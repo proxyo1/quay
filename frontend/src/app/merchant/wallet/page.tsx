@@ -1,16 +1,15 @@
 "use client";
 
+import { decodeJwt } from "@mysten/sui/zklogin";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 
-import { useMerchantSession } from "@/lib/merchant-session";
+import { useZkLoginSession } from "@/lib/zklogin";
 import { objectUrl } from "@/lib/sui-config";
 
 export default function WalletPage() {
-  const { session, hydrated, signOut } = useMerchantSession();
+  const { session, hydrated, signOut } = useZkLoginSession();
   const router = useRouter();
-  const [revealed, setRevealed] = useState(false);
 
   if (hydrated && !session) {
     if (typeof window !== "undefined") {
@@ -23,6 +22,14 @@ export default function WalletPage() {
     );
   }
   if (!session) return null;
+
+  const claims = (() => {
+    try {
+      return decodeJwt(session.jwt) as { iss?: string; email?: string; sub?: string; aud?: string | string[] };
+    } catch {
+      return null;
+    }
+  })();
 
   async function copy(s: string) {
     try {
@@ -40,24 +47,23 @@ export default function WalletPage() {
       <header className="space-y-1">
         <h1 className="text-3xl font-semibold">Wallet</h1>
         <p className="text-sm text-gray-500">
-          Your suiqr merchant wallet — derived from your sign-in identity and
-          fully yours. Export the private key if you want to use this wallet
-          in Sui Wallet, Slush, or anywhere else.
+          Your suiqr merchant wallet — bound to your Google identity via Sui
+          zkLogin. There&apos;s no private key to lose, no recovery phrase to
+          back up. Sign back in with the same Google account from any device
+          and your wallet is there.
         </p>
       </header>
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-gray-500">Identity</p>
-          <p className="text-sm mt-1">{session.email}</p>
-          {session.kind === "email_demo" && (
-            <p className="text-[11px] text-gray-500 mt-1">
-              email fingerprint{" "}
-              <code className="font-mono">{session.fingerprint}</code> · derived
-              via blake2b256("SUIQR_MERCHANT_V1" || testnet_salt || email_lower)
-            </p>
-          )}
-        </div>
+      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-gray-500">Identity</p>
+        <p className="text-sm">{session.email}</p>
+        {claims && (
+          <ul className="text-[11px] text-gray-500 font-mono pt-1 space-y-0.5">
+            <li>iss: {claims.iss}</li>
+            <li>sub: {claims.sub?.slice(0, 24)}…</li>
+            <li>aud: {Array.isArray(claims.aud) ? claims.aud[0] : claims.aud}</li>
+          </ul>
+        )}
       </section>
 
       <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
@@ -87,58 +93,21 @@ export default function WalletPage() {
         </p>
       </section>
 
-      {session.kind === "email_demo" && (
-        <section className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-amber-900/10 p-5 space-y-3">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-amber-700 dark:text-amber-300">
-              Private key
-            </p>
-            <p className="text-sm font-medium mt-1">
-              Full access to this wallet
-            </p>
-            <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-              Anyone who has the bech32 string below can sign as you. Treat it
-              like a password. Testnet only.
-            </p>
-          </div>
-
-          {revealed ? (
-            <div className="space-y-2">
-              <pre className="text-[11px] font-mono break-all whitespace-pre-wrap rounded bg-white/50 dark:bg-black/30 p-3 border border-amber-200 dark:border-amber-800">
-                {session.privateKeyBech32}
-              </pre>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => copy(session.privateKeyBech32)}
-                  className="text-xs px-2.5 py-1.5 rounded border border-amber-300 dark:border-amber-700 hover:bg-amber-100/50"
-                >
-                  Copy
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRevealed(false)}
-                  className="text-xs px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  Hide
-                </button>
-              </div>
-              <p className="text-[11px] text-gray-500">
-                To import into Sui Wallet / Slush: open the wallet, choose
-                "Import private key", paste the bech32 string above.
-              </p>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setRevealed(true)}
-              className="w-full rounded-md bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium py-2.5 transition"
-            >
-              Reveal private key
-            </button>
-          )}
-        </section>
-      )}
+      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-gray-500">zkLogin session</p>
+        <ul className="text-[11px] text-gray-500 font-mono space-y-1">
+          <li>maxEpoch: {session.maxEpoch}</li>
+          <li>salt: {session.salt.slice(0, 24)}…</li>
+          <li>ephemeral: bech32 stored in localStorage (rotated per session)</li>
+        </ul>
+        <p className="text-[11px] text-gray-500 leading-relaxed">
+          The ephemeral keypair signs transaction bytes; the Mysten-prover
+          proof binds those signatures to your Google identity. Once Sui
+          advances past <code className="font-mono">maxEpoch</code>, sign in
+          again to refresh the proof. No private key for you to back up — the
+          source of truth is your Google account.
+        </p>
+      </section>
 
       <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
         <p className="text-xs uppercase tracking-wide text-gray-500">Session</p>
@@ -153,8 +122,8 @@ export default function WalletPage() {
           Sign out
         </button>
         <p className="text-[11px] text-gray-500">
-          Signing out clears the local session. Same email signs you back in
-          to the same wallet — the keypair is deterministic.
+          Signing out clears the local session. Sign in again with the same
+          Google account to land on the same Sui address.
         </p>
       </section>
     </main>

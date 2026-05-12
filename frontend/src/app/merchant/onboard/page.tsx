@@ -1,15 +1,14 @@
 "use client";
 
 import { useSuiClient } from "@mysten/dapp-kit";
-import { Transaction } from "@mysten/sui/transactions";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { useMerchantSession, loadKeypair } from "@/lib/merchant-session";
-import { looksLikeUen } from "@/lib/sgqr";
-import { isAllowedMetadataUri } from "@/lib/suiqr";
+import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
+import { extractPayNow, looksLikeUen, parseSgqr } from "@/lib/sgqr";
 import { SUIQR, objectUrl, txUrl } from "@/lib/sui-config";
+import { useZkLoginSession, zkLoginSign } from "@/lib/zklogin";
 
 type SponsoredRegister = {
   tx_bytes_b64: string;
@@ -26,12 +25,13 @@ type State =
   | { kind: "error"; message: string };
 
 export default function OnboardPage() {
-  const { session, hydrated } = useMerchantSession();
+  const { session, hydrated, signOut } = useZkLoginSession();
   const router = useRouter();
   const sui = useSuiClient();
 
   const [uen, setUen] = useState("");
-  const [metadataUri, setMetadataUri] = useState("");
+  const [scanOpen, setScanOpen] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
 
   if (hydrated && !session) {
@@ -44,10 +44,39 @@ export default function OnboardPage() {
       </main>
     );
   }
+  if (!session) return null;
 
   const uenValid = looksLikeUen(uen);
-  const metaUriValid = !metadataUri || isAllowedMetadataUri(metadataUri);
-  const ready = !!session && uenValid && metaUriValid;
+  const ready = uenValid && state.kind !== "submitting";
+
+  function onScanResult(text: string) {
+    setScanOpen(false);
+    try {
+      const payload = parseSgqr(text.trim());
+      if (!payload.crcValid) {
+        setScanFeedback("Scanned QR has an invalid CRC — not an SGQR. Type the UEN manually.");
+        return;
+      }
+      const payNow = extractPayNow(payload);
+      if (!payNow) {
+        setScanFeedback("Scanned QR isn't an SG.PAYNOW code. Type the UEN manually.");
+        return;
+      }
+      if (payNow.proxyType === "mobile") {
+        setScanFeedback("Mobile-number PayNow isn't supported in V0 (AD3). Use a UEN-based SGQR.");
+        return;
+      }
+      if (payNow.proxyType !== "uen") {
+        setScanFeedback(`Proxy type '${payNow.proxyType}' not supported. UEN only in V0.`);
+        return;
+      }
+      setUen(payNow.proxyValue);
+      setScanFeedback(`Captured UEN ${payNow.proxyValue}.`);
+      if (state.kind !== "idle" && state.kind !== "submitting") setState({ kind: "idle" });
+    } catch (e) {
+      setScanFeedback(`Couldn't parse QR: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   async function handleSubmit() {
     if (!session) return;
@@ -56,11 +85,7 @@ export default function OnboardPage() {
       const res = await fetch("/api/sponsor/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          uen,
-          claimer: session.address,
-          metadata_uri: metadataUri.trim() || undefined,
-        }),
+        body: JSON.stringify({ uen, claimer: session.address }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -68,13 +93,11 @@ export default function OnboardPage() {
       }
       const sp = (await res.json()) as SponsoredRegister;
       const bytes = base64ToBytes(sp.tx_bytes_b64);
-
-      const kp = loadKeypair(session);
-      const senderSig = await kp.signTransaction(bytes);
+      const senderSig = await zkLoginSign(session, bytes);
 
       const result = await sui.executeTransactionBlock({
         transactionBlock: bytes,
-        signature: [senderSig.signature, sp.sponsor_signature],
+        signature: [senderSig, sp.sponsor_signature],
         options: { showEffects: true },
       });
       if (result.effects?.status?.status !== "success") {
@@ -95,18 +118,34 @@ export default function OnboardPage() {
         </Link>
         <h1 className="text-3xl font-semibold">Onboard a UEN</h1>
         <p className="text-sm text-gray-500">
-          Suiqr signs an attestation for your UEN, then submits register_merchant
-          on your behalf. The sponsor wallet pays the gas. Your signed-in
-          wallet only signs to authorize.
+          Scan your SGQR sticker or type the UEN. Suiqr signs an attestation,
+          your Google identity signs the register tx via zkLogin, the sponsor
+          covers gas.
         </p>
       </header>
 
-      {session && <SessionCard session={session} />}
+      <SessionCard session={session} onSignOut={signOut} />
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-gray-500">UEN</p>
+      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-gray-500">UEN</p>
+            <p className="text-sm font-medium">Your business identifier</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setScanFeedback(null);
+              setScanOpen(true);
+            }}
+            className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 inline-flex items-center gap-1.5"
+            disabled={state.kind === "submitting"}
+          >
+            <CameraIcon />
+            Scan SGQR
+          </button>
         </div>
+
         <div>
           <label htmlFor="uen" className="block text-xs text-gray-500 mb-1">
             Singapore UEN (8–10 alphanumeric)
@@ -117,6 +156,7 @@ export default function OnboardPage() {
             value={uen}
             onChange={(e) => {
               setUen(e.target.value.trim().toUpperCase());
+              setScanFeedback(null);
               if (state.kind !== "idle" && state.kind !== "submitting") setState({ kind: "idle" });
             }}
             placeholder="202412345Z"
@@ -128,28 +168,8 @@ export default function OnboardPage() {
               Doesn&apos;t look like a UEN. Expected 8–10 alphanumeric chars (e.g., 202012345Z, T12LL3456A).
             </p>
           )}
-        </div>
-
-        <div>
-          <label htmlFor="meta" className="block text-xs text-gray-500 mb-1">
-            Profile URI (optional) — must start with https:// or ipfs://
-          </label>
-          <input
-            id="meta"
-            type="text"
-            value={metadataUri}
-            onChange={(e) => {
-              setMetadataUri(e.target.value.trim());
-              if (state.kind !== "idle" && state.kind !== "submitting") setState({ kind: "idle" });
-            }}
-            placeholder="ipfs://merchant-profile-cid"
-            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-3 py-2 text-sm"
-            disabled={state.kind === "submitting"}
-          />
-          {metadataUri && !metaUriValid && (
-            <p className="text-xs text-amber-600 mt-1">
-              Allowlist (AD30): only https:// and ipfs:// URIs are accepted.
-            </p>
+          {scanFeedback && (
+            <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{scanFeedback}</p>
           )}
         </div>
       </section>
@@ -170,31 +190,48 @@ export default function OnboardPage() {
           on {SUIQR.network}
         </p>
         <p>
-          V0 auto-issues attestations for any well-shaped UEN. Production gates
-          this behind SGQR-photo + BizFile+ review (or a NETS-controlled signer).
-          Sponsored gas: 5 onboarding txs per wallet per day on testnet.
+          V0 auto-issues attestations for any well-shaped UEN; production gates
+          this behind SGQR-photo + BizFile+ review or a NETS-controlled signer.
         </p>
       </footer>
+
+      {scanOpen && (
+        <SgqrCameraScanner
+          onDecoded={onScanResult}
+          onCancel={() => setScanOpen(false)}
+        />
+      )}
     </main>
   );
 }
 
-function SessionCard({ session }: { session: NonNullable<ReturnType<typeof useMerchantSession>["session"]> }) {
+function SessionCard({
+  session,
+  onSignOut,
+}: {
+  session: NonNullable<ReturnType<typeof useZkLoginSession>["session"]>;
+  onSignOut: () => void;
+}) {
   return (
-    <section className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/10 p-4 text-sm space-y-1">
-      <p className="font-medium">Signed in</p>
-      <p className="text-xs text-gray-600 dark:text-gray-400 font-mono">
-        {session.email}
-      </p>
-      <p className="text-xs text-gray-600 dark:text-gray-400 font-mono">
-        wallet: {session.address.slice(0, 10)}…{session.address.slice(-6)}
-      </p>
-      <p className="text-[11px] text-gray-500 pt-1">
-        Want to back up your private key?{" "}
-        <Link href="/merchant/wallet" className="text-blue-600 hover:underline">
-          /merchant/wallet
-        </Link>
-      </p>
+    <section className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/10 p-4 text-sm space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-medium">Signed in via Google zkLogin</p>
+          <p className="text-xs text-gray-600 dark:text-gray-400 font-mono mt-1">
+            {session.email}
+          </p>
+          <p className="text-xs text-gray-600 dark:text-gray-400 font-mono">
+            wallet: {session.address.slice(0, 10)}…{session.address.slice(-6)}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+        >
+          Sign out
+        </button>
+      </div>
     </section>
   );
 }
@@ -267,9 +304,18 @@ function SubmitFlow({
     >
       Claim this UEN
       <span className="block text-xs font-normal opacity-80 mt-0.5">
-        POST /api/sponsor/register → your session signs → executeTransactionBlock
+        zkLogin signs · sponsor pays gas · executeTransactionBlock
       </span>
     </button>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+      <circle cx="12" cy="13" r="3" />
+    </svg>
   );
 }
 

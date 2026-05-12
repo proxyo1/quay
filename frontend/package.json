@@ -14,6 +14,9 @@
     "@mysten/sui": "^2.16.2",
     "@noble/hashes": "^2.2.0",
     "@tanstack/react-query": "^5.100.9",
+    "@zxing/browser": "^0.2.0",
+    "@zxing/library": "^0.23.0",
+    "jwt-decode": "^4.0.0",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4"

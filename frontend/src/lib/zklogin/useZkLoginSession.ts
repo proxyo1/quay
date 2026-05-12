@@ -2,17 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { clearSession, loadSession, signInWithEmail, type MerchantSession } from "./session";
+import { clearSession, loadSession, type ZkLoginSession } from "./session";
 
-/** React hook around the localStorage-backed merchant session. */
-export function useMerchantSession() {
-  const [session, setSession] = useState<MerchantSession | null>(null);
+/** React hook around the localStorage-backed zkLogin session. */
+export function useZkLoginSession() {
+  const [session, setSession] = useState<ZkLoginSession | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     setSession(loadSession());
     setHydrated(true);
-    // Listen for changes from other tabs.
     const onStorage = (e: StorageEvent) => {
       if (e.key === "suiqr.merchant_session.v1") setSession(loadSession());
     };
@@ -20,10 +19,8 @@ export function useMerchantSession() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  const signIn = useCallback((email: string) => {
-    const s = signInWithEmail(email);
-    setSession(s);
-    return s;
+  const refresh = useCallback(() => {
+    setSession(loadSession());
   }, []);
 
   const signOut = useCallback(() => {
@@ -31,5 +28,5 @@ export function useMerchantSession() {
     setSession(null);
   }, []);
 
-  return { session, hydrated, signIn, signOut };
+  return { session, hydrated, refresh, signOut };
 }

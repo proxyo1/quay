@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 
-import { useMerchantSession } from "@/lib/merchant-session";
+import { useZkLoginSession } from "@/lib/zklogin";
 import { SUIQR, objectUrl, txUrl } from "@/lib/sui-config";
 
 interface PaymentReceiptEvent {
@@ -34,7 +34,7 @@ interface NormalizedReceipt {
 }
 
 export default function TerminalPage() {
-  const { session, hydrated, signOut } = useMerchantSession();
+  const { session, hydrated, signOut } = useZkLoginSession();
   const router = useRouter();
 
   if (hydrated && !session) {
@@ -55,7 +55,7 @@ function TerminalView({
   session,
   onSignOut,
 }: {
-  session: ReturnType<typeof useMerchantSession>["session"];
+  session: ReturnType<typeof useZkLoginSession>["session"];
   onSignOut: () => void;
 }) {
   const merchantAddress = session?.address ?? "0x0";

@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 
-import { useMerchantSession } from "@/lib/merchant-session";
+import { useZkLoginSession } from "@/lib/zklogin";
 
 export default function MerchantHome() {
-  const { session, hydrated } = useMerchantSession();
+  const { session, hydrated } = useZkLoginSession();
   return (
     <main className="mx-auto max-w-2xl px-6 py-16 space-y-10">
       <header className="space-y-2">
