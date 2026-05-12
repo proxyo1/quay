@@ -55,3 +55,6 @@ sui_keystore
 *.log
 .cache/
 .turbo/
+
+# Local deploy secrets (issuer privkey, etc.)
+.secrets/

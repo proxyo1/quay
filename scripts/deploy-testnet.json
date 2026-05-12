@@ -1,0 +1,22 @@
+{
+  "network": "testnet",
+  "chain_id": 0,
+  "package_id": "0x46398f18d42864b8325c0089bd0ae6ba439c85d02510412738ce273c53ce167e",
+  "merchant_registry_id": "0x00148a23a4e120142965ed011370b39a42e858174aec98d5fac079a834c1e5e1",
+  "admin_cap_id": "0x622f8c06080c324eb1a76d5ba199ab90aeb3a57f2953b12c46c44c1110e1e0ec",
+  "admin_address": "0xa91644aa47914b16b73258c1de984e3296ef15e40a838ffd3b8fa533b27def2f",
+  "issuer_pubkey_hex": "5d44735e96af7d30d245936458efc03f5fdc4ba042046848afc4ad9dd8d115c8",
+  "digests": {
+    "publish": "41WRCow4ZhXGzHA8vLt7v6vZEubXBgk4kBcEWbrDbE3p",
+    "set_initial_issuer_pubkey": "CFEfJoEBrb87N3M7u8fq46RDA7SU5JCPqTKr3bwGUR1U",
+    "fund_merchant1": "9AA8A4G2VPtiBXuK2V9ApYgUHHBEKXGpKzeByVypUVn7",
+    "register_merchant1": "DQ8ayrSsHyLxr1U8ekNaBz434Cw8DjgmBV1J4fkT2hXK",
+    "pay_demo": "B6YpJM7CcKPRXVL9kbTavYioY6VhuDemwcoYuikVsNae"
+  },
+  "demo_merchant1": {
+    "sui_address": "0x78405a4ad3b4e0a1cdb2f97393730a0d756564afd73b906cff6e6f8e38bf3360",
+    "uen": "202412345Z"
+  },
+  "status": "complete",
+  "deployed_at": "2026-05-12T14:03:34.896Z"
+}
