@@ -388,8 +388,8 @@ suiqr/
 │   │   ├── merchant/login/        # Google zkLogin sign-in
 │   │   ├── merchant/onboard/      # claim a UEN (zkLogin signs, sponsor pays gas)
 │   │   ├── merchant/wallet/       # info + identity claims (no exportable key)
-│   │   ├── auth/google/callback/  # OAuth callback: salt + Mysten proof
-│   │   ├── api/zklogin/salt/      # POST: server-derived stable salt per Google identity
+│   │   ├── auth/google/callback/  # OAuth callback: Enoki zk-proof fetch
+│   │   ├── api/zklogin/salt/      # POST: server-derived salt (legacy; unused since Enoki migration)
 │   │   ├── merchant/terminal/     # live PaymentReceipt feed
 │   │   ├── api/attest/route.ts    # POST: issuer signs ClaimMessage
 │   │   └── api/sponsor/register/  # POST: sponsor signs gas; rate-limited

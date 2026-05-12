@@ -7,11 +7,17 @@ application client.
 
 ## What you'll create
 
-A single OAuth 2.0 **Web application** client in Google Cloud Console.
-Its client ID becomes a public env var (`NEXT_PUBLIC_GOOGLE_CLIENT_ID`)
-that the frontend uses to initiate the OAuth redirect; the JWT Google
-returns is then exchanged through Mysten's prover service for a
-zkLogin-bound Sui address.
+Two things:
+
+1. A single OAuth 2.0 **Web application** client in Google Cloud Console.
+   Its client ID becomes a public env var (`NEXT_PUBLIC_GOOGLE_CLIENT_ID`)
+   that the frontend uses to initiate the OAuth redirect.
+2. An **Enoki app** at [portal.enoki.mystenlabs.com](https://portal.enoki.mystenlabs.com).
+   Enoki exchanges the Google JWT for a zkLogin proof against the
+   production verifying key — required for **testnet and mainnet**
+   (the public `prover-dev` endpoint emits proofs against the devnet
+   VK only, which testnet validators reject with `Groth16 proof verify
+   failed`). Its public API key becomes `NEXT_PUBLIC_ENOKI_API_KEY`.
 
 ## Steps
 
@@ -40,27 +46,30 @@ zkLogin-bound Sui address.
 > Google Cloud Console allowlist AND `ZKLOGIN_REDIRECT_PATH` in
 > [`frontend/src/lib/zklogin/config.ts`](../frontend/src/lib/zklogin/config.ts).
 
+## Enoki app
+
+1. Sign in at [portal.enoki.mystenlabs.com](https://portal.enoki.mystenlabs.com).
+2. Create an app. Allowlist the same origins you used for the Google
+   client (`http://localhost:3000` for dev, your deploy URL for prod).
+3. Add your Google **client ID** to the app's auth providers.
+   This is what makes Enoki accept your JWTs — without it, the proof
+   endpoint returns `invalid_client_id`.
+4. Enable the **zkLogin** feature on **Testnet** (Mainnet requires a
+   paid plan). Sponsored Transactions can stay off — suiqr uses its
+   own sponsor wallet (`/api/sponsor/register`) for gas.
+5. Create a **Public** API key. The string starts with `enoki_public_`.
+
 ## Wire it up
 
 ```bash
 # frontend/.env.local
 NEXT_PUBLIC_GOOGLE_CLIENT_ID="1234567890-abc...def.apps.googleusercontent.com"
+NEXT_PUBLIC_ENOKI_API_KEY="enoki_public_..."
 ```
 
-That's all the public config. The Mysten zkLogin salt service and prover
-service URLs are baked in (free for hackathon use; rate-limited).
-
-For production deployments, also set:
-
-```bash
-# Server-only — used by /api/zklogin/salt to derive a stable salt per user
-SUIQR_ZKLOGIN_SALT_SECRET="<32-bytes-of-randomness-as-base64-or-hex>"
-```
-
-If unset, [`/api/zklogin/salt`](../frontend/src/app/api/zklogin/salt/route.ts)
-falls back to a default development secret — fine for testnet, not safe
-for mainnet because anyone with the same default would derive the same
-address space.
+That's all the public config. Enoki manages the per-user salt internally;
+the bundled `/api/zklogin/salt` route is kept for back-compat but no
+longer called from the proof path.
 
 ## How the flow works locally
 
@@ -69,14 +78,17 @@ address space.
    it + current Sui epoch + `EPOCH_LOOKAHEAD`, persists pending state
    in localStorage, redirects to Google with `response_type=id_token`
 3. User approves → Google redirects to `/auth/google/callback#id_token=…`
-4. Callback page parses the JWT, POSTs `/api/zklogin/salt` for the
-   per-user salt, derives the Sui address via `jwtToAddress(jwt, salt)`,
-   fetches a Groth16 proof from Mysten's prover-dev endpoint, persists
-   the full `ZkLoginSession`, redirects to `next` (default
+4. Callback page parses the JWT, POSTs Enoki's `/v1/zklogin/zkp` with
+   the JWT in the `zklogin-jwt` header. Enoki returns a Groth16 proof
+   + the addressSeed it bound it to. The Sui address is derived locally
+   from that addressSeed and the JWT's `iss`. The full `ZkLoginSession`
+   is persisted; the page redirects to `next` (default
    `/merchant/onboard`)
 5. From there, every `executeTransactionBlock` call uses
    [`zkLoginSign`](../frontend/src/lib/zklogin/sign.ts) to wrap an
-   ephemeral signature in a zkLogin signature envelope
+   ephemeral signature in a zkLogin signature envelope. The addressSeed
+   comes from the stored proof verbatim — no local recomputation, which
+   eliminates a class of mismatch bugs.
 
 The session is valid for `maxEpoch` (≈ current epoch + 2). After
 that, signing in again refreshes the proof; the Sui address stays
@@ -87,6 +99,8 @@ the same as long as the user keeps the same Google account.
 | Error | Cause | Fix |
 |---|---|---|
 | `Error 400: redirect_uri_mismatch` | The path in your Google Cloud Console allowlist doesn't exactly match `${origin}/auth/google/callback` | Add the exact URI to the allowlist; wait ~5 min for Google's propagation |
-| Callback fails on "fetching zk proof" | Mysten prover-dev rate-limited or down | Retry; check `https://prover-dev.mystenlabs.com/v1` is up |
+| Callback fails with `Enoki prover HTTP 400: invalid_client_id` | Your Google client ID isn't registered under your Enoki app | Add the client ID in the Enoki dashboard's auth-providers section |
+| Callback fails with `Enoki API key missing` | `NEXT_PUBLIC_ENOKI_API_KEY` not in `.env.local` | Add the key from the Enoki portal and restart `pnpm dev` |
 | Sign-in succeeds but `/merchant/onboard` redirects back to `/merchant/login` | localStorage write blocked (Safari private mode, third-party cookies setting) | Reload in a normal browser tab |
-| Session looks live but a tx signature fails on chain | `maxEpoch` expired | Sign out + sign in again to refresh the proof |
+| Session looks live but a tx signature fails on chain with `Groth16 proof verify failed` | Stale v1 session from the pre-Enoki code path | Sign out + sign in again; the storage key bumped to v2 |
+| Session looks live but a tx signature fails on chain with `MoveAbort` | `maxEpoch` expired | Sign out + sign in again to refresh the proof |

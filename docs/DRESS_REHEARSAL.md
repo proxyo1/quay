@@ -99,9 +99,9 @@ finality.
 
 1. **Open /merchant/login**, click **"Sign in with Google"**. Sign in
    with the demoer account you pre-staged in step 4 of pre-demo.
-2. **Show the callback progress** ("parsing JWT → fetching salt →
-   deriving address → fetching zk proof → persisting session"). Lands
-   on `/merchant/onboard`.
+2. **Show the callback progress** ("parsing JWT → fetching zk proof from
+   Enoki → deriving address → persisting session"). Lands on
+   `/merchant/onboard`.
 3. **Point out the "Signed in" card**: the Gmail email + a derived Sui
    address starting with `0x…`. **This address is bound to the
    demoer's Google account** — there's no private key to back up, no
@@ -142,7 +142,8 @@ finality.
 | Sui Wallet payer-side sign rejected | user closed popup | retry — state machine handles retry cleanly |
 | Sponsor returns 503 on /merchant/onboard | sponsor balance < 20% floor | `day7-create-sponsor.ts` tops up |
 | Google sign-in shows `Error 400: redirect_uri_mismatch` | Google Cloud Console redirect URI doesn't match `${origin}/auth/google/callback` | Fix the allowlist + wait 5 min |
-| Callback page errors on "fetching zk proof" | Mysten prover-dev rate-limited or down | retry; the proof endpoint is the only third-party dep on the merchant signing path |
+| Callback page errors on "fetching zk proof from Enoki" | Enoki rate-limited or your Google client ID isn't registered on the Enoki app | retry; if persistent, check the Enoki dashboard for the client ID under auth providers |
+| Onboarded UEN doesn't appear in `/merchant/terminal` | Pre-Enoki claim (registered with `metadata_uri = null` before the on-chain UEN list shipped) | the entry is still valid on chain; the display layer can only show entries claimed via the current flow. Onboard a fresh UEN to see the list populate |
 | Terminal stays empty after a pay | signed in as a different Google account than the one that owns the merchant address | sign out and back in with the merchant's Gmail |
 
 ## Talking points for Q&A
