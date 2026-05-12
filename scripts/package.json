@@ -1,0 +1,12 @@
+{
+  "name": "suiqr-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "day0": "bun run day0-validate.ts"
+  },
+  "dependencies": {
+    "@mysten/sui": "^2.16.2",
+    "@mysten/zklogin": "^0.8.1"
+  }
+}
