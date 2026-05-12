@@ -3,10 +3,11 @@
 import { useSuiClient } from "@mysten/dapp-kit";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
 import { extractPayNow, looksLikeUen, parseSgqr } from "@/lib/sgqr";
+import { lookupUen } from "@/lib/suiqr";
 import { SUIQR, objectUrl, txUrl } from "@/lib/sui-config";
 import { useZkLoginSession, zkLoginSign } from "@/lib/zklogin";
 
@@ -22,6 +23,7 @@ type State =
   | { kind: "idle" }
   | { kind: "submitting" }
   | { kind: "registered"; digest: string }
+  | { kind: "already-yours" }
   | { kind: "error"; message: string };
 
 export default function OnboardPage() {
@@ -34,10 +36,14 @@ export default function OnboardPage() {
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
 
-  if (hydrated && !session) {
-    if (typeof window !== "undefined") {
+  // Side effect — must not run during render.
+  useEffect(() => {
+    if (hydrated && !session) {
       router.replace("/merchant/login?next=/merchant/onboard");
     }
+  }, [hydrated, session, router]);
+
+  if (hydrated && !session) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
         <p className="text-sm text-gray-500">Redirecting to sign-in…</p>
@@ -82,10 +88,34 @@ export default function OnboardPage() {
     if (!session) return;
     setState({ kind: "submitting" });
     try {
+      // Pre-flight: check the registry for this uen_hash before the sponsor
+      // signs anything. Saves a sponsor signature on hopeless attempts and
+      // gives the right next step instead of a raw MoveAbort.
+      const existing = await lookupUen(sui, SUIQR.registryId, uen);
+      if (existing.claimed) {
+        if (existing.owner === session.address) {
+          setState({ kind: "already-yours" });
+        } else {
+          const ownerShort = `${existing.owner.slice(0, 8)}…${existing.owner.slice(-6)}`;
+          setState({
+            kind: "error",
+            message: `UEN ${uen} is already registered to another account (${ownerShort}).`,
+          });
+        }
+        return;
+      }
+
       const res = await fetch("/api/sponsor/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ uen, claimer: session.address }),
+        // metadata_uri carries the raw UEN so /merchant/terminal can read it
+        // back on any device from the MerchantEntry's metadata_uri field. The
+        // chain key is still uen_hash; this is just the human-readable mirror.
+        body: JSON.stringify({
+          uen,
+          claimer: session.address,
+          metadata_uri: `uen:${uen}`,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -101,7 +131,8 @@ export default function OnboardPage() {
         options: { showEffects: true },
       });
       if (result.effects?.status?.status !== "success") {
-        throw new Error(`tx failed: ${result.effects?.status?.error ?? "unknown"}`);
+        const raw = result.effects?.status?.error ?? "unknown";
+        throw new Error(mapRegisterAbort(raw, uen));
       }
       await sui.waitForTransaction({ digest: result.digest });
       setState({ kind: "registered", digest: result.digest });
@@ -256,6 +287,24 @@ function SubmitFlow({
       </div>
     );
   }
+  if (state.kind === "already-yours") {
+    return (
+      <div className="rounded-md border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 p-3 text-sm">
+        <p className="font-medium text-blue-800 dark:text-blue-200">
+          You already own this UEN
+        </p>
+        <p className="mt-1 text-xs text-blue-800 dark:text-blue-300">
+          Nothing more to do here — open the terminal to see incoming payments.
+        </p>
+        <Link
+          href="/merchant/terminal"
+          className="inline-block mt-2 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-medium"
+        >
+          Open terminal →
+        </Link>
+      </div>
+    );
+  }
   if (state.kind === "registered") {
     return (
       <div className="space-y-2">
@@ -317,6 +366,23 @@ function CameraIcon() {
       <circle cx="12" cy="13" r="3" />
     </svg>
   );
+}
+
+/**
+ * Translate a raw Sui MoveAbort string into a user-readable error. Backstop
+ * for cases where the pre-flight `lookupUen` was bypassed (e.g., a race where
+ * two onboards run concurrently for the same UEN).
+ */
+function mapRegisterAbort(raw: string, uen: string): string {
+  if (raw.includes("MoveAbort") && raw.includes("register_merchant")) {
+    if (/,\s*1\)/.test(raw)) {
+      return `UEN ${uen} was claimed between pre-flight and submit. Pick another or sign in with the owning account.`;
+    }
+    if (/,\s*5\)/.test(raw)) return "Attestation invalid (issuer key mismatch).";
+    if (/,\s*9\)/.test(raw)) return "Attestation expired — retry the claim.";
+    if (/,\s*6\)/.test(raw)) return "Attestation nonce replayed — retry the claim.";
+  }
+  return `tx failed: ${raw}`;
 }
 
 function base64ToBytes(b64: string): Uint8Array {

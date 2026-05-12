@@ -1,11 +1,13 @@
 "use client";
 
-import { useSuiClientQuery } from "@mysten/dapp-kit";
+import { useSuiClient, useSuiClientQuery } from "@mysten/dapp-kit";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { useZkLoginSession } from "@/lib/zklogin";
+import { getEntriesTableId } from "@/lib/suiqr";
 import { SUIQR, objectUrl, txUrl } from "@/lib/sui-config";
 
 interface PaymentReceiptEvent {
@@ -37,10 +39,16 @@ export default function TerminalPage() {
   const { session, hydrated, signOut } = useZkLoginSession();
   const router = useRouter();
 
-  if (hydrated && !session) {
-    if (typeof window !== "undefined") {
+  // Navigation is a side effect — running it during render makes React unhappy
+  // ("Cannot update a component while rendering..."). useEffect is the correct
+  // home for the redirect.
+  useEffect(() => {
+    if (hydrated && !session) {
       router.replace("/merchant/login?next=/merchant/terminal");
     }
+  }, [hydrated, session, router]);
+
+  if (hydrated && !session) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
         <p className="text-sm text-gray-500">Redirecting to sign-in…</p>
@@ -51,6 +59,87 @@ export default function TerminalPage() {
   return <TerminalView session={session} onSignOut={signOut} />;
 }
 
+interface MerchantUen {
+  uen: string;
+  digest: string;
+  timestamp: number;
+}
+
+interface MerchantRegisteredEvent {
+  uen_hash: number[];
+  sui_address: string;
+  timestamp_ms: string;
+}
+
+/**
+ * Read the merchant's claimed UENs from chain.
+ *
+ * Flow:
+ *   1. Fetch recent MerchantRegistered events, filter to this address.
+ *   2. For each event's uen_hash, read the registry's dynamic field to get
+ *      the MerchantEntry's `metadata_uri`.
+ *   3. metadata_uri is stamped at register time as "uen:<UEN>" — we strip
+ *      the prefix to recover the raw UEN.
+ *
+ * Older entries with metadata_uri=null are invisible here (we can't reverse
+ * the on-chain uen_hash). Re-onboarding a different UEN under the new flow
+ * surfaces it correctly.
+ */
+function useMerchantUens(address: string | undefined) {
+  const sui = useSuiClient();
+  return useQuery<MerchantUen[]>({
+    queryKey: ["merchant-uens", address],
+    queryFn: async () => {
+      if (!address) return [];
+      // entries is a Table<vector<u8>, MerchantEntry> — dynamic fields live
+      // under the table's UID, NOT the parent registry's. Resolve once.
+      const tableId = await getEntriesTableId(sui, SUIQR.registryId);
+      const events = await sui.queryEvents({
+        query: { MoveEventType: `${SUIQR.packageId}::payments::MerchantRegistered` },
+        order: "descending",
+        limit: 100,
+      });
+      const mine = events.data.filter(
+        (e) => (e.parsedJson as MerchantRegisteredEvent | undefined)?.sui_address === address,
+      );
+      const entries = await Promise.all(
+        mine.map(async (e) => {
+          const ev = e.parsedJson as MerchantRegisteredEvent;
+          try {
+            const field = await sui.getDynamicFieldObject({
+              parentId: tableId,
+              name: { type: "vector<u8>", value: ev.uen_hash },
+            });
+            const uen = extractUenFromEntry(field.data?.content);
+            if (!uen) return null;
+            return {
+              uen,
+              digest: e.id.txDigest,
+              timestamp: Number(ev.timestamp_ms),
+            };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      return entries.filter((x): x is MerchantUen => x !== null);
+    },
+    enabled: !!address,
+    refetchInterval: 10_000,
+  });
+}
+
+function extractUenFromEntry(content: unknown): string | null {
+  if (!content || typeof content !== "object") return null;
+  const c = content as { dataType?: string; fields?: Record<string, unknown> };
+  if (c.dataType !== "moveObject") return null;
+  const value = c.fields?.value as { fields?: Record<string, unknown> } | undefined;
+  const meta = value?.fields?.metadata_uri;
+  if (typeof meta !== "string") return null;
+  if (meta.startsWith("uen:")) return meta.slice(4);
+  return null;
+}
+
 function TerminalView({
   session,
   onSignOut,
@@ -59,6 +148,8 @@ function TerminalView({
   onSignOut: () => void;
 }) {
   const merchantAddress = session?.address ?? "0x0";
+  const uens = useMerchantUens(session?.address);
+
   const { data, error, isLoading } = useSuiClientQuery(
     "queryEvents",
     {
@@ -127,6 +218,8 @@ function TerminalView({
         </p>
       </section>
 
+      <UenList state={uens} />
+
       {error ? (
         <section className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 p-3 text-sm">
           <p className="font-medium text-red-700 dark:text-red-300">Event query failed</p>
@@ -179,6 +272,71 @@ function TerminalView({
         </p>
       </footer>
     </main>
+  );
+}
+
+function UenList({
+  state,
+}: {
+  state: ReturnType<typeof useMerchantUens>;
+}) {
+  if (state.isLoading) {
+    return (
+      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 text-sm">
+        <p className="text-xs uppercase tracking-wide text-gray-500">Your UENs</p>
+        <p className="text-sm text-gray-500 mt-2">Loading from chain…</p>
+      </section>
+    );
+  }
+  if (state.error) {
+    return (
+      <section className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 p-4 text-sm">
+        <p className="text-xs uppercase tracking-wide text-red-700 dark:text-red-300">Your UENs</p>
+        <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+          {state.error instanceof Error ? state.error.message : String(state.error)}
+        </p>
+      </section>
+    );
+  }
+  const uens = state.data ?? [];
+  if (uens.length === 0) {
+    return (
+      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 text-sm">
+        <p className="text-xs uppercase tracking-wide text-gray-500">Your UENs</p>
+        <p className="text-sm text-gray-500 mt-2">
+          You haven&apos;t claimed any UENs yet.{" "}
+          <Link href="/merchant/onboard" className="text-blue-600 hover:underline">
+            Onboard one →
+          </Link>
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-2">
+      <p className="text-xs uppercase tracking-wide text-gray-500">
+        Your UEN{uens.length > 1 ? "s" : ""}
+      </p>
+      <ul className="space-y-1.5">
+        {uens.map((u) => (
+          <li
+            key={u.uen}
+            className="flex items-center justify-between gap-3 text-sm"
+          >
+            <span className="font-mono font-medium">{u.uen}</span>
+            <a
+              href={txUrl(u.digest)}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-blue-600 hover:underline font-mono"
+              title={`Registered ${new Date(u.timestamp).toLocaleString()}`}
+            >
+              registration tx ↗
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
