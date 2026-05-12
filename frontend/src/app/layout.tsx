@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
 import { SuiProviders } from "@/components/SuiProviders";
@@ -14,11 +14,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#0a0a0a",
+};
+
 export const metadata: Metadata = {
   title: "suiqr — SGQR payments on Sui",
   description: "Scan any SGQR sticker, pay any Sui token, settle on-chain.",
   manifest: "/manifest.webmanifest",
-  themeColor: "#0a0a0a",
   appleWebApp: { capable: true, title: "suiqr", statusBarStyle: "black-translucent" },
   icons: {
     icon: "/icon-192.svg",

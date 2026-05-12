@@ -35,9 +35,10 @@ export default function ScanPage() {
   const [state, setState] = useState<ParseState>({ kind: "idle" });
   const [lookup, setLookup] = useState<RegistryLookup>({ kind: "idle" });
 
+  // From scripts/demo-fixtures.json — KOPI HOUSE staged on testnet, valid CRC.
   const example = useMemo(
     () =>
-      "00020101021126370010SG.PAYNOW010220210202412345Z030105204000053037025802SG5915FOOD-COURT KIOSK6009Singapore62160512BillNumber123",
+      "00020101021126370009SG.PAYNOW010120210T11KH0001A030105204000053037025802SG5910KOPI HOUSE6009Singapore6304BFAC",
     [],
   );
 
@@ -98,7 +99,10 @@ export default function ScanPage() {
         // We can call the view function `merchant_address` via devInspect to
         // get back the on-chain address (which aborts if not registered).
         const result = await sui.devInspectTransactionBlock({
-          sender: account?.address ?? "0x0",
+          // Use a fully-padded zero address when no wallet is connected — Sui
+          // testnet RPC rejects the short `0x0` form. devInspect doesn't sign,
+          // so any valid 32-byte address works here.
+          sender: account?.address ?? `0x${"0".repeat(64)}`,
           transactionBlock: buildDevInspectQuery(uenBytes),
         });
         if (cancelled) return;

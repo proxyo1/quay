@@ -1,16 +1,18 @@
 "use client";
 
-import { ConnectButton, useCurrentAccount, useSuiClientQuery } from "@mysten/dapp-kit";
+import { useSuiClientQuery } from "@mysten/dapp-kit";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo } from "react";
 
+import { useMerchantSession } from "@/lib/merchant-session";
 import { SUIQR, objectUrl, txUrl } from "@/lib/sui-config";
 
 interface PaymentReceiptEvent {
   receipt_id: number[];
   merchant: string;
   payer: string;
-  amount: string; // u64 stringified
+  amount: string;
   token_type: { name: string };
   uen_hash: number[];
   timestamp_ms: string;
@@ -21,7 +23,6 @@ interface PaymentReceiptEvent {
 
 interface NormalizedReceipt {
   receiptId: string;
-  digest: string;
   txDigest: string;
   payer: string;
   merchant: string;
@@ -32,36 +33,52 @@ interface NormalizedReceipt {
   timestampMs: number;
 }
 
-/**
- * Day 8 — merchant terminal.
- *
- * Connected wallet sees a live feed of PaymentReceipt events targeting
- * its address, plus a running "today total" in SGD. Refreshes every
- * 2s via dapp-kit's useSuiClientQuery. WebSocket subscription would be
- * lower-latency but the JSON-RPC polling path is more reliable across
- * fullnode operators (and easier to reason about under flaky networks).
- */
 export default function TerminalPage() {
-  const account = useCurrentAccount();
+  const { session, hydrated, signOut } = useMerchantSession();
+  const router = useRouter();
 
+  if (hydrated && !session) {
+    if (typeof window !== "undefined") {
+      router.replace("/merchant/login?next=/merchant/terminal");
+    }
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-16">
+        <p className="text-sm text-gray-500">Redirecting to sign-in…</p>
+      </main>
+    );
+  }
+
+  return <TerminalView session={session} onSignOut={signOut} />;
+}
+
+function TerminalView({
+  session,
+  onSignOut,
+}: {
+  session: ReturnType<typeof useMerchantSession>["session"];
+  onSignOut: () => void;
+}) {
+  const merchantAddress = session?.address ?? "0x0";
   const { data, error, isLoading } = useSuiClientQuery(
     "queryEvents",
     {
-      query: {
-        MoveEventType: `${SUIQR.packageId}::payments::PaymentReceipt`,
-      },
+      query: { MoveEventType: `${SUIQR.packageId}::payments::PaymentReceipt` },
       order: "descending",
       limit: 50,
     },
-    { refetchInterval: 2000, refetchIntervalInBackground: false },
+    {
+      refetchInterval: 2000,
+      refetchIntervalInBackground: false,
+      enabled: !!session,
+    },
   );
 
   const receipts: NormalizedReceipt[] = useMemo(() => {
-    if (!data?.data || !account) return [];
+    if (!data?.data || !session) return [];
     return data.data
       .map((ev) => normalizeEvent(ev))
-      .filter((r): r is NormalizedReceipt => r !== null && r.merchant === account.address);
-  }, [data, account]);
+      .filter((r): r is NormalizedReceipt => r !== null && r.merchant === merchantAddress);
+  }, [data, session, merchantAddress]);
 
   const todayTotalSgd = useMemo(() => {
     const startOfDay = new Date();
@@ -74,23 +91,6 @@ export default function TerminalPage() {
     return total / 100;
   }, [receipts]);
 
-  if (!account) {
-    return (
-      <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">
-        <Link href="/merchant" className="text-xs text-blue-600 hover:underline">
-          ← merchant
-        </Link>
-        <header className="space-y-1">
-          <h1 className="text-3xl font-semibold">Terminal</h1>
-          <p className="text-sm text-gray-500">
-            Connect the wallet that owns your registered UEN to see live payment events.
-          </p>
-        </header>
-        <ConnectButton />
-      </main>
-    );
-  }
-
   return (
     <main className="mx-auto max-w-2xl px-6 py-10 space-y-8">
       <Link href="/merchant" className="text-xs text-blue-600 hover:underline">
@@ -99,17 +99,24 @@ export default function TerminalPage() {
       <header className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold">Terminal</h1>
-          <p className="text-xs text-gray-500 font-mono mt-1">
-            you · {account.address.slice(0, 10)}…{account.address.slice(-6)}
-          </p>
+          {session && (
+            <p className="text-xs text-gray-500 mt-1">
+              <span className="font-mono">{session.email}</span> ·{" "}
+              <span className="font-mono">{session.address.slice(0, 10)}…{session.address.slice(-6)}</span>
+            </p>
+          )}
         </div>
-        <ConnectButton />
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+        >
+          Sign out
+        </button>
       </header>
 
       <section className="rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/10 p-6">
-        <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-          Today
-        </p>
+        <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">Today</p>
         <p className="text-5xl font-semibold tabular-nums mt-1">
           ${todayTotalSgd.toFixed(2)}{" "}
           <span className="text-2xl text-gray-500 font-normal">SGD</span>
@@ -133,14 +140,19 @@ export default function TerminalPage() {
         <section className="rounded-md border border-gray-200 dark:border-gray-700 p-6 text-center space-y-2">
           <p className="text-base font-medium">No payments yet</p>
           <p className="text-xs text-gray-500">
-            Share your SGQR sticker. When a payer settles via /scan, the
-            payment appears here within ~2 seconds of finality.
+            Once you&apos;ve claimed a UEN on /merchant/onboard, share your SGQR
+            sticker. When a payer settles via /scan, the payment appears here
+            within ~2 seconds of finality.
           </p>
-          <p className="text-xs">
+          <div className="flex gap-2 justify-center text-xs pt-2">
+            <Link href="/merchant/onboard" className="text-blue-600 hover:underline">
+              Onboard a UEN →
+            </Link>
+            <span className="text-gray-300 dark:text-gray-700">·</span>
             <Link href="/scan" className="text-blue-600 hover:underline">
               Test a payment from /scan →
             </Link>
-          </p>
+          </div>
         </section>
       ) : (
         <section className="space-y-2">
@@ -217,7 +229,6 @@ function normalizeEvent(ev: {
   try {
     return {
       receiptId: `${ev.id.txDigest}_${ev.id.eventSeq}`,
-      digest: ev.id.txDigest,
       txDigest: ev.id.txDigest,
       payer: p.payer,
       merchant: p.merchant,
@@ -233,12 +244,8 @@ function normalizeEvent(ev: {
 }
 
 function shortTokenLabel(typeName: string): string {
-  // Examples:
-  //   "0000000000000000000000000000000000000000000000000000000000000002::sui::SUI"
-  //   "a1ec...::usdc::USDC"
   const parts = typeName.split("::");
-  const symbol = parts.at(-1) ?? typeName;
-  return symbol;
+  return parts.at(-1) ?? typeName;
 }
 
 function formatTokenAmount(amount: bigint, symbol: string): string {
@@ -246,7 +253,6 @@ function formatTokenAmount(amount: bigint, symbol: string): string {
     const sui = Number(amount) / 1_000_000_000;
     return `${sui < 1 ? sui.toFixed(4) : sui.toFixed(2)} SUI`;
   }
-  // Generic: just show as integer + symbol
   return `${amount.toString()} ${symbol}`;
 }
 
@@ -258,6 +264,6 @@ function formatRelativeTime(ms: number): string {
   if (ageMin < 60) return `${ageMin}m ago`;
   const ageHour = Math.floor(ageMin / 60);
   if (ageHour < 24) return `${ageHour}h ago`;
-  const ageDay = Math.floor(ageHour / 24);
+  const ageDay = Math.floor(ageHour / 60 / 24);
   return `${ageDay}d ago`;
 }

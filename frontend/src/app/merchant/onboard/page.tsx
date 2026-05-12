@@ -1,28 +1,15 @@
 "use client";
 
-import {
-  ConnectButton,
-  useCurrentAccount,
-  useSignAndExecuteTransaction,
-  useSignTransaction,
-  useSuiClient,
-} from "@mysten/dapp-kit";
+import { useSuiClient } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { useMerchantSession, loadKeypair } from "@/lib/merchant-session";
 import { looksLikeUen } from "@/lib/sgqr";
-import { buildRegisterTx, isAllowedMetadataUri } from "@/lib/suiqr";
+import { isAllowedMetadataUri } from "@/lib/suiqr";
 import { SUIQR, objectUrl, txUrl } from "@/lib/sui-config";
-
-type Attestation = {
-  attestation_hex: string;
-  nonce_hex: string;
-  expires_at_ms: number;
-  issuer_pubkey_hex: string;
-  chain_id: number;
-  msg_hash_hex: string;
-};
 
 type SponsoredRegister = {
   tx_bytes_b64: string;
@@ -34,63 +21,36 @@ type SponsoredRegister = {
 
 type State =
   | { kind: "idle" }
-  | { kind: "requesting_attestation" }
-  | { kind: "attestation_ready"; attestation: Attestation }
   | { kind: "submitting" }
-  | { kind: "registered"; digest: string; sponsored: boolean }
+  | { kind: "registered"; digest: string }
   | { kind: "error"; message: string };
 
 export default function OnboardPage() {
-  const account = useCurrentAccount();
+  const { session, hydrated } = useMerchantSession();
+  const router = useRouter();
   const sui = useSuiClient();
-  const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
-  const { mutateAsync: signTransaction } = useSignTransaction();
 
   const [uen, setUen] = useState("");
   const [metadataUri, setMetadataUri] = useState("");
-  const [useSponsored, setUseSponsored] = useState(true);
   const [state, setState] = useState<State>({ kind: "idle" });
+
+  if (hydrated && !session) {
+    if (typeof window !== "undefined") {
+      router.replace("/merchant/login?next=/merchant/onboard");
+    }
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-16">
+        <p className="text-sm text-gray-500">Redirecting to sign-in…</p>
+      </main>
+    );
+  }
 
   const uenValid = looksLikeUen(uen);
   const metaUriValid = !metadataUri || isAllowedMetadataUri(metadataUri);
-  const ready = !!account && uenValid && metaUriValid;
+  const ready = !!session && uenValid && metaUriValid;
 
-  function reset() {
-    setState({ kind: "idle" });
-  }
-
-  async function handleStandard() {
-    if (!account) return;
-    setState({ kind: "requesting_attestation" });
-    try {
-      const res = await fetch("/api/attest", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ uen, claimer: account.address }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(err.error ?? `HTTP ${res.status}`);
-      }
-      const attestation = (await res.json()) as Attestation;
-      setState({ kind: "submitting" });
-      const tx = buildRegisterTx({
-        uen,
-        nonce: hexToBytes(attestation.nonce_hex),
-        attestation: hexToBytes(attestation.attestation_hex),
-        expiresAtMs: BigInt(attestation.expires_at_ms),
-        metadataUri: metadataUri.trim() || undefined,
-      });
-      const result = await signAndExecute({ transaction: tx });
-      await sui.waitForTransaction({ digest: result.digest });
-      setState({ kind: "registered", digest: result.digest, sponsored: false });
-    } catch (e) {
-      setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
-    }
-  }
-
-  async function handleSponsored() {
-    if (!account) return;
+  async function handleSubmit() {
+    if (!session) return;
     setState({ kind: "submitting" });
     try {
       const res = await fetch("/api/sponsor/register", {
@@ -98,7 +58,7 @@ export default function OnboardPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           uen,
-          claimer: account.address,
+          claimer: session.address,
           metadata_uri: metadataUri.trim() || undefined,
         }),
       });
@@ -108,7 +68,10 @@ export default function OnboardPage() {
       }
       const sp = (await res.json()) as SponsoredRegister;
       const bytes = base64ToBytes(sp.tx_bytes_b64);
-      const senderSig = await signTransaction({ transaction: Transaction.from(bytes) });
+
+      const kp = loadKeypair(session);
+      const senderSig = await kp.signTransaction(bytes);
+
       const result = await sui.executeTransactionBlock({
         transactionBlock: bytes,
         signature: [senderSig.signature, sp.sponsor_signature],
@@ -118,7 +81,7 @@ export default function OnboardPage() {
         throw new Error(`tx failed: ${result.effects?.status?.error ?? "unknown"}`);
       }
       await sui.waitForTransaction({ digest: result.digest });
-      setState({ kind: "registered", digest: result.digest, sponsored: true });
+      setState({ kind: "registered", digest: result.digest });
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     }
@@ -132,31 +95,18 @@ export default function OnboardPage() {
         </Link>
         <h1 className="text-3xl font-semibold">Onboard a UEN</h1>
         <p className="text-sm text-gray-500">
-          Three steps: connect a Sui wallet, declare the UEN you own, claim it on chain.
+          Suiqr signs an attestation for your UEN, then submits register_merchant
+          on your behalf. The sponsor wallet pays the gas. Your signed-in
+          wallet only signs to authorize.
         </p>
       </header>
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-gray-500">Step 1</p>
-            <p className="text-sm font-medium">Wallet</p>
-          </div>
-          <ConnectButton />
-        </div>
-        {account && (
-          <p className="text-xs text-gray-500 font-mono">
-            connected · {account.address.slice(0, 10)}…{account.address.slice(-6)}
-          </p>
-        )}
-      </section>
+      {session && <SessionCard session={session} />}
 
       <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-3">
         <div>
-          <p className="text-xs uppercase tracking-wide text-gray-500">Step 2</p>
-          <p className="text-sm font-medium">Your UEN</p>
+          <p className="text-xs uppercase tracking-wide text-gray-500">UEN</p>
         </div>
-
         <div>
           <label htmlFor="uen" className="block text-xs text-gray-500 mb-1">
             Singapore UEN (8–10 alphanumeric)
@@ -167,11 +117,11 @@ export default function OnboardPage() {
             value={uen}
             onChange={(e) => {
               setUen(e.target.value.trim().toUpperCase());
-              reset();
+              if (state.kind !== "idle" && state.kind !== "submitting") setState({ kind: "idle" });
             }}
             placeholder="202412345Z"
             className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-3 py-2 font-mono"
-            disabled={state.kind === "submitting" || state.kind === "requesting_attestation"}
+            disabled={state.kind === "submitting"}
           />
           {uen && !uenValid && (
             <p className="text-xs text-amber-600 mt-1">
@@ -190,11 +140,11 @@ export default function OnboardPage() {
             value={metadataUri}
             onChange={(e) => {
               setMetadataUri(e.target.value.trim());
-              reset();
+              if (state.kind !== "idle" && state.kind !== "submitting") setState({ kind: "idle" });
             }}
             placeholder="ipfs://merchant-profile-cid"
             className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-3 py-2 text-sm"
-            disabled={state.kind === "submitting" || state.kind === "requesting_attestation"}
+            disabled={state.kind === "submitting"}
           />
           {metadataUri && !metaUriValid && (
             <p className="text-xs text-amber-600 mt-1">
@@ -202,99 +152,79 @@ export default function OnboardPage() {
             </p>
           )}
         </div>
-
-        <label className="flex items-center gap-2 text-sm pt-1">
-          <input
-            type="checkbox"
-            checked={useSponsored}
-            onChange={(e) => {
-              setUseSponsored(e.target.checked);
-              reset();
-            }}
-            className="rounded"
-            disabled={state.kind === "submitting" || state.kind === "requesting_attestation"}
-          />
-          <span>
-            Use sponsored gas <span className="text-emerald-600 text-xs font-medium">(recommended — no SUI needed)</span>
-          </span>
-        </label>
       </section>
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-gray-500">Step 3</p>
-          <p className="text-sm font-medium">
-            {useSponsored ? "Sign + submit (suiqr pays gas)" : "Attest + sign + submit"}
-          </p>
-        </div>
-
-        <SubmitFlow
-          state={state}
-          ready={ready}
-          useSponsored={useSponsored}
-          onStandard={handleStandard}
-          onSponsored={handleSponsored}
-        />
-      </section>
+      <SubmitFlow state={state} ready={ready} onSubmit={handleSubmit} />
 
       <footer className="text-xs text-gray-500 pt-6 border-t border-gray-100 dark:border-gray-800 space-y-1">
         <p>
           Registry:{" "}
-          <a href={objectUrl(SUIQR.registryId)} target="_blank" rel="noreferrer" className="font-mono text-blue-600 hover:underline">
+          <a
+            href={objectUrl(SUIQR.registryId)}
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono text-blue-600 hover:underline"
+          >
             {SUIQR.registryId.slice(0, 10)}…{SUIQR.registryId.slice(-6)}
           </a>{" "}
           on {SUIQR.network}
         </p>
         <p>
-          Sponsored gas covers up to 5 onboarding txs per wallet per day on
-          testnet. V0 auto-issues attestations; production gates this behind
-          SGQR-photo + BizFile+ review.
+          V0 auto-issues attestations for any well-shaped UEN. Production gates
+          this behind SGQR-photo + BizFile+ review (or a NETS-controlled signer).
+          Sponsored gas: 5 onboarding txs per wallet per day on testnet.
         </p>
       </footer>
     </main>
   );
 }
 
+function SessionCard({ session }: { session: NonNullable<ReturnType<typeof useMerchantSession>["session"]> }) {
+  return (
+    <section className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/10 p-4 text-sm space-y-1">
+      <p className="font-medium">Signed in</p>
+      <p className="text-xs text-gray-600 dark:text-gray-400 font-mono">
+        {session.email}
+      </p>
+      <p className="text-xs text-gray-600 dark:text-gray-400 font-mono">
+        wallet: {session.address.slice(0, 10)}…{session.address.slice(-6)}
+      </p>
+      <p className="text-[11px] text-gray-500 pt-1">
+        Want to back up your private key?{" "}
+        <Link href="/merchant/wallet" className="text-blue-600 hover:underline">
+          /merchant/wallet
+        </Link>
+      </p>
+    </section>
+  );
+}
+
 function SubmitFlow({
   state,
   ready,
-  useSponsored,
-  onStandard,
-  onSponsored,
+  onSubmit,
 }: {
   state: State;
   ready: boolean;
-  useSponsored: boolean;
-  onStandard: () => void;
-  onSponsored: () => void;
+  onSubmit: () => void;
 }) {
   if (state.kind === "error") {
     return (
       <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-900/20 p-3 text-sm">
         <p className="font-medium text-red-700 dark:text-red-300">Error</p>
         <p className="mt-1 text-xs text-red-700 dark:text-red-300 break-words">{state.message}</p>
-        <button
-          type="button"
-          onClick={useSponsored ? onSponsored : onStandard}
-          className="text-xs underline mt-2"
-        >
+        <button type="button" onClick={onSubmit} className="text-xs underline mt-2">
           Try again
         </button>
       </div>
     );
   }
-
   if (state.kind === "registered") {
     return (
       <div className="space-y-2">
         <div className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 p-3 text-sm">
           <p className="font-medium">
-            ✓ Registered on testnet
-            {state.sponsored && (
-              <span className="ml-2 text-xs font-normal text-emerald-700 dark:text-emerald-300">
-                · sponsor paid gas
-              </span>
-            )}
+            ✓ Registered on testnet · sponsor paid gas
           </p>
           <p className="mt-1 text-xs">
             tx{" "}
@@ -308,50 +238,39 @@ function SubmitFlow({
             </a>
           </p>
         </div>
-        <Link
-          href="/scan"
-          className="block text-center text-sm text-emerald-700 dark:text-emerald-300 hover:underline"
-        >
-          Now test it on /scan →
-        </Link>
+        <div className="flex gap-3 text-sm">
+          <Link
+            href="/merchant/terminal"
+            className="flex-1 text-center rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2"
+          >
+            Open terminal →
+          </Link>
+          <Link
+            href="/scan"
+            className="flex-1 text-center rounded-md border border-emerald-300 dark:border-emerald-700 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+          >
+            Test on /scan →
+          </Link>
+        </div>
       </div>
     );
   }
-
-  if (state.kind === "requesting_attestation") {
-    return <p className="text-sm text-gray-500">Asking suiqr for an attestation…</p>;
-  }
   if (state.kind === "submitting") {
-    return (
-      <p className="text-sm text-gray-500">
-        {useSponsored ? "Sponsor signing + submitting…" : "Submitting register_merchant on testnet…"}
-      </p>
-    );
+    return <p className="text-sm text-gray-500">Sponsor signing + submitting on testnet…</p>;
   }
-
   return (
     <button
       type="button"
-      onClick={useSponsored ? onSponsored : onStandard}
+      onClick={onSubmit}
       disabled={!ready}
       className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-3 transition"
     >
-      {useSponsored ? "Sign + submit (sponsor pays gas)" : "Request attestation + register"}
+      Claim this UEN
       <span className="block text-xs font-normal opacity-80 mt-0.5">
-        {useSponsored
-          ? "POST /api/sponsor/register → wallet signs bytes → executeTransactionBlock"
-          : "POST /api/attest → wallet signs register_merchant → wallet pays gas"}
+        POST /api/sponsor/register → your session signs → executeTransactionBlock
       </span>
     </button>
   );
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (clean.length % 2 !== 0) throw new Error(`hex length ${clean.length} is not even`);
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-  return out;
 }
 
 function base64ToBytes(b64: string): Uint8Array {
