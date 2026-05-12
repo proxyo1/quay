@@ -19,11 +19,22 @@ export default function MerchantHome() {
           <div className="text-base font-medium">Onboard a UEN →</div>
           <p className="text-sm text-gray-500 mt-1">
             Connect a Sui wallet, declare your UEN, suiqr signs an attestation,
-            you claim on chain.
+            you claim on chain. Sponsored gas means no SUI needed.
           </p>
         </Link>
 
-        <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-800 p-5 text-sm text-gray-400">
+        <Link
+          href="/merchant/terminal"
+          className="rounded-lg border border-gray-200 dark:border-gray-700 p-5 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition"
+        >
+          <div className="text-base font-medium">Terminal →</div>
+          <p className="text-sm text-gray-500 mt-1">
+            Live PaymentReceipt feed for the connected wallet. SGD-prominent
+            display, ~2s refresh after on-chain finality.
+          </p>
+        </Link>
+
+        <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-800 p-5 text-sm text-gray-400 sm:col-span-2">
           <div className="font-medium">Sign in with Google (zkLogin)</div>
           <p className="mt-1">
             Coming once a Google OAuth client is configured. See{" "}
