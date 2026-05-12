@@ -16,7 +16,14 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "suiqr — SGQR payments on Sui",
-  description: "Scan any SGQR sticker, pay any Sui token, settle in USDC.",
+  description: "Scan any SGQR sticker, pay any Sui token, settle on-chain.",
+  manifest: "/manifest.webmanifest",
+  themeColor: "#0a0a0a",
+  appleWebApp: { capable: true, title: "suiqr", statusBarStyle: "black-translucent" },
+  icons: {
+    icon: "/icon-192.svg",
+    apple: "/icon-192.svg",
+  },
 };
 
 export default function RootLayout({
