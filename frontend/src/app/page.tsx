@@ -24,10 +24,16 @@ export default function Home() {
           </p>
         </Link>
 
-        <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-800 p-5 text-sm text-gray-400">
-          <div className="font-medium">Merchant onboarding</div>
-          <p className="mt-1">Coming Day 6 — sign in with Google (zkLogin).</p>
-        </div>
+        <Link
+          href="/merchant"
+          className="rounded-lg border border-gray-200 dark:border-gray-700 p-5 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition"
+        >
+          <div className="text-base font-medium">Merchant onboarding →</div>
+          <p className="text-sm text-gray-500 mt-1">
+            Claim your UEN. Connect a Sui wallet today; Google zkLogin lands
+            once an OAuth client is wired.
+          </p>
+        </Link>
       </section>
 
       <footer className="text-xs text-gray-500 pt-8 border-t border-gray-100 dark:border-gray-800 space-y-1">
