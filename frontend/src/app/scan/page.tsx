@@ -4,6 +4,7 @@ import { ConnectButton, useCurrentAccount, useSuiClient } from "@mysten/dapp-kit
 import { Transaction } from "@mysten/sui/transactions";
 import { useEffect, useMemo, useState } from "react";
 
+import { PayPanel } from "@/components/PayPanel";
 import { SUIQR, objectUrl } from "@/lib/sui-config";
 import { sanitizeMerchantCity, sanitizeMerchantName } from "@/lib/sgqr";
 import { extractPayNow, parseSgqr, type PayNowInfo, type SgqrPayload } from "@/lib/sgqr";
@@ -192,6 +193,16 @@ export default function ScanPage() {
       </section>
 
       <ResultPane state={state} lookup={lookup} />
+
+      {state.kind === "ok" &&
+        state.payNow?.proxyType === "uen" &&
+        lookup.kind === "registered" && (
+          <PayPanel
+            merchantAddress={lookup.address}
+            merchantName={state.payload.merchantName}
+            uen={state.payNow.proxyValue}
+          />
+        )}
 
       <footer className="text-xs text-gray-500 space-y-1">
         <p>
