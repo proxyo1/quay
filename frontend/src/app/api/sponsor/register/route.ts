@@ -95,17 +95,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid claimer address" }, { status: 400 });
   }
 
-  // Rate limit
-  const usageCheck = checkAndIncrementSponsorUsage(body.claimer, DAILY_CAP);
-  if (!usageCheck.ok) {
-    return NextResponse.json(
-      {
-        error: "daily sponsored-gas cap reached for this address",
-        cap: DAILY_CAP,
-        reset_at_ms: usageCheck.resetAt,
-      },
-      { status: 429 },
-    );
+  // Rate limit — production-only. Dev skips the cap because the counter is
+  // in-memory and increments on every request, including ones that later fail
+  // signature verification, which makes iterative local testing painful.
+  if (process.env.NODE_ENV !== "development") {
+    const usageCheck = checkAndIncrementSponsorUsage(body.claimer, DAILY_CAP);
+    if (!usageCheck.ok) {
+      return NextResponse.json(
+        {
+          error: "daily sponsored-gas cap reached for this address",
+          cap: DAILY_CAP,
+          reset_at_ms: usageCheck.resetAt,
+        },
+        { status: 429 },
+      );
+    }
   }
 
   let issuer, sponsor;
