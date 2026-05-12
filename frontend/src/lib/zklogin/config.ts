@@ -7,7 +7,7 @@
 
 export const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 
-export const ZKLOGIN_REDIRECT_PATH = "/merchant/oauth/callback";
+export const ZKLOGIN_REDIRECT_PATH = "/auth/google/callback";
 
 /** Mysten-hosted prover for testnet / devnet. */
 export const ZK_PROVER_URL = "https://prover-dev.mystenlabs.com/v1";

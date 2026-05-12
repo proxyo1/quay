@@ -32,29 +32,42 @@ output.
 
 Sorted by **how much it advances the demo or unblocks mainnet**:
 
-1. **Cetus swap-and-pay PTB** — Move contract is `Coin<T>`-generic; the
-   missing piece is the frontend PTB that pulls a SUI→USDC swap from a
-   Cetus pool right before the `pay` call. See
+1. **Gasless stablecoin retail path** — Sui ships a protocol-level
+   gasless mechanism via [`0x2::balance::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers)
+   (testnet today, mainnet "in the future"). It's tightly scoped: only
+   allowlisted stablecoins (USDC, USDsui, USDY, AUSD, FDUSD, BUCK, YSLD),
+   only certain balance/coin ops, no object writes. Wire a
+   `buildGaslessTransferTx` for sub-$10 retail tickets where the rich
+   `PaymentReceipt` event isn't required. Keep `payments::pay<T>` for
+   GST-reportable receipted payments. Dual-path frontend; merchant
+   terminal subscribes to both event types.
+2. **Cetus swap-and-pay PTB** — Move contract is `Coin<T>`-generic; the
+   missing piece is the frontend PTB that pulls a SUI→USDsui swap from
+   a Cetus pool right before the `pay` call. See
    [`scripts/cetus-testnet.json`](scripts/cetus-testnet.json) for the
    pre-cataloged pool registry IDs. Probably needs the
    `cetus_clmm::pool::flash_swap` flash-swap pattern plus
    `repay_flash_swap` in the same PTB to avoid an intermediate Coin
    custody hop.
-2. **Camera scanning** — `frontend/src/lib/sgqr/` already handles the
-   parse. What's needed is a `<CameraInput>` component using
-   `@zxing/browser` that feeds the parser. Plus a field-test pass per
-   AD5: ≥20 real Singapore SGQR photos × lighting conditions.
-3. **Mobile-number PayNow support** — the domain-tag scheme
+3. **USDsui mainnet settlement** — when USDsui lands on testnet (or we
+   move directly to mainnet for V0.5), swap the default
+   `COIN_TYPES.SUI` → USDsui in the pay path. Pure constant change in
+   [`frontend/src/lib/suiqr/pay.ts`](frontend/src/lib/suiqr/pay.ts); no
+   on-chain redeploy.
+4. **Real-photo SGQR field test (AD5)** — the `SgqrCameraScanner` is
+   wired and tuned (`facingMode: environment`, `TRY_HARDER`, reticle
+   sized to the 10:1 rule for a 50mm SGQR at 30cm), but the spec
+   demands ≥20 real Singapore SGQR photos × lighting conditions before
+   we can claim camera reliability for the V0 submission.
+5. **Mobile-number PayNow support** — the domain-tag scheme
    (`PAYNOW_UEN_V1` vs future `PAYNOW_MOBILE_V1`) is already in place on
    chain. Frontend needs to parse proxy type `0` (currently flagged as
-   "not supported in V0") and surface a mobile-number registration path.
-4. **zkLogin merchant signup** — scaffolded in
-   [`docs/GOOGLE_OAUTH_SETUP.md`](docs/GOOGLE_OAUTH_SETUP.md). Needs a
-   Google OAuth client + the Mysten prover service plumbing.
-5. **SuiNS optional name attach** — small enhancement; show
+   "not supported in V0") and surface a mobile-number registration
+   path. ~70% of SG hawkers use mobile-number PayNow.
+6. **SuiNS optional name attach** — small enhancement; show
    "kopihouse.sui" instead of `0x7840…3360` on /scan and
    /merchant/terminal.
-6. **Multisig issuer migration** — currently single-key. V1 must rotate
+7. **Multisig issuer migration** — currently single-key. V1 must rotate
    to 2-of-3 (or m-of-n) via the existing `rotate_issuer_pubkey` entry.
 
 ## Commit + PR style

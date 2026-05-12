@@ -1,18 +1,17 @@
 # Google OAuth setup (for zkLogin merchant onboarding)
 
-The merchant onboarding flow on `/merchant/onboard` works today via Sui
-wallet connect. To enable the **"Sign in with Google"** path (zkLogin),
-you need a Google OAuth 2.0 client.
-
-This is per AD33 in the build plan: pre-cache salts + tested fallback
-to regular wallet path.
+The merchant onboarding flow on `/merchant/onboard` uses **Sui zkLogin
+with Google as the OIDC provider** as the only authentication path. To
+run the app locally or deploy it, you need a Google OAuth 2.0 Web
+application client.
 
 ## What you'll create
 
 A single OAuth 2.0 **Web application** client in Google Cloud Console.
 Its client ID becomes a public env var (`NEXT_PUBLIC_GOOGLE_CLIENT_ID`)
 that the frontend uses to initiate the OAuth redirect; the JWT Google
-returns is then used to derive a zkLogin Sui address.
+returns is then exchanged through Mysten's prover service for a
+zkLogin-bound Sui address.
 
 ## Steps
 
@@ -31,11 +30,15 @@ returns is then used to derive a zkLogin Sui address.
 5. Authorized JavaScript origins:
    - `http://localhost:3000` (dev)
    - whatever Vercel URL you deploy to (e.g., `https://suiqr.vercel.app`)
-6. Authorized redirect URIs:
+6. Authorized redirect URIs (exact-match, including path):
    - `http://localhost:3000/auth/google/callback`
    - `https://suiqr.vercel.app/auth/google/callback` (or your deploy URL)
 7. Click **Create**. Copy the Client ID — it looks like
    `1234567890-abc...def.apps.googleusercontent.com`.
+
+> If you change the redirect path on either side, update both: the
+> Google Cloud Console allowlist AND `ZKLOGIN_REDIRECT_PATH` in
+> [`frontend/src/lib/zklogin/config.ts`](../frontend/src/lib/zklogin/config.ts).
 
 ## Wire it up
 
@@ -47,37 +50,43 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID="1234567890-abc...def.apps.googleusercontent.com"
 That's all the public config. The Mysten zkLogin salt service and prover
 service URLs are baked in (free for hackathon use; rate-limited).
 
-The frontend code path for OAuth + zkLogin lives in
-`frontend/src/lib/zklogin/` (skeleton ships in a future commit — Day 6 in
-this repo only ships the wallet-connect path E2E).
+For production deployments, also set:
 
-## Why this isn't already wired
+```bash
+# Server-only — used by /api/zklogin/salt to derive a stable salt per user
+SUIQR_ZKLOGIN_SALT_SECRET="<32-bytes-of-randomness-as-base64-or-hex>"
+```
 
-Two reasons it's deferred:
+If unset, [`/api/zklogin/salt`](../frontend/src/app/api/zklogin/salt/route.ts)
+falls back to a default development secret — fine for testnet, not safe
+for mainnet because anyone with the same default would derive the same
+address space.
 
-1. **OAuth client ID is a per-deploy secret-ish value** — we don't want
-   to hardcode one developer's client ID into the repo, and CI doesn't
-   have a Google account to create one.
-2. **zkLogin signing of `register_merchant` requires the Mysten prover
-   service**, which validates real Google JWTs. There's no way to test
-   the E2E flow without a real OAuth client. The Day 6 wallet-connect
-   smoke test (`scripts/day6-onboard-smoke.ts`) proves the on-chain
-   register flow itself works; the zkLogin layer only changes which
-   key signs the tx.
+## How the flow works locally
 
-When you wire your OAuth client and want the zkLogin path live, write
-to the build plan or open an issue — the work is straightforward but
-needs OAuth credentials to test against.
+1. `/merchant/login` → click "Sign in with Google"
+2. Browser mints an ephemeral Ed25519 keypair, computes a nonce from
+   it + current Sui epoch + `EPOCH_LOOKAHEAD`, persists pending state
+   in localStorage, redirects to Google with `response_type=id_token`
+3. User approves → Google redirects to `/auth/google/callback#id_token=…`
+4. Callback page parses the JWT, POSTs `/api/zklogin/salt` for the
+   per-user salt, derives the Sui address via `jwtToAddress(jwt, salt)`,
+   fetches a Groth16 proof from Mysten's prover-dev endpoint, persists
+   the full `ZkLoginSession`, redirects to `next` (default
+   `/merchant/onboard`)
+5. From there, every `executeTransactionBlock` call uses
+   [`zkLoginSign`](../frontend/src/lib/zklogin/sign.ts) to wrap an
+   ephemeral signature in a zkLogin signature envelope
 
-## Why the V0 demo can ship without this
+The session is valid for `maxEpoch` (≈ current epoch + 2). After
+that, signing in again refreshes the proof; the Sui address stays
+the same as long as the user keeps the same Google account.
 
-The demo path:
+## Troubleshooting
 
-1. Merchant connects an existing Sui wallet (Sui Wallet / Slush / Suiet)
-2. Enters their UEN
-3. `/api/attest` auto-issues an attestation (V0 only — production gates
-   this behind SGQR-photo + BizFile+ review)
-4. Wallet signs `register_merchant` → on-chain registration
-
-This is the path verified by `day6-onboard-smoke.ts`. The Gmail path
-is a demo polish item, not a load-bearing capability.
+| Error | Cause | Fix |
+|---|---|---|
+| `Error 400: redirect_uri_mismatch` | The path in your Google Cloud Console allowlist doesn't exactly match `${origin}/auth/google/callback` | Add the exact URI to the allowlist; wait ~5 min for Google's propagation |
+| Callback fails on "fetching zk proof" | Mysten prover-dev rate-limited or down | Retry; check `https://prover-dev.mystenlabs.com/v1` is up |
+| Sign-in succeeds but `/merchant/onboard` redirects back to `/merchant/login` | localStorage write blocked (Safari private mode, third-party cookies setting) | Reload in a normal browser tab |
+| Session looks live but a tx signature fails on chain | `maxEpoch` expired | Sign out + sign in again to refresh the proof |

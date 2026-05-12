@@ -1,9 +1,10 @@
 # suiqr
 
 **SGQR-compatible Sui payments.** Scan any Singapore SGQR sticker, pay any Sui
-token, settle on chain. Merchants onboard with a Sui wallet (zkLogin path
-ready when an OAuth client is wired); the suiqr-the-company sponsor wallet
-covers gas so a brand-new merchant doesn't need a single SUI to register.
+token, settle on chain. Merchants onboard with **Google zkLogin** — one
+Gmail account = one Sui address — and the suiqr-the-company sponsor
+wallet covers gas so a brand-new merchant doesn't need a single SUI to
+register.
 
 > **Submission for the Sui Overflow hackathon.** Live on Sui testnet. Mainnet
 > path documented below.
@@ -35,7 +36,7 @@ covers gas so a brand-new merchant doesn't need a single SUI to register.
 | `payments::payments` Move module | ✅ on testnet | `0x46398f...e167e` |
 | `MerchantRegistry` shared object | ✅ on testnet | `0x00148a...e5e1` |
 | `/scan` — paste SGQR, see live SGD/SUI quote, pay | ✅ end-to-end | Pyth USD/SGD inverted + SUI/USD |
-| `/merchant/onboard` — claim a UEN | ✅ wallet + sponsored-gas paths | zkLogin OAuth path scaffolded |
+| `/merchant/onboard` — claim a UEN | ✅ Google zkLogin + sponsored gas | Wallet-connect path removed for merchants |
 | `/merchant/terminal` — live PaymentReceipt feed | ✅ 2s refresh, SGD-prominent | client-side merchant filter |
 | `/api/attest` — issuer signs ed25519 attestations | ✅ server-side, `.secrets`/env keys |
 | `/api/sponsor/register` — suiqr pays merchant onboarding gas | ✅ 5/day per address, 20% balance floor |
@@ -43,7 +44,8 @@ covers gas so a brand-new merchant doesn't need a single SUI to register.
 | Feature | Status | Why |
 |---|---|---|
 | Cetus swap-and-pay (any-token → USDC) | 📋 catalog only | Move contract is `Coin<T>`-generic; testnet pool liquidity uncertain; deferred to focused session |
-| Sui zkLogin merchant signup | 📋 scaffolded | Needs a Google OAuth client — [`docs/GOOGLE_OAUTH_SETUP.md`](docs/GOOGLE_OAUTH_SETUP.md) walks through it |
+| Cetus swap-and-pay PTB on mainnet | 📋 V0.5 | Move contract is `Coin<T>`-generic; testnet liquidity uncertain |
+| Gasless stablecoin retail path (USDsui / USDC) | 📋 V0.5 | Protocol-level gasless via [`0x2::balance::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers); dual-path with `payments::pay<T>` retained for the receipted path |
 | Mobile-number PayNow (~70% of SG hawkers) | 📋 V1 | Domain-tag namespacing (`PAYNOW_UEN_V1` vs future `PAYNOW_MOBILE_V1`) is already on chain |
 | SuiNS optional name attach | 📋 V0.5 | Address truncation works for V0 demo |
 
@@ -260,9 +262,10 @@ pnpm install
 pnpm dev   # http://localhost:3000
 
 # 5. Browser walk-through
-# /scan        → paste an SGQR string from scripts/demo-fixtures.json
-# /merchant/onboard → connect a fresh wallet, claim a UEN with sponsored gas
-# /merchant/terminal → connect the demo-merchant wallet, see live PaymentReceipt feed
+# /scan        → scan an SGQR sticker with the camera, or type a demo UEN
+# /merchant/login → "Sign in with Google" (zkLogin)
+# /merchant/onboard → claim a UEN with sponsored gas (no SUI required)
+# /merchant/terminal → live PaymentReceipt feed for your zkLogin-derived address
 ```
 
 Full step-by-step demo flow: [`docs/DRESS_REHEARSAL.md`](docs/DRESS_REHEARSAL.md).
@@ -382,7 +385,11 @@ suiqr/
 │   │   ├── page.tsx               # home
 │   │   ├── scan/page.tsx          # payer flow
 │   │   ├── merchant/page.tsx      # merchant landing
-│   │   ├── merchant/onboard/      # claim a UEN (wallet OR sponsored gas)
+│   │   ├── merchant/login/        # Google zkLogin sign-in
+│   │   ├── merchant/onboard/      # claim a UEN (zkLogin signs, sponsor pays gas)
+│   │   ├── merchant/wallet/       # info + identity claims (no exportable key)
+│   │   ├── auth/google/callback/  # OAuth callback: salt + Mysten proof
+│   │   ├── api/zklogin/salt/      # POST: server-derived stable salt per Google identity
 │   │   ├── merchant/terminal/     # live PaymentReceipt feed
 │   │   ├── api/attest/route.ts    # POST: issuer signs ClaimMessage
 │   │   └── api/sponsor/register/  # POST: sponsor signs gas; rate-limited
@@ -421,7 +428,7 @@ suiqr/
 - [x] SGQR EMVCo parser + scan page (Day 3)
 - [x] Pyth live SGD→SUI quote (Day 4)
 - [x] Real `payments::pay<SUI>` Pay button (Day 5)
-- [x] Merchant onboarding (Day 6, wallet path; zkLogin scaffolded)
+- [x] Merchant onboarding via Google zkLogin + sponsored gas (Days 6 + 7 collapsed)
 - [x] Sponsored-gas merchant signup (Day 7)
 - [x] Merchant terminal with live event feed (Day 8)
 - [x] PWA manifest + icons (Day 10)
@@ -430,10 +437,9 @@ suiqr/
 
 Deferred to V0.5+:
 - Cetus swap-and-pay PTB (catalog ready)
-- Sui zkLogin merchant signup (needs Google OAuth client)
 - SuiNS optional name attach
-- Camera scanning via `@zxing/browser`
 - Mobile-number PayNow proxy
+- USDsui mainnet settlement + protocol-level gasless retail path (V0.5)
 
 ---
 
