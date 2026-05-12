@@ -16,11 +16,9 @@ export interface ZkLoginSession {
   email: string;
   sub: string;
   aud: string;
-  /** Sui address derived from jwtToAddress(jwt, salt). */
+  /** Sui address derived from Enoki's addressSeed + iss. */
   address: string;
-  /** Per-user salt (decimal-string bigint as returned by /api/zklogin/salt). */
-  salt: string;
-  /** The Google JWT (id_token). Needed to reconstruct addressSeed at signing time. */
+  /** The Google JWT (id_token). Kept for audit/debug; signing uses proof.addressSeed. */
   jwt: string;
   /** Bech32 ephemeral private key — signs tx bytes; ZK proof binds to its pubkey. */
   ephemeralPrivKeyBech32: string;
@@ -28,12 +26,12 @@ export interface ZkLoginSession {
   randomness: string;
   /** Max Sui epoch the proof is valid for. */
   maxEpoch: number;
-  /** Groth16 proof from Mysten prover. */
+  /** Groth16 proof from Enoki, including the addressSeed Enoki bound it to. */
   proof: ZkProof;
   createdAt: number;
 }
 
-const STORAGE_KEY = "suiqr.merchant_session.v1";
+const STORAGE_KEY = "suiqr.merchant_session.v2";
 
 export function loadSession(): ZkLoginSession | null {
   if (typeof window === "undefined") return null;

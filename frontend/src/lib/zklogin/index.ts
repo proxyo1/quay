@@ -1,4 +1,13 @@
-export { GOOGLE_CLIENT_ID, ZKLOGIN_REDIRECT_PATH, ZK_PROVER_URL, EPOCH_LOOKAHEAD, KEY_CLAIM_NAME, isZkLoginConfigured, redirectUri } from "./config";
+export {
+  GOOGLE_CLIENT_ID,
+  ZKLOGIN_REDIRECT_PATH,
+  ENOKI_API_BASE,
+  ENOKI_API_KEY,
+  ENOKI_NETWORK,
+  EPOCH_LOOKAHEAD,
+  isZkLoginConfigured,
+  redirectUri,
+} from "./config";
 export {
   startGoogleZkLogin,
   loadPendingState,

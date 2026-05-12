@@ -97,11 +97,11 @@ export default function WalletPage() {
         <p className="text-xs uppercase tracking-wide text-gray-500">zkLogin session</p>
         <ul className="text-[11px] text-gray-500 font-mono space-y-1">
           <li>maxEpoch: {session.maxEpoch}</li>
-          <li>salt: {session.salt.slice(0, 24)}…</li>
+          <li>addressSeed: {session.proof.addressSeed.slice(0, 24)}…</li>
           <li>ephemeral: bech32 stored in localStorage (rotated per session)</li>
         </ul>
         <p className="text-[11px] text-gray-500 leading-relaxed">
-          The ephemeral keypair signs transaction bytes; the Mysten-prover
+          The ephemeral keypair signs transaction bytes; Enoki&apos;s Groth16
           proof binds those signatures to your Google identity. Once Sui
           advances past <code className="font-mono">maxEpoch</code>, sign in
           again to refresh the proof. No private key for you to back up — the

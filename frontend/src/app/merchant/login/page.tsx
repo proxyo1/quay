@@ -53,7 +53,7 @@ function LoginInner() {
         <p className="text-sm text-gray-500">
           One Google account = one Sui address = one merchant entry on chain.
           Suiqr never sees your password; Google does the identity work and
-          Mysten&apos;s prover binds it to your Sui wallet.
+          Enoki binds it to your Sui wallet with a Groth16 zk proof.
         </p>
       </header>
 
@@ -87,9 +87,9 @@ function LoginInner() {
         <ul className="text-[11px] text-gray-500 space-y-1 pt-1">
           <li>1. Browser mints an ephemeral Ed25519 keypair</li>
           <li>2. Google issues an ID token with our ephemeral nonce</li>
-          <li>3. /api/zklogin/salt returns a stable per-account salt</li>
-          <li>4. Mysten prover binds it all into a Groth16 zk proof</li>
-          <li>5. Your Sui address = jwtToAddress(jwt, salt) — yours forever, no key to lose</li>
+          <li>3. Enoki proves the JWT + salt + ephemeral binding in zero knowledge</li>
+          <li>4. The proof yields a stable addressSeed → your Sui address</li>
+          <li>5. Yours forever — no private key to back up, no seed phrase</li>
         </ul>
       </section>
     </main>

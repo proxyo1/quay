@@ -1,6 +1,6 @@
 "use client";
 
-import { jwtToAddress, decodeJwt } from "@mysten/sui/zklogin";
+import { computeZkLoginAddressFromSeed, decodeJwt } from "@mysten/sui/zklogin";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -21,16 +21,17 @@ type State =
   | { kind: "done"; address: string };
 
 /**
- * /merchant/oauth/callback
+ * /auth/google/callback
  *
  * Google redirects here with `#id_token=<JWT>` in the URL hash. We:
- *   1. extract the JWT (client-side only — never sent to our server raw)
+ *   1. extract the JWT (client-side only)
  *   2. load the pending state we persisted before the redirect
- *   3. POST /api/zklogin/salt to get a stable per-user salt
- *   4. compute the zkLogin Sui address: jwtToAddress(jwt, salt)
- *   5. POST Mysten prover to get the Groth16 proof
- *   6. persist the full session in localStorage
- *   7. redirect to the next URL (typically /merchant/onboard)
+ *   3. POST Enoki to get the Groth16 proof + Enoki-managed addressSeed
+ *   4. derive the Sui address locally from (addressSeed, iss)
+ *   5. persist the full session in localStorage
+ *   6. redirect to the next URL (typically /merchant/onboard)
+ *
+ * Enoki owns the per-user salt, so there is no separate salt fetch here.
  */
 export default function OAuthCallbackPage() {
   const router = useRouter();
@@ -49,41 +50,36 @@ export default function OAuthCallbackPage() {
         const pending = loadPendingState();
         if (!pending) throw new Error("no pending zkLogin state — start over from /merchant/login");
 
-        setState({ kind: "running", step: "fetching salt" });
-        const saltRes = await fetch("/api/zklogin/salt", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jwt: idToken }),
-        });
-        if (!saltRes.ok) {
-          const j = await saltRes.json().catch(() => ({}));
-          throw new Error(`salt service: ${j.error ?? saltRes.status}`);
-        }
-        const { salt } = (await saltRes.json()) as { salt: string };
-
-        setState({ kind: "running", step: "deriving address" });
-        const address = jwtToAddress(idToken, salt, false);
-
-        setState({ kind: "running", step: "fetching zk proof from Mysten prover" });
+        setState({ kind: "running", step: "fetching zk proof from Enoki" });
         const ephemeral = ephemeralKeypairFromPending(pending);
         const proof = await fetchZkLoginProof({
           jwt: idToken,
           ephemeral,
           maxEpoch: pending.maxEpoch,
           jwtRandomness: pending.randomness,
-          salt,
         });
 
-        setState({ kind: "running", step: "persisting session" });
-        const claims = decodeJwt(idToken) as { sub: string; email?: string; aud: string | string[] };
+        setState({ kind: "running", step: "deriving address" });
+        const claims = decodeJwt(idToken) as {
+          sub: string;
+          email?: string;
+          aud: string | string[];
+          iss: string;
+        };
         const audValue = Array.isArray(claims.aud) ? claims.aud[0] : claims.aud;
+        const address = computeZkLoginAddressFromSeed(
+          BigInt(proof.addressSeed),
+          claims.iss,
+          false,
+        );
+
+        setState({ kind: "running", step: "persisting session" });
         const session: ZkLoginSession = {
           kind: "zklogin",
           email: claims.email ?? claims.sub,
           sub: claims.sub,
           aud: audValue,
           address,
-          salt,
           jwt: idToken,
           ephemeralPrivKeyBech32: pending.ephemeralPrivKeyBech32,
           randomness: pending.randomness,
@@ -118,8 +114,8 @@ export default function OAuthCallbackPage() {
         <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 text-sm">
           <p className="font-medium">{state.step}…</p>
           <p className="text-xs text-gray-500 mt-1">
-            Ephemeral keypair, salt, Groth16 proof — never leaves your browser
-            unencrypted to anyone except the Mysten prover.
+            Ephemeral keypair + Groth16 proof via Enoki — your password
+            never touches suiqr.
           </p>
         </section>
       )}
