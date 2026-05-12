@@ -4,8 +4,10 @@ import {
   ConnectButton,
   useCurrentAccount,
   useSignAndExecuteTransaction,
+  useSignTransaction,
   useSuiClient,
 } from "@mysten/dapp-kit";
+import { Transaction } from "@mysten/sui/transactions";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -22,21 +24,31 @@ type Attestation = {
   msg_hash_hex: string;
 };
 
+type SponsoredRegister = {
+  tx_bytes_b64: string;
+  sponsor_signature: string;
+  sponsor_address: string;
+  expires_at_ms: number;
+  daily_cap: number;
+};
+
 type State =
   | { kind: "idle" }
   | { kind: "requesting_attestation" }
   | { kind: "attestation_ready"; attestation: Attestation }
   | { kind: "submitting" }
-  | { kind: "registered"; digest: string }
+  | { kind: "registered"; digest: string; sponsored: boolean }
   | { kind: "error"; message: string };
 
 export default function OnboardPage() {
   const account = useCurrentAccount();
   const sui = useSuiClient();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+  const { mutateAsync: signTransaction } = useSignTransaction();
 
   const [uen, setUen] = useState("");
   const [metadataUri, setMetadataUri] = useState("");
+  const [useSponsored, setUseSponsored] = useState(true);
   const [state, setState] = useState<State>({ kind: "idle" });
 
   const uenValid = looksLikeUen(uen);
@@ -47,7 +59,7 @@ export default function OnboardPage() {
     setState({ kind: "idle" });
   }
 
-  async function requestAttestation() {
+  async function handleStandard() {
     if (!account) return;
     setState({ kind: "requesting_attestation" });
     try {
@@ -61,26 +73,52 @@ export default function OnboardPage() {
         throw new Error(err.error ?? `HTTP ${res.status}`);
       }
       const attestation = (await res.json()) as Attestation;
-      setState({ kind: "attestation_ready", attestation });
+      setState({ kind: "submitting" });
+      const tx = buildRegisterTx({
+        uen,
+        nonce: hexToBytes(attestation.nonce_hex),
+        attestation: hexToBytes(attestation.attestation_hex),
+        expiresAtMs: BigInt(attestation.expires_at_ms),
+        metadataUri: metadataUri.trim() || undefined,
+      });
+      const result = await signAndExecute({ transaction: tx });
+      await sui.waitForTransaction({ digest: result.digest });
+      setState({ kind: "registered", digest: result.digest, sponsored: false });
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     }
   }
 
-  async function submitRegistration() {
-    if (state.kind !== "attestation_ready") return;
+  async function handleSponsored() {
+    if (!account) return;
     setState({ kind: "submitting" });
     try {
-      const tx = buildRegisterTx({
-        uen,
-        nonce: hexToBytes(state.attestation.nonce_hex),
-        attestation: hexToBytes(state.attestation.attestation_hex),
-        expiresAtMs: BigInt(state.attestation.expires_at_ms),
-        metadataUri: metadataUri.trim() || undefined,
+      const res = await fetch("/api/sponsor/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          uen,
+          claimer: account.address,
+          metadata_uri: metadataUri.trim() || undefined,
+        }),
       });
-      const result = await signAndExecute({ transaction: tx });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+      const sp = (await res.json()) as SponsoredRegister;
+      const bytes = base64ToBytes(sp.tx_bytes_b64);
+      const senderSig = await signTransaction({ transaction: Transaction.from(bytes) });
+      const result = await sui.executeTransactionBlock({
+        transactionBlock: bytes,
+        signature: [senderSig.signature, sp.sponsor_signature],
+        options: { showEffects: true },
+      });
+      if (result.effects?.status?.status !== "success") {
+        throw new Error(`tx failed: ${result.effects?.status?.error ?? "unknown"}`);
+      }
       await sui.waitForTransaction({ digest: result.digest });
-      setState({ kind: "registered", digest: result.digest });
+      setState({ kind: "registered", digest: result.digest, sponsored: true });
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     }
@@ -164,19 +202,38 @@ export default function OnboardPage() {
             </p>
           )}
         </div>
+
+        <label className="flex items-center gap-2 text-sm pt-1">
+          <input
+            type="checkbox"
+            checked={useSponsored}
+            onChange={(e) => {
+              setUseSponsored(e.target.checked);
+              reset();
+            }}
+            className="rounded"
+            disabled={state.kind === "submitting" || state.kind === "requesting_attestation"}
+          />
+          <span>
+            Use sponsored gas <span className="text-emerald-600 text-xs font-medium">(recommended — no SUI needed)</span>
+          </span>
+        </label>
       </section>
 
       <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-3">
         <div>
           <p className="text-xs uppercase tracking-wide text-gray-500">Step 3</p>
-          <p className="text-sm font-medium">Attestation + on-chain register</p>
+          <p className="text-sm font-medium">
+            {useSponsored ? "Sign + submit (suiqr pays gas)" : "Attest + sign + submit"}
+          </p>
         </div>
 
-        <AttestationFlow
+        <SubmitFlow
           state={state}
           ready={ready}
-          onRequest={requestAttestation}
-          onSubmit={submitRegistration}
+          useSponsored={useSponsored}
+          onStandard={handleStandard}
+          onSponsored={handleSponsored}
         />
       </section>
 
@@ -189,31 +246,38 @@ export default function OnboardPage() {
           on {SUIQR.network}
         </p>
         <p>
-          V0 auto-issues attestations for any well-shaped UEN. Production gates
-          this behind SGQR-photo + BizFile+ review (or a NETS-controlled signer).
+          Sponsored gas covers up to 5 onboarding txs per wallet per day on
+          testnet. V0 auto-issues attestations; production gates this behind
+          SGQR-photo + BizFile+ review.
         </p>
       </footer>
     </main>
   );
 }
 
-function AttestationFlow({
+function SubmitFlow({
   state,
   ready,
-  onRequest,
-  onSubmit,
+  useSponsored,
+  onStandard,
+  onSponsored,
 }: {
   state: State;
   ready: boolean;
-  onRequest: () => void;
-  onSubmit: () => void;
+  useSponsored: boolean;
+  onStandard: () => void;
+  onSponsored: () => void;
 }) {
   if (state.kind === "error") {
     return (
       <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-900/20 p-3 text-sm">
         <p className="font-medium text-red-700 dark:text-red-300">Error</p>
         <p className="mt-1 text-xs text-red-700 dark:text-red-300 break-words">{state.message}</p>
-        <button type="button" onClick={onRequest} className="text-xs underline mt-2">
+        <button
+          type="button"
+          onClick={useSponsored ? onSponsored : onStandard}
+          className="text-xs underline mt-2"
+        >
           Try again
         </button>
       </div>
@@ -224,7 +288,14 @@ function AttestationFlow({
     return (
       <div className="space-y-2">
         <div className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 p-3 text-sm">
-          <p className="font-medium">✓ Registered on testnet.</p>
+          <p className="font-medium">
+            ✓ Registered on testnet
+            {state.sponsored && (
+              <span className="ml-2 text-xs font-normal text-emerald-700 dark:text-emerald-300">
+                · sponsor paid gas
+              </span>
+            )}
+          </p>
           <p className="mt-1 text-xs">
             tx{" "}
             <a
@@ -247,45 +318,29 @@ function AttestationFlow({
     );
   }
 
-  if (state.kind === "attestation_ready") {
-    const a = state.attestation;
-    return (
-      <div className="space-y-3">
-        <div className="rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-900/10 p-3 text-xs space-y-1 font-mono">
-          <p className="font-medium text-sm font-sans">Attestation ready</p>
-          <p>nonce: {a.nonce_hex.slice(0, 16)}…</p>
-          <p>sig: {a.attestation_hex.slice(0, 16)}…</p>
-          <p>expires: {new Date(a.expires_at_ms).toISOString()}</p>
-          <p>issuer pubkey: {a.issuer_pubkey_hex.slice(0, 16)}…</p>
-        </div>
-        <button
-          type="button"
-          onClick={onSubmit}
-          className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-3 transition"
-        >
-          Sign + submit register_merchant
-        </button>
-      </div>
-    );
-  }
-
   if (state.kind === "requesting_attestation") {
     return <p className="text-sm text-gray-500">Asking suiqr for an attestation…</p>;
   }
   if (state.kind === "submitting") {
-    return <p className="text-sm text-gray-500">Submitting register_merchant on testnet…</p>;
+    return (
+      <p className="text-sm text-gray-500">
+        {useSponsored ? "Sponsor signing + submitting…" : "Submitting register_merchant on testnet…"}
+      </p>
+    );
   }
 
   return (
     <button
       type="button"
-      onClick={onRequest}
+      onClick={useSponsored ? onSponsored : onStandard}
       disabled={!ready}
       className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-3 transition"
     >
-      Request attestation
+      {useSponsored ? "Sign + submit (sponsor pays gas)" : "Request attestation + register"}
       <span className="block text-xs font-normal opacity-80 mt-0.5">
-        suiqr signs (ed25519) → you submit register_merchant
+        {useSponsored
+          ? "POST /api/sponsor/register → wallet signs bytes → executeTransactionBlock"
+          : "POST /api/attest → wallet signs register_merchant → wallet pays gas"}
       </span>
     </button>
   );
@@ -295,8 +350,16 @@ function hexToBytes(hex: string): Uint8Array {
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
   if (clean.length % 2 !== 0) throw new Error(`hex length ${clean.length} is not even`);
   const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-  }
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   return out;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  if (typeof window !== "undefined" && typeof window.atob === "function") {
+    const s = window.atob(b64);
+    const out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+  return Uint8Array.from(Buffer.from(b64, "base64"));
 }
