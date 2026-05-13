@@ -1,20 +1,39 @@
 "use client";
 
+import { useSuiClient } from "@mysten/dapp-kit";
 import { decodeJwt } from "@mysten/sui/zklogin";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
-import { useZkLoginSession } from "@/lib/zklogin";
-import { objectUrl } from "@/lib/sui-config";
+import { fetchMerchantProfile, getEntriesTableId } from "@/lib/quay";
+import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
+import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
+import {
+  buildMerchantProfileBytes,
+  LEGACY_RECEIVE_TOKEN,
+  RECEIVE_TOKEN_OPTIONS,
+  type SupportedReceiveToken,
+} from "@/lib/walrus/profileSchema";
+import { useZkLoginSession, zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
+
+function receiveLabel(token: SupportedReceiveToken): string {
+  const opt = RECEIVE_TOKEN_OPTIONS.find((o) => o.type === token);
+  return opt?.label ?? token;
+}
 
 export default function WalletPage() {
   const { session, hydrated, signOut } = useZkLoginSession();
   const router = useRouter();
 
-  if (hydrated && !session) {
-    if (typeof window !== "undefined") {
+  useEffect(() => {
+    if (hydrated && !session) {
       router.replace("/merchant/login?next=/merchant/wallet");
     }
+  }, [hydrated, session, router]);
+
+  if (hydrated && !session) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
         <p className="text-sm text-gray-500">Redirecting to sign-in…</p>
@@ -53,6 +72,8 @@ export default function WalletPage() {
           and your wallet is there.
         </p>
       </header>
+
+      <SettlementPreferenceSection session={session} />
 
       <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-2">
         <p className="text-xs uppercase tracking-wide text-gray-500">Identity</p>
@@ -128,4 +149,313 @@ export default function WalletPage() {
       </section>
     </main>
   );
+}
+
+// ─── Settlement preference section ──────────────────────────────────────
+
+interface MerchantUenRow {
+  uen: string;
+  metadataBlobId: string | null;
+}
+
+interface MerchantRegisteredEvent {
+  uen_hash: number[];
+  sui_address: string;
+  timestamp_ms: string;
+}
+
+function useMerchantUenRows(address: string | undefined) {
+  const sui = useSuiClient();
+  return useQuery<MerchantUenRow[]>({
+    queryKey: ["merchant-uens-wallet", address],
+    queryFn: async () => {
+      if (!address) return [];
+      const tableId = await getEntriesTableId(sui, QUAY.registryId);
+      const events = await sui.queryEvents({
+        query: { MoveEventType: `${QUAY.packageId}::payments::MerchantRegistered` },
+        order: "descending",
+        limit: 100,
+      });
+      const mine = events.data.filter(
+        (e) => (e.parsedJson as MerchantRegisteredEvent | undefined)?.sui_address === address,
+      );
+      const rows = await Promise.all(
+        mine.map(async (e) => {
+          const ev = e.parsedJson as MerchantRegisteredEvent;
+          try {
+            const field = await sui.getDynamicFieldObject({
+              parentId: tableId,
+              name: { type: "vector<u8>", value: ev.uen_hash },
+            });
+            const content = field.data?.content;
+            if (!content || content.dataType !== "moveObject") return null;
+            const fields = (content.fields as { value?: { fields?: Record<string, unknown> } })
+              .value?.fields;
+            if (!fields) return null;
+            const uenRaw = fields.uen_raw;
+            let uen: string | null = null;
+            if (Array.isArray(uenRaw)) uen = new TextDecoder().decode(new Uint8Array(uenRaw as number[]));
+            else if (typeof uenRaw === "string") uen = uenRaw;
+            if (!uen) return null;
+            const meta = fields.metadata_uri;
+            const metadataBlobId = typeof meta === "string" && meta.length > 0 ? meta : null;
+            return { uen, metadataBlobId };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      return rows.filter((x): x is MerchantUenRow => x !== null);
+    },
+    enabled: !!address,
+    staleTime: 10_000,
+  });
+}
+
+type SaveState =
+  | { kind: "idle" }
+  | { kind: "uploading" }
+  | { kind: "sponsoring" }
+  | { kind: "signing" }
+  | { kind: "executing" }
+  | { kind: "success"; digest: string }
+  | { kind: "error"; message: string };
+
+function SettlementPreferenceSection({ session }: { session: ZkLoginSession }) {
+  const uensQ = useMerchantUenRows(session.address);
+  const uens = uensQ.data ?? [];
+
+  return (
+    <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
+      <div>
+        <p className="text-xs uppercase tracking-wide text-gray-500">Settlement preference</p>
+        <p className="text-[11px] text-gray-500 mt-0.5">
+          Choose the token Quay delivers when a payer scans your SGQR. Payers
+          can pay in anything — the aggregator handles the conversion.
+        </p>
+      </div>
+      {uensQ.isLoading ? (
+        <p className="text-xs text-gray-500">Loading your registered UENs…</p>
+      ) : uens.length === 0 ? (
+        <p className="text-sm text-gray-500">
+          You haven&apos;t claimed any UENs yet.{" "}
+          <Link href="/merchant/onboard" className="text-blue-600 hover:underline">
+            Onboard one →
+          </Link>
+        </p>
+      ) : (
+        <ul className="space-y-3">
+          {uens.map((row) => (
+            <UenPreferenceRow key={row.uen} row={row} session={session} onSaved={() => uensQ.refetch()} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function UenPreferenceRow({
+  row,
+  session,
+  onSaved,
+}: {
+  row: MerchantUenRow;
+  session: ZkLoginSession;
+  onSaved: () => void;
+}) {
+  const sui = useSuiClient();
+  const [editing, setEditing] = useState(false);
+  const [chosen, setChosen] = useState<SupportedReceiveToken | null>(null);
+  const [save, setSave] = useState<SaveState>({ kind: "idle" });
+
+  const profileQ = useQuery({
+    queryKey: ["merchant-profile", row.metadataBlobId],
+    queryFn: () => fetchMerchantProfile(row.metadataBlobId),
+    enabled: !!row.metadataBlobId,
+    staleTime: 30_000,
+  });
+
+  const current = profileQ.data?.receiveToken ?? LEGACY_RECEIVE_TOKEN;
+  const logoBlobId = profileQ.data?.logoBlobId ?? null;
+  const merchantName = profileQ.data?.merchantName;
+
+  async function handleSave(newToken: SupportedReceiveToken) {
+    if (newToken === current) {
+      setEditing(false);
+      return;
+    }
+    setSave({ kind: "uploading" });
+    try {
+      // 1. Build the new v1 profile blob — preserve existing logo + name.
+      const newBytes = buildMerchantProfileBytes({
+        logoBlobId,
+        preferredReceiveToken: newToken,
+        merchantName,
+      });
+      let newBlobId: string;
+      try {
+        const upload = await uploadBlob(newBytes);
+        newBlobId = upload.blobId;
+      } catch (e) {
+        const why = e instanceof WalrusUploadError ? e.message : String(e);
+        throw new Error(`Walrus upload failed: ${why}`);
+      }
+
+      // 2. Ask the sponsor endpoint to build + co-sign the update tx.
+      setSave({ kind: "sponsoring" });
+      const res = await fetch("/api/sponsor/update-metadata", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          uen: row.uen,
+          owner: session.address,
+          new_metadata_blob_id: newBlobId,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error ?? `sponsor HTTP ${res.status}`);
+      }
+      const sp = (await res.json()) as {
+        tx_bytes_b64: string;
+        sponsor_signature: string;
+      };
+
+      // 3. Sign the tx bytes as the merchant via zkLogin.
+      setSave({ kind: "signing" });
+      const txBytes = base64ToBytes(sp.tx_bytes_b64);
+      const senderSig = await zkLoginSign(session, txBytes);
+
+      // 4. Submit with both signatures.
+      setSave({ kind: "executing" });
+      const result = await sui.executeTransactionBlock({
+        transactionBlock: txBytes,
+        signature: [senderSig, sp.sponsor_signature],
+        options: { showEffects: true },
+      });
+      const status = result.effects?.status?.status;
+      if (status !== "success") {
+        throw new Error(result.effects?.status?.error ?? "tx failed");
+      }
+      await sui.waitForTransaction({ digest: result.digest });
+      setSave({ kind: "success", digest: result.digest });
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      setSave({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return (
+    <li className="rounded border border-gray-100 dark:border-gray-800 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-sm">{row.uen}</p>
+          <p className="text-[11px] text-gray-500">
+            Currently receiving in <span className="text-gray-700 dark:text-gray-300 font-medium">{receiveLabel(current)}</span>
+          </p>
+        </div>
+        {!editing && (
+          <button
+            type="button"
+            onClick={() => {
+              setChosen(current);
+              setEditing(true);
+              setSave({ kind: "idle" });
+            }}
+            className="text-xs px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 shrink-0"
+          >
+            Change
+          </button>
+        )}
+      </div>
+
+      {editing && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            {RECEIVE_TOKEN_OPTIONS.map((opt) => {
+              const selected = chosen === opt.type;
+              return (
+                <button
+                  key={opt.type}
+                  type="button"
+                  onClick={() => setChosen(opt.type)}
+                  disabled={save.kind !== "idle" && save.kind !== "error"}
+                  className={`rounded border px-3 py-2 text-left transition disabled:opacity-50 ${
+                    selected
+                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
+                      : "border-gray-200 dark:border-gray-700 hover:border-gray-400"
+                  }`}
+                >
+                  <p className="text-sm font-medium">{opt.label}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{opt.description}</p>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => chosen && handleSave(chosen)}
+              disabled={!chosen || chosen === current || (save.kind !== "idle" && save.kind !== "error")}
+              className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {save.kind === "idle" || save.kind === "error"
+                ? "Save"
+                : save.kind === "uploading"
+                ? "Uploading profile…"
+                : save.kind === "sponsoring"
+                ? "Sponsor signing…"
+                : save.kind === "signing"
+                ? "zkLogin signing…"
+                : save.kind === "executing"
+                ? "Submitting…"
+                : "Saved"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setSave({ kind: "idle" });
+              }}
+              disabled={save.kind !== "idle" && save.kind !== "error"}
+              className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+          {save.kind === "error" && (
+            <p className="text-[11px] text-red-500 break-words">Error: {save.message}</p>
+          )}
+          <p className="text-[10px] text-gray-500">
+            Quay pays the testnet gas via the sponsor wallet — you don&apos;t need any SUI.
+          </p>
+        </div>
+      )}
+
+      {save.kind === "success" && !editing && (
+        <p className="text-[11px] text-green-600">
+          Saved · tx{" "}
+          <a
+            href={txUrl(save.digest)}
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono hover:underline"
+          >
+            {save.digest.slice(0, 10)}…{save.digest.slice(-6)} ↗
+          </a>
+        </p>
+      )}
+    </li>
+  );
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  if (typeof window !== "undefined" && typeof window.atob === "function") {
+    const s = window.atob(b64);
+    const out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+  return Uint8Array.from(Buffer.from(b64, "base64"));
 }

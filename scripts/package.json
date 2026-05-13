@@ -6,6 +6,7 @@
     "day0": "bun run day0-validate.ts"
   },
   "dependencies": {
+    "@cetusprotocol/aggregator-sdk": "^1.5.3",
     "@mysten/sui": "^2.16.2",
     "@mysten/zklogin": "^0.8.1",
     "@noble/hashes": "^2.2.0"

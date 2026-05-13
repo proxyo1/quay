@@ -7,54 +7,112 @@ import {
   useSuiClient,
 } from "@mysten/dapp-kit";
 import { blake2b } from "@noble/hashes/blake2.js";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   PYTH_FEEDS,
   PYTH_FEED_LABELS,
   formatSgd,
-  formatSui,
   quoteSgdToSui,
   STALE_THRESHOLD_SECONDS,
   usePythPrices,
 } from "@/lib/pyth";
 import { sanitizeMerchantName } from "@/lib/sgqr";
 import { encodeV2 } from "@/lib/sgqr/quote-metadata";
-import { buildPaySuiTx, deriveUenHash, encodeQuoteMetadata } from "@/lib/quay";
-import { COIN_TYPES } from "@/lib/quay/pay";
+import {
+  buildPayAnyTokenPtb,
+  buildPaySuiTx,
+  COIN_TYPES,
+  deriveUenHash,
+  encodeQuoteMetadata,
+} from "@/lib/quay";
+import { getDexClients } from "@/lib/dex/client";
+import { AggregatorRouteError } from "@/lib/dex/aggregator";
+import { formatBalance, useUserBalances, type UserBalance } from "@/lib/dex/balances";
+import { type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
 import { txUrl } from "@/lib/sui-config";
 
-type PayPhase = "uploading-receipt" | "awaiting-signature";
+type PayPhase = "uploading-receipt" | "quoting-route" | "awaiting-signature";
 
 type PayState =
   | { kind: "idle" }
   | { kind: "submitting"; phase: PayPhase }
-  | { kind: "success"; digest: string; blobId?: string }
+  | { kind: "success"; digest: string; blobId?: string; routedVia: "direct" | "aggregator" }
   | { kind: "error"; message: string };
+
+/**
+ * Display labels + decimals for the merchant's RECEIVE token. Only the curated
+ * settlement set needs to live here (SUI + USDC for V0). The payer side uses
+ * dynamic metadata fetched per-token via `useUserBalances`.
+ */
+const RECEIVE_DECIMALS: Record<SupportedReceiveToken, number> = {
+  [COIN_TYPES.SUI]: 9,
+  [COIN_TYPES.USDC_TESTNET]: 6,
+};
+
+const RECEIVE_LABEL: Record<SupportedReceiveToken, string> = {
+  [COIN_TYPES.SUI]: "SUI",
+  [COIN_TYPES.USDC_TESTNET]: "USDC",
+};
 
 export function PayPanel({
   merchantAddress,
   merchantName,
+  merchantReceiveType,
   uen,
 }: {
   merchantAddress: string;
   merchantName?: string;
+  /** Token the merchant wants to receive — read from their Walrus profile. */
+  merchantReceiveType: SupportedReceiveToken;
   uen: string;
 }) {
   const [sgdInput, setSgdInput] = useState("3.50");
   const [memo, setMemo] = useState("");
+  /**
+   * Payer-side token type. Any Sui Move type the wallet holds, not constrained
+   * to the merchant-side curated list. Default lands on the merchant's
+   * receive token if the user holds it; otherwise their largest balance.
+   */
+  const [payerCoinType, setPayerCoinType] = useState<string>(merchantReceiveType);
   const [pay, setPay] = useState<PayState>({ kind: "idle" });
 
   const account = useCurrentAccount();
   const sui = useSuiClient();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
+  const dexClients = useMemo(() => getDexClients(sui), [sui]);
+  const balancesQ = useUserBalances(account?.address);
+  const balances = balancesQ.data ?? [];
+
+  /**
+   * Default payer selection rule (re-applied when balances load or the wallet
+   * changes): pick the merchant's preferred token when the user holds it;
+   * otherwise the largest balance the user has. This keeps the happy path
+   * "direct transfer, no routing fee" for users whose wallet matches.
+   */
+  useEffect(() => {
+    if (balances.length === 0) return;
+    const matching = balances.find((b) => b.coinType === merchantReceiveType);
+    const target = matching ?? balances[0];
+    // Only auto-switch if the user hasn't picked something that's still in
+    // their balance list — avoid clobbering an intentional pick on refetch.
+    if (!balances.some((b) => b.coinType === payerCoinType)) {
+      setPayerCoinType(target.coinType);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balancesQ.data, merchantReceiveType]);
+
+  const payerBalance = balances.find((b) => b.coinType === payerCoinType);
+  const payerLabel = payerBalance?.symbol ?? RECEIVE_LABEL[payerCoinType as SupportedReceiveToken] ?? shortType(payerCoinType);
+
   const feeds = useMemo(() => [PYTH_FEEDS.USD_SGD, PYTH_FEEDS.SUI_USD], []);
   const pricesQ = usePythPrices(feeds);
 
   const sgdMinorUnits = useMemo(() => parseSgdInput(sgdInput), [sgdInput]);
 
-  const quote = useMemo(() => {
+  /** Quote in SUI terms (preserved for the existing rate display). */
+  const suiQuote = useMemo(() => {
     if (!pricesQ.data || sgdMinorUnits <= 0) return null;
     const usdSgd = pricesQ.data.get(PYTH_FEEDS.USD_SGD);
     const suiUsd = pricesQ.data.get(PYTH_FEEDS.SUI_USD);
@@ -62,26 +120,60 @@ export function PayPanel({
     return quoteSgdToSui({ sgdMinorUnits, usdSgd, suiUsd });
   }, [pricesQ.data, sgdMinorUnits]);
 
+  /**
+   * The amount the merchant must receive in `merchantReceiveType`, in the
+   * token's smallest units. For SUI this is MIST (1e9). For USDC this is
+   * micro-USDC (1e6) computed from SGD via Pyth USD/SGD (USDC ≈ 1 USD).
+   */
+  const outputAmount = useMemo<bigint | null>(() => {
+    if (!pricesQ.data || sgdMinorUnits <= 0) return null;
+    if (merchantReceiveType === COIN_TYPES.SUI) {
+      return suiQuote?.suiMist ?? null;
+    }
+    if (merchantReceiveType === COIN_TYPES.USDC_TESTNET) {
+      const usdSgd = pricesQ.data.get(PYTH_FEEDS.USD_SGD);
+      if (!usdSgd) return null;
+      // usdSgd is "USD per 1 SGD" (e.g., ~0.74). USDC ≈ USD.
+      // outputUsdcMicro = (sgdMinor / 100) * usdPerSgd * 1e6
+      //                 = sgdMinor * usdPerSgd * 10_000
+      // Use raw price/expo math to avoid Number precision loss on big amounts.
+      const usdPerSgdScaled = BigInt(usdSgd.rawPrice); // signed in SDK; raw is u64
+      const expo = usdSgd.expo; // typically negative
+      // outputUsdcMicro = sgdMinor * (rawPrice * 10^expo) * 10_000
+      // Rearrange to integer math: multiply by 10^(4 + max(0, -expo)) then divide by 10^max(0, -expo).
+      const negExpo = expo < 0 ? -expo : 0;
+      const num = BigInt(sgdMinorUnits) * usdPerSgdScaled * 10_000n;
+      const denom = 10n ** BigInt(negExpo);
+      const out = num / denom;
+      return out > 0n ? out : null;
+    }
+    return null;
+  }, [pricesQ.data, sgdMinorUnits, merchantReceiveType, suiQuote]);
+
+  const isDirect = payerCoinType === merchantReceiveType;
   const safeName = sanitizeMerchantName(merchantName) || "merchant";
-  const stale = quote != null && quote.maxAgeSeconds > STALE_THRESHOLD_SECONDS;
+  const stale = suiQuote != null && suiQuote.maxAgeSeconds > STALE_THRESHOLD_SECONDS;
   const canPay =
     !!account &&
-    quote != null &&
-    quote.suiMist > 0n &&
+    outputAmount != null &&
+    outputAmount > 0n &&
     pay.kind !== "submitting" &&
     !stale;
 
   async function handlePay() {
-    if (!quote || !pricesQ.data || !account) return;
-    setPay({ kind: "submitting", phase: "uploading-receipt" });
+    if (!outputAmount || !pricesQ.data || !account) return;
+    setPay({ kind: "submitting", phase: isDirect ? "uploading-receipt" : "quoting-route" });
     try {
       const usdSgd = pricesQ.data.get(PYTH_FEEDS.USD_SGD)!;
       const suiUsd = pricesQ.data.get(PYTH_FEEDS.SUI_USD)!;
 
+      // Pyth quote envelope — same shape as before, with a small `dex` field
+      // appended so the on-chain receipt records the routing path. The hard
+      // 2 KB cap in `encodeQuoteMetadata` keeps this from bloating.
       const v1Quote = {
         v: 1,
         src: "pyth-hermes",
-        sgd_minor: quote.sgdMinorUnits,
+        sgd_minor: sgdMinorUnits,
         usd_sgd_id: PYTH_FEEDS.USD_SGD,
         usd_sgd_price: usdSgd.rawPrice,
         usd_sgd_expo: usdSgd.expo,
@@ -90,64 +182,130 @@ export function PayPanel({
         sui_usd_price: suiUsd.rawPrice,
         sui_usd_expo: suiUsd.expo,
         sui_usd_publish_time: suiUsd.publishTime,
-        mist: quote.suiMist.toString(),
+        out_token: merchantReceiveType,
+        out_amount: outputAmount.toString(),
+        dex: {
+          venue: isDirect ? "direct" : "cetus-aggregator",
+          payer_token: payerCoinType,
+          slippage_bps: 100,
+        },
       };
       const v1Bytes = encodeQuoteMetadata(v1Quote);
 
-      const predictedTimestampMs = Date.now();
-      const receiptIdHex = predictReceiptIdHex({
-        uen,
-        payer: account.address,
-        timestampMs: predictedTimestampMs,
-        amount: quote.suiMist,
-      });
+      // ─── Direct payment path: same-token. Walrus receipt pre-upload works
+      // because the on-chain `coin.value()` is exactly `outputAmount`.
+      if (isDirect && merchantReceiveType === COIN_TYPES.SUI) {
+        const predictedTimestampMs = Date.now();
+        const receiptIdHex = predictReceiptIdHex({
+          uen,
+          payer: account.address,
+          timestampMs: predictedTimestampMs,
+          amount: outputAmount,
+        });
 
-      const receiptReq = {
-        receipt_id_hex: receiptIdHex,
-        payer: account.address,
-        merchant: merchantAddress,
-        uen_raw: uen,
-        amount: quote.suiMist.toString(),
-        token_type: COIN_TYPES.SUI,
-        sgd_minor_units: quote.sgdMinorUnits,
-        timestamp_ms: predictedTimestampMs,
-        quote: {
-          feed: PYTH_FEEDS.SUI_USD,
-          price_usd: quote.usd.toFixed(6),
-          sgd_per_usd: quote.rates.sgdPerUsd.toFixed(6),
-        },
-        memo: memo.trim() || undefined,
-      };
+        const receiptReq = {
+          receipt_id_hex: receiptIdHex,
+          payer: account.address,
+          merchant: merchantAddress,
+          uen_raw: uen,
+          amount: outputAmount.toString(),
+          token_type: merchantReceiveType,
+          sgd_minor_units: sgdMinorUnits,
+          timestamp_ms: predictedTimestampMs,
+          quote: {
+            feed: PYTH_FEEDS.SUI_USD,
+            price_usd: suiQuote?.usd.toFixed(6) ?? "0",
+            sgd_per_usd: suiQuote?.rates.sgdPerUsd.toFixed(6) ?? "0",
+          },
+          memo: memo.trim() || undefined,
+        };
 
-      const upRes = await fetch("/api/receipts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(receiptReq),
-      });
-      if (!upRes.ok) {
-        const err = await upRes
-          .json()
-          .catch(() => ({ error: `HTTP ${upRes.status}` }));
-        throw new Error(`receipt prep failed: ${err.error ?? `HTTP ${upRes.status}`}`);
+        const upRes = await fetch("/api/receipts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(receiptReq),
+        });
+        if (!upRes.ok) {
+          const err = await upRes
+            .json()
+            .catch(() => ({ error: `HTTP ${upRes.status}` }));
+          throw new Error(`receipt prep failed: ${err.error ?? `HTTP ${upRes.status}`}`);
+        }
+        const { blob_id: blobId } = (await upRes.json()) as { blob_id: string };
+
+        const v2Bytes = encodeV2(v1Bytes, blobId);
+
+        setPay({ kind: "submitting", phase: "awaiting-signature" });
+        const tx = buildPaySuiTx({
+          uen,
+          mistAmount: outputAmount,
+          sgdMinorUnits,
+          memo: memo.trim() || undefined,
+          quoteMetadata: v2Bytes,
+        });
+        const result = await signAndExecute({ transaction: tx });
+        await sui.waitForTransaction({ digest: result.digest });
+        setPay({ kind: "success", digest: result.digest, blobId, routedVia: "direct" });
+        return;
       }
-      const { blob_id: blobId } = (await upRes.json()) as { blob_id: string };
 
-      const v2Bytes = encodeV2(v1Bytes, blobId);
+      // ─── Generic path: direct USDC, or aggregator-routed swap.
+      // Walrus receipt pre-upload is skipped for aggregator paths because the
+      // delivered amount can vary with positive slippage; the on-chain
+      // PaymentReceipt still carries full Pyth metadata + the dex breadcrumb.
+      //
+      // Resolve the source-coin reference:
+      //   * SUI input → "gas" sentinel (dapp-kit fills in the wallet's gas
+      //     coin at sign time; buildPayAnyTokenPtb splits from tx.gas).
+      //   * Non-SUI input → pick the user's largest Coin<T> object id and
+      //     pass it in. If the user has zero balance of that token, bail
+      //     before constructing the PTB.
+      let payerCoinSource: "gas" | { objectId: string };
+      if (payerCoinType === COIN_TYPES.SUI) {
+        payerCoinSource = "gas";
+      } else {
+        const coins = await sui.getCoins({
+          owner: account.address,
+          coinType: payerCoinType,
+        });
+        if (coins.data.length === 0) {
+          throw new Error(`No ${payerLabel} coins in your wallet.`);
+        }
+        // Pick the largest balance to maximize the chance the split succeeds.
+        const largest = coins.data.reduce((a, b) =>
+          BigInt(a.balance) >= BigInt(b.balance) ? a : b,
+        );
+        payerCoinSource = { objectId: largest.coinObjectId };
+      }
 
-      setPay({ kind: "submitting", phase: "awaiting-signature" });
-      const tx = buildPaySuiTx({
+      const built = await buildPayAnyTokenPtb({
+        cetus: dexClients.cetusAggregator,
         uen,
-        mistAmount: quote.suiMist,
-        sgdMinorUnits: quote.sgdMinorUnits,
+        payerCoinType,
+        merchantReceiveType,
+        payerCoinSource,
+        outputAmount,
+        sgdMinorUnits,
         memo: memo.trim() || undefined,
-        quoteMetadata: v2Bytes,
+        quoteMetadata: v1Bytes,
       });
-      const result = await signAndExecute({
-        transaction: tx,
-      });
+      setPay({ kind: "submitting", phase: "awaiting-signature" });
+      const result = await signAndExecute({ transaction: built.tx });
       await sui.waitForTransaction({ digest: result.digest });
-      setPay({ kind: "success", digest: result.digest, blobId });
+      setPay({
+        kind: "success",
+        digest: result.digest,
+        routedVia: built.routedVia,
+      });
+      return;
     } catch (e) {
+      if (e instanceof AggregatorRouteError) {
+        setPay({
+          kind: "error",
+          message: `${e.message}. Try a different source token or swap on Cetus first.`,
+        });
+        return;
+      }
       setPay({
         kind: "error",
         message: e instanceof Error ? e.message : String(e),
@@ -166,6 +324,10 @@ export function PayPanel({
         <h2 className="text-2xl font-semibold tracking-tight">Pay {safeName}</h2>
         <p className="text-[11px] font-mono text-neutral-500">
           UEN {uen} → {merchantAddress.slice(0, 6)}…{merchantAddress.slice(-4)}
+        </p>
+        <p className="text-[11px] text-neutral-400 mt-1.5">
+          Merchant receives in{" "}
+          <span className="text-white font-medium">{RECEIVE_LABEL[merchantReceiveType]}</span>
         </p>
       </header>
 
@@ -192,6 +354,17 @@ export function PayPanel({
         </div>
       </div>
 
+      {account && (
+        <SourceTokenPicker
+          balances={balances}
+          balancesLoading={balancesQ.isLoading}
+          merchantReceiveType={merchantReceiveType}
+          value={payerCoinType}
+          onChange={setPayerCoinType}
+          disabled={pay.kind === "submitting"}
+        />
+      )}
+
       <div className="space-y-1.5">
         <label htmlFor="memo" className="block text-[11px] uppercase tracking-wider text-neutral-500">
           Memo <span className="normal-case text-neutral-600">(optional, on-chain)</span>
@@ -211,8 +384,16 @@ export function PayPanel({
       <QuoteDisplay
         loading={pricesQ.isLoading}
         error={pricesQ.error}
-        quote={quote}
+        quote={suiQuote}
         stale={stale}
+      />
+
+      <PreSignReceipt
+        sgdMinorUnits={sgdMinorUnits}
+        outputAmount={outputAmount}
+        merchantReceiveType={merchantReceiveType}
+        payerLabel={payerLabel}
+        isDirect={isDirect}
       />
 
       {!account ? (
@@ -221,7 +402,12 @@ export function PayPanel({
           <ConnectButton />
         </div>
       ) : (
-        <PayButton state={pay} quote={quote} canPay={canPay} onClick={handlePay} />
+        <PayButton
+          state={pay}
+          sgdMinorUnits={sgdMinorUnits}
+          canPay={canPay}
+          onClick={handlePay}
+        />
       )}
 
       <PayResult state={pay} />
@@ -229,14 +415,135 @@ export function PayPanel({
   );
 }
 
+function SourceTokenPicker({
+  balances,
+  balancesLoading,
+  merchantReceiveType,
+  value,
+  onChange,
+  disabled,
+}: {
+  balances: UserBalance[];
+  balancesLoading: boolean;
+  merchantReceiveType: SupportedReceiveToken;
+  value: string;
+  onChange: (next: string) => void;
+  disabled: boolean;
+}) {
+  if (balancesLoading) {
+    return (
+      <div className="space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
+          Pay from
+        </label>
+        <p className="text-xs text-neutral-500">Reading wallet balances…</p>
+      </div>
+    );
+  }
+  if (balances.length === 0) {
+    return (
+      <div className="space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
+          Pay from
+        </label>
+        <p className="text-xs text-amber-400">
+          Your wallet has no balances on this network. Fund some SUI to start.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
+        Pay from
+      </label>
+      <ul className="space-y-1" role="radiogroup" aria-label="Source token">
+        {balances.map((b) => {
+          const selected = value === b.coinType;
+          const direct = b.coinType === merchantReceiveType;
+          return (
+            <li key={b.coinType}>
+              <button
+                type="button"
+                onClick={() => onChange(b.coinType)}
+                disabled={disabled}
+                role="radio"
+                aria-checked={selected}
+                className={`w-full flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition disabled:opacity-50 ${
+                  selected
+                    ? "border-[var(--accent)] bg-[var(--accent)]/[0.08] text-white"
+                    : "border-white/10 bg-black/20 text-neutral-300 hover:border-white/25"
+                }`}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="text-sm font-medium">{b.symbol}</span>
+                  {direct && (
+                    <span className="text-[10px] uppercase tracking-wider text-[var(--success)]">
+                      direct
+                    </span>
+                  )}
+                </span>
+                <span className="text-xs tabular-nums text-neutral-400 shrink-0">
+                  {formatBalance(b.balance, b.decimals)}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[10px] text-neutral-500">
+        Direct = no routing fee. Other tokens route via Cetus Aggregator.
+      </p>
+    </div>
+  );
+}
+
+function PreSignReceipt({
+  sgdMinorUnits,
+  outputAmount,
+  merchantReceiveType,
+  payerLabel,
+  isDirect,
+}: {
+  sgdMinorUnits: number;
+  outputAmount: bigint | null;
+  merchantReceiveType: SupportedReceiveToken;
+  payerLabel: string;
+  isDirect: boolean;
+}) {
+  if (sgdMinorUnits <= 0 || !outputAmount) return null;
+  const outFormatted = formatTokenAmount(outputAmount, merchantReceiveType);
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3 space-y-1.5 text-xs">
+      <p className="text-[11px] uppercase tracking-wider text-[var(--accent)]">Before you sign</p>
+      <div className="flex items-center justify-between">
+        <span className="text-neutral-400">Merchant receives</span>
+        <span className="font-medium tabular-nums text-white">
+          {outFormatted} {RECEIVE_LABEL[merchantReceiveType]}
+        </span>
+      </div>
+      <div className="flex items-center justify-between text-neutral-500">
+        <span>You pay from</span>
+        <span className="text-white">{payerLabel}</span>
+      </div>
+      <div className="flex items-center justify-between text-neutral-500 pt-1.5 border-t border-white/5">
+        <span>Route</span>
+        <span className={isDirect ? "text-[var(--success)]" : "text-[var(--accent)]"}>
+          {isDirect ? "Direct transfer (no routing fee)" : "Cetus Aggregator (≤1% slippage)"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function PayButton({
   state,
-  quote,
+  sgdMinorUnits,
   canPay,
   onClick,
 }: {
   state: PayState;
-  quote: ReturnType<typeof quoteSgdToSui> | null;
+  sgdMinorUnits: number;
   canPay: boolean;
   onClick: () => void;
 }) {
@@ -245,6 +552,8 @@ function PayButton({
     state.kind === "submitting"
       ? state.phase === "uploading-receipt"
         ? "Preparing receipt on Walrus…"
+        : state.phase === "quoting-route"
+        ? "Quoting route on Cetus Aggregator…"
         : "Awaiting wallet signature…"
       : null;
   return (
@@ -258,14 +567,9 @@ function PayButton({
         <span className="flex items-center gap-2">
           <Spinner /> {phaseLabel}
         </span>
-      ) : quote ? (
+      ) : sgdMinorUnits > 0 ? (
         <>
-          <span className="flex flex-col items-start text-left">
-            <span>Pay {formatSgd(quote.sgd)}</span>
-            <span className="text-[11px] font-normal text-white/70 group-hover:text-white transition">
-              ≈ {formatSui(quote.sui)} · Walrus receipt
-            </span>
-          </span>
+          <span>Pay {formatSgd(sgdMinorUnits / 100)}</span>
           <span className="text-white/70 group-hover:text-white transition">→</span>
         </>
       ) : (
@@ -284,7 +588,7 @@ function PayResult({ state }: { state: PayState }) {
           <span className="text-[var(--success)]">
             <CheckIcon />
           </span>
-          Paid on testnet
+          Paid on testnet · {state.routedVia === "direct" ? "direct transfer" : "via Cetus Aggregator"}
         </p>
         <p className="text-xs text-neutral-400">
           <a
@@ -346,18 +650,9 @@ function QuoteDisplay({
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3 space-y-1.5 text-xs">
-      <div className="flex items-center justify-between">
-        <span className="text-neutral-500">≈ via Pyth oracle</span>
-        <span className="font-medium tabular-nums text-white">
-          {formatSui(quote.sui)}{" "}
-          <span className="text-neutral-500">({quote.suiMist.toString()} MIST)</span>
-        </span>
-      </div>
       <div className="flex items-center justify-between text-neutral-500">
-        <span>= ${quote.usd.toFixed(4)} USD</span>
-        <span>
-          1 USD = {quote.rates.sgdPerUsd.toFixed(4)} SGD · 1 SUI = ${quote.rates.usdPerSui.toFixed(4)}
-        </span>
+        <span>1 SUI = ${quote.rates.usdPerSui.toFixed(4)} USD</span>
+        <span>1 USD = {quote.rates.sgdPerUsd.toFixed(4)} SGD</span>
       </div>
       <div className="flex items-center justify-between pt-1.5 border-t border-white/5">
         <span className="text-neutral-500">
@@ -425,6 +720,20 @@ function parseSgdInput(s: string): number {
   const n = parseFloat(s);
   if (!Number.isFinite(n) || n < 0) return 0;
   return Math.round(n * 100);
+}
+
+function formatTokenAmount(amount: bigint, token: SupportedReceiveToken): string {
+  const decimals = RECEIVE_DECIMALS[token];
+  const divisor = 10n ** BigInt(decimals);
+  const whole = amount / divisor;
+  const fraction = amount % divisor;
+  const fracStr = fraction.toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fracStr ? `${whole}.${fracStr}` : `${whole}`;
+}
+
+function shortType(coinType: string): string {
+  const idx = coinType.lastIndexOf("::");
+  return idx >= 0 ? coinType.slice(idx + 2) : coinType;
 }
 
 function predictReceiptIdHex(input: {

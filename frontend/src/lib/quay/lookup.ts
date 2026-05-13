@@ -1,6 +1,14 @@
 import { blake2b } from "@noble/hashes/blake2.js";
 import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
 
+import { fetchBlob, WalrusFetchError } from "@/lib/walrus/client";
+import {
+  LEGACY_RECEIVE_TOKEN,
+  parseMerchantProfile,
+  resolveProfile,
+  type SupportedReceiveToken,
+} from "@/lib/walrus/profileSchema";
+
 const PAYNOW_UEN_V1 = new TextEncoder().encode("PAYNOW_UEN_V1");
 
 /**
@@ -130,4 +138,67 @@ export async function lookupUen(
 
 function toHex(b: Uint8Array): string {
   return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+// ─── Merchant profile fetch ─────────────────────────────────────────────
+
+/**
+ * The resolved merchant profile that PayPanel / scan flow needs after a
+ * successful `lookupUen`. This is a thin layer on top of the Walrus profile
+ * schema that hides "v1 JSON vs legacy logo blob" from callers.
+ */
+export interface ResolvedMerchantProfile {
+  /** Walrus blob ID for the logo. May be the same blob ID as the profile
+   *  itself in legacy mode (since legacy blobs ARE the logo bytes). */
+  logoBlobId: string | null;
+  /** Token the merchant wants to receive. Falls back to SUI for legacy. */
+  receiveToken: SupportedReceiveToken;
+  /** Optional display name from v1 profile; undefined for legacy. */
+  merchantName: string | undefined;
+  /** True if the on-chain metadata pointed at a v1 JSON profile. */
+  isV1: boolean;
+}
+
+/**
+ * Resolve a merchant's profile from their on-chain `metadata_uri` blob ID.
+ *
+ * Graceful degradation: if the Walrus aggregator is unreachable or the blob
+ * is missing, we return a `null`-logo profile with the default receive
+ * token (SUI). /scan must still work even when Walrus is flaky — the
+ * payment path itself doesn't depend on the logo.
+ *
+ * Returns `null` only if `metadataBlobId` itself is `null` (merchant
+ * registered without a profile).
+ */
+export async function fetchMerchantProfile(
+  metadataBlobId: string | null,
+): Promise<ResolvedMerchantProfile | null> {
+  if (!metadataBlobId) return null;
+
+  let blobBytes: Uint8Array;
+  try {
+    blobBytes = await fetchBlob(metadataBlobId);
+  } catch (err) {
+    if (err instanceof WalrusFetchError) {
+      console.warn(
+        `[merchant-profile] Walrus fetch failed for ${metadataBlobId}: ${err.message}; defaulting to legacy`,
+      );
+      return {
+        logoBlobId: metadataBlobId,
+        receiveToken: LEGACY_RECEIVE_TOKEN,
+        merchantName: undefined,
+        isV1: false,
+      };
+    }
+    throw err;
+  }
+
+  const parsed = parseMerchantProfile(blobBytes, metadataBlobId);
+  const resolved = resolveProfile(parsed);
+  return {
+    logoBlobId: resolved.logoBlobId,
+    receiveToken: resolved.receiveToken,
+    merchantName: resolved.merchantName,
+    isV1: parsed.kind === "v1",
+  };
 }

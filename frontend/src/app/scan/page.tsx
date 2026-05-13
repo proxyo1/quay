@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 
 import { PayPanel } from "@/components/PayPanel";
 import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
+import { fetchMerchantProfile, lookupUen } from "@/lib/quay";
 import {
   extractPayNow,
   looksLikeUen,
@@ -16,6 +17,7 @@ import {
   type SgqrPayload,
 } from "@/lib/sgqr";
 import { QUAY, objectUrl } from "@/lib/sui-config";
+import { LEGACY_RECEIVE_TOKEN, type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
 
 type Source = "scan" | "manual";
 
@@ -32,7 +34,13 @@ type Input =
 type Lookup =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "registered"; address: string }
+  | {
+      kind: "registered";
+      address: string;
+      receiveToken: SupportedReceiveToken;
+      logoBlobId: string | null;
+      profileName: string | undefined;
+    }
   | { kind: "not_registered" }
   | { kind: "error"; message: string };
 
@@ -106,27 +114,28 @@ export default function ScanPage() {
     setLookup({ kind: "loading" });
     (async () => {
       try {
-        const uenBytes = new TextEncoder().encode(input.uen);
-        const result = await sui.devInspectTransactionBlock({
-          sender: account?.address ?? `0x${"0".repeat(64)}`,
-          transactionBlock: buildDevInspectQuery(uenBytes),
-        });
+        const result = await lookupUen(sui, QUAY.registryId, input.uen);
         if (cancelled) return;
-        const status = result.effects?.status?.status;
-        if (status !== "success") {
+        if (!result.claimed) {
           setLookup({ kind: "not_registered" });
           return;
         }
-        const ret = result.results?.[0]?.returnValues?.[0];
-        if (!ret) {
-          setLookup({ kind: "not_registered" });
-          return;
-        }
-        const [bytes] = ret;
-        const hex = "0x" + Array.from(bytes as number[])
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
-        setLookup({ kind: "registered", address: hex });
+        // Fetch the merchant profile (logo + preferred receive token) from
+        // Walrus. fetchMerchantProfile degrades gracefully — a Walrus failure
+        // returns a legacy profile defaulting to SUI. When the on-chain
+        // metadata_uri is `null` (legacy merchants registered before the v1
+        // schema), preserve the pre-feature behavior by defaulting to SUI.
+        const profile = await fetchMerchantProfile(result.metadataBlobId).catch(
+          () => null,
+        );
+        if (cancelled) return;
+        setLookup({
+          kind: "registered",
+          address: result.owner,
+          receiveToken: profile?.receiveToken ?? LEGACY_RECEIVE_TOKEN,
+          logoBlobId: profile?.logoBlobId ?? null,
+          profileName: profile?.merchantName,
+        });
       } catch (e) {
         if (!cancelled) {
           setLookup({ kind: "error", message: e instanceof Error ? e.message : String(e) });
@@ -136,7 +145,7 @@ export default function ScanPage() {
     return () => {
       cancelled = true;
     };
-  }, [input, sui, account?.address]);
+  }, [input, sui]);
 
   const okInput = input.kind === "ok" ? input : null;
   const merchantName = okInput?.payload?.merchantName;
@@ -225,7 +234,8 @@ export default function ScanPage() {
         lookup.kind === "registered" && (
           <PayPanel
             merchantAddress={lookup.address}
-            merchantName={merchantName}
+            merchantName={lookup.profileName ?? merchantName}
+            merchantReceiveType={lookup.receiveToken}
             uen={okInput.uen}
           />
         )}
@@ -447,14 +457,3 @@ function CheckIcon() {
   );
 }
 
-function buildDevInspectQuery(uenBytes: Uint8Array): Transaction {
-  const tx = new Transaction();
-  tx.moveCall({
-    target: `${QUAY.packageId}::payments::merchant_address`,
-    arguments: [
-      tx.object(QUAY.registryId),
-      tx.pure.vector("u8", Array.from(uenBytes)),
-    ],
-  });
-  return tx;
-}
