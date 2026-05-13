@@ -7,7 +7,7 @@ import {
   useSuiClient,
 } from "@mysten/dapp-kit";
 import { blake2b } from "@noble/hashes/blake2.js";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   PYTH_FEEDS,
@@ -28,10 +28,8 @@ import {
 } from "@/lib/quay";
 import { getDexClients } from "@/lib/dex/client";
 import { AggregatorRouteError } from "@/lib/dex/aggregator";
-import {
-  RECEIVE_TOKEN_OPTIONS,
-  type SupportedReceiveToken,
-} from "@/lib/walrus/profileSchema";
+import { formatBalance, useUserBalances, type UserBalance } from "@/lib/dex/balances";
+import { type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
 import { txUrl } from "@/lib/sui-config";
 
 type PayPhase = "uploading-receipt" | "quoting-route" | "awaiting-signature";
@@ -42,12 +40,17 @@ type PayState =
   | { kind: "success"; digest: string; blobId?: string; routedVia: "direct" | "aggregator" }
   | { kind: "error"; message: string };
 
-const COIN_DECIMALS: Record<SupportedReceiveToken, number> = {
+/**
+ * Display labels + decimals for the merchant's RECEIVE token. Only the curated
+ * settlement set needs to live here (SUI + USDC for V0). The payer side uses
+ * dynamic metadata fetched per-token via `useUserBalances`.
+ */
+const RECEIVE_DECIMALS: Record<SupportedReceiveToken, number> = {
   [COIN_TYPES.SUI]: 9,
   [COIN_TYPES.USDC_TESTNET]: 6,
 };
 
-const COIN_LABEL: Record<SupportedReceiveToken, string> = {
+const RECEIVE_LABEL: Record<SupportedReceiveToken, string> = {
   [COIN_TYPES.SUI]: "SUI",
   [COIN_TYPES.USDC_TESTNET]: "USDC",
 };
@@ -66,7 +69,12 @@ export function PayPanel({
 }) {
   const [sgdInput, setSgdInput] = useState("3.50");
   const [memo, setMemo] = useState("");
-  const [payerCoinType, setPayerCoinType] = useState<SupportedReceiveToken>(merchantReceiveType);
+  /**
+   * Payer-side token type. Any Sui Move type the wallet holds, not constrained
+   * to the merchant-side curated list. Default lands on the merchant's
+   * receive token if the user holds it; otherwise their largest balance.
+   */
+  const [payerCoinType, setPayerCoinType] = useState<string>(merchantReceiveType);
   const [pay, setPay] = useState<PayState>({ kind: "idle" });
 
   const account = useCurrentAccount();
@@ -74,6 +82,29 @@ export function PayPanel({
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
   const dexClients = useMemo(() => getDexClients(sui), [sui]);
+  const balancesQ = useUserBalances(account?.address);
+  const balances = balancesQ.data ?? [];
+
+  /**
+   * Default payer selection rule (re-applied when balances load or the wallet
+   * changes): pick the merchant's preferred token when the user holds it;
+   * otherwise the largest balance the user has. This keeps the happy path
+   * "direct transfer, no routing fee" for users whose wallet matches.
+   */
+  useEffect(() => {
+    if (balances.length === 0) return;
+    const matching = balances.find((b) => b.coinType === merchantReceiveType);
+    const target = matching ?? balances[0];
+    // Only auto-switch if the user hasn't picked something that's still in
+    // their balance list — avoid clobbering an intentional pick on refetch.
+    if (!balances.some((b) => b.coinType === payerCoinType)) {
+      setPayerCoinType(target.coinType);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [balancesQ.data, merchantReceiveType]);
+
+  const payerBalance = balances.find((b) => b.coinType === payerCoinType);
+  const payerLabel = payerBalance?.symbol ?? RECEIVE_LABEL[payerCoinType as SupportedReceiveToken] ?? shortType(payerCoinType);
 
   const feeds = useMemo(() => [PYTH_FEEDS.USD_SGD, PYTH_FEEDS.SUI_USD], []);
   const pricesQ = usePythPrices(feeds);
@@ -238,7 +269,7 @@ export function PayPanel({
           coinType: payerCoinType,
         });
         if (coins.data.length === 0) {
-          throw new Error(`No ${COIN_LABEL[payerCoinType]} coins in your wallet.`);
+          throw new Error(`No ${payerLabel} coins in your wallet.`);
         }
         // Pick the largest balance to maximize the chance the split succeeds.
         const largest = coins.data.reduce((a, b) =>
@@ -296,7 +327,7 @@ export function PayPanel({
         </p>
         <p className="text-[11px] text-neutral-400 mt-1.5">
           Merchant receives in{" "}
-          <span className="text-white font-medium">{COIN_LABEL[merchantReceiveType]}</span>
+          <span className="text-white font-medium">{RECEIVE_LABEL[merchantReceiveType]}</span>
         </p>
       </header>
 
@@ -323,11 +354,16 @@ export function PayPanel({
         </div>
       </div>
 
-      <SourceTokenPicker
-        value={payerCoinType}
-        onChange={setPayerCoinType}
-        disabled={pay.kind === "submitting"}
-      />
+      {account && (
+        <SourceTokenPicker
+          balances={balances}
+          balancesLoading={balancesQ.isLoading}
+          merchantReceiveType={merchantReceiveType}
+          value={payerCoinType}
+          onChange={setPayerCoinType}
+          disabled={pay.kind === "submitting"}
+        />
+      )}
 
       <div className="space-y-1.5">
         <label htmlFor="memo" className="block text-[11px] uppercase tracking-wider text-neutral-500">
@@ -356,7 +392,7 @@ export function PayPanel({
         sgdMinorUnits={sgdMinorUnits}
         outputAmount={outputAmount}
         merchantReceiveType={merchantReceiveType}
-        payerCoinType={payerCoinType}
+        payerLabel={payerLabel}
         isDirect={isDirect}
       />
 
@@ -380,40 +416,84 @@ export function PayPanel({
 }
 
 function SourceTokenPicker({
+  balances,
+  balancesLoading,
+  merchantReceiveType,
   value,
   onChange,
   disabled,
 }: {
-  value: SupportedReceiveToken;
-  onChange: (next: SupportedReceiveToken) => void;
+  balances: UserBalance[];
+  balancesLoading: boolean;
+  merchantReceiveType: SupportedReceiveToken;
+  value: string;
+  onChange: (next: string) => void;
   disabled: boolean;
 }) {
+  if (balancesLoading) {
+    return (
+      <div className="space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
+          Pay from
+        </label>
+        <p className="text-xs text-neutral-500">Reading wallet balances…</p>
+      </div>
+    );
+  }
+  if (balances.length === 0) {
+    return (
+      <div className="space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
+          Pay from
+        </label>
+        <p className="text-xs text-amber-400">
+          Your wallet has no balances on this network. Fund some SUI to start.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="space-y-1.5">
       <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
         Pay from
       </label>
-      <div className="grid grid-cols-2 gap-2">
-        {RECEIVE_TOKEN_OPTIONS.map((opt) => {
-          const selected = value === opt.type;
+      <ul className="space-y-1" role="radiogroup" aria-label="Source token">
+        {balances.map((b) => {
+          const selected = value === b.coinType;
+          const direct = b.coinType === merchantReceiveType;
           return (
-            <button
-              key={opt.type}
-              type="button"
-              onClick={() => onChange(opt.type)}
-              disabled={disabled}
-              className={`rounded-xl border px-3 py-2 text-left transition disabled:opacity-50 ${
-                selected
-                  ? "border-[var(--accent)] bg-[var(--accent)]/[0.08] text-white"
-                  : "border-white/10 bg-black/20 text-neutral-300 hover:border-white/25"
-              }`}
-              aria-pressed={selected}
-            >
-              <span className="text-sm font-medium">{opt.label}</span>
-            </button>
+            <li key={b.coinType}>
+              <button
+                type="button"
+                onClick={() => onChange(b.coinType)}
+                disabled={disabled}
+                role="radio"
+                aria-checked={selected}
+                className={`w-full flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition disabled:opacity-50 ${
+                  selected
+                    ? "border-[var(--accent)] bg-[var(--accent)]/[0.08] text-white"
+                    : "border-white/10 bg-black/20 text-neutral-300 hover:border-white/25"
+                }`}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="text-sm font-medium">{b.symbol}</span>
+                  {direct && (
+                    <span className="text-[10px] uppercase tracking-wider text-[var(--success)]">
+                      direct
+                    </span>
+                  )}
+                </span>
+                <span className="text-xs tabular-nums text-neutral-400 shrink-0">
+                  {formatBalance(b.balance, b.decimals)}
+                </span>
+              </button>
+            </li>
           );
         })}
-      </div>
+      </ul>
+      <p className="text-[10px] text-neutral-500">
+        Direct = no routing fee. Other tokens route via Cetus Aggregator.
+      </p>
     </div>
   );
 }
@@ -422,13 +502,13 @@ function PreSignReceipt({
   sgdMinorUnits,
   outputAmount,
   merchantReceiveType,
-  payerCoinType,
+  payerLabel,
   isDirect,
 }: {
   sgdMinorUnits: number;
   outputAmount: bigint | null;
   merchantReceiveType: SupportedReceiveToken;
-  payerCoinType: SupportedReceiveToken;
+  payerLabel: string;
   isDirect: boolean;
 }) {
   if (sgdMinorUnits <= 0 || !outputAmount) return null;
@@ -439,12 +519,12 @@ function PreSignReceipt({
       <div className="flex items-center justify-between">
         <span className="text-neutral-400">Merchant receives</span>
         <span className="font-medium tabular-nums text-white">
-          {outFormatted} {COIN_LABEL[merchantReceiveType]}
+          {outFormatted} {RECEIVE_LABEL[merchantReceiveType]}
         </span>
       </div>
       <div className="flex items-center justify-between text-neutral-500">
         <span>You pay from</span>
-        <span className="text-white">{COIN_LABEL[payerCoinType]}</span>
+        <span className="text-white">{payerLabel}</span>
       </div>
       <div className="flex items-center justify-between text-neutral-500 pt-1.5 border-t border-white/5">
         <span>Route</span>
@@ -643,12 +723,17 @@ function parseSgdInput(s: string): number {
 }
 
 function formatTokenAmount(amount: bigint, token: SupportedReceiveToken): string {
-  const decimals = COIN_DECIMALS[token];
+  const decimals = RECEIVE_DECIMALS[token];
   const divisor = 10n ** BigInt(decimals);
   const whole = amount / divisor;
   const fraction = amount % divisor;
   const fracStr = fraction.toString().padStart(decimals, "0").replace(/0+$/, "");
   return fracStr ? `${whole}.${fracStr}` : `${whole}`;
+}
+
+function shortType(coinType: string): string {
+  const idx = coinType.lastIndexOf("::");
+  return idx >= 0 ? coinType.slice(idx + 2) : coinType;
 }
 
 function predictReceiptIdHex(input: {
