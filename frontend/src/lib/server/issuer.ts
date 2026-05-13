@@ -9,8 +9,8 @@ import { join } from "node:path";
  * Load the quay attestation issuer keypair.
  *
  * Priority:
- *   1. SUIQR_ISSUER_SECRET_KEY_HEX env var (preferred for production)
- *   2. SUIQR_ISSUER_SECRET_KEY_BECH32 env var (the `suiprivkey1...` format)
+ *   1. QUAY_ISSUER_SECRET_KEY_HEX env var (preferred for production)
+ *   2. QUAY_ISSUER_SECRET_KEY_BECH32 env var (the `suiprivkey1...` format)
  *   3. `<repo>/.secrets/issuer-testnet.json` for local dev
  *
  * The local-dev path matches what scripts/day2-deploy.ts produces.
@@ -19,13 +19,13 @@ import { join } from "node:path";
  * import from a client component or the secret can leak into the bundle.
  */
 export function loadIssuerKeypair(): Ed25519Keypair {
-  const hex = process.env.SUIQR_ISSUER_SECRET_KEY_HEX;
+  const hex = process.env.QUAY_ISSUER_SECRET_KEY_HEX;
   if (hex) {
     const bytes = Buffer.from(hex.replace(/^0x/, ""), "hex");
-    if (bytes.length !== 32) throw new Error(`SUIQR_ISSUER_SECRET_KEY_HEX must be 32 bytes, got ${bytes.length}`);
+    if (bytes.length !== 32) throw new Error(`QUAY_ISSUER_SECRET_KEY_HEX must be 32 bytes, got ${bytes.length}`);
     return Ed25519Keypair.fromSecretKey(new Uint8Array(bytes));
   }
-  const bech = process.env.SUIQR_ISSUER_SECRET_KEY_BECH32;
+  const bech = process.env.QUAY_ISSUER_SECRET_KEY_BECH32;
   if (bech) {
     const { secretKey } = decodeSuiPrivateKey(bech);
     return Ed25519Keypair.fromSecretKey(secretKey);

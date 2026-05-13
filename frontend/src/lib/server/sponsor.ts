@@ -12,15 +12,15 @@ import { join } from "node:path";
  * Server-only — never import from a client component.
  */
 export function loadSponsorKeypair(): Ed25519Keypair {
-  const hex = process.env.SUIQR_SPONSOR_SECRET_KEY_HEX;
+  const hex = process.env.QUAY_SPONSOR_SECRET_KEY_HEX;
   if (hex) {
     const bytes = Buffer.from(hex.replace(/^0x/, ""), "hex");
     if (bytes.length !== 32) {
-      throw new Error(`SUIQR_SPONSOR_SECRET_KEY_HEX must be 32 bytes, got ${bytes.length}`);
+      throw new Error(`QUAY_SPONSOR_SECRET_KEY_HEX must be 32 bytes, got ${bytes.length}`);
     }
     return Ed25519Keypair.fromSecretKey(new Uint8Array(bytes));
   }
-  const bech = process.env.SUIQR_SPONSOR_SECRET_KEY_BECH32;
+  const bech = process.env.QUAY_SPONSOR_SECRET_KEY_BECH32;
   if (bech) {
     const { secretKey } = decodeSuiPrivateKey(bech);
     return Ed25519Keypair.fromSecretKey(secretKey);

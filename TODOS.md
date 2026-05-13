@@ -1,14 +1,14 @@
-# suiqr TODOs
+# quay TODOs
 
 Generated 2026-05-12 from office-hours design session + hackathon scoping.
 
 ## In scope for hackathon submission
 
-### Move module (suiqr::payments)
+### Move module (quay::payments)
 - [ ] Write module per design doc sketch (~250 LOC, Sui framework 1.20+)
 - [ ] Registry keyed on `blake2b256("PAYNOW_UEN_V1" || uen_bytes)` (NOT raw UEN — privacy)
 - [ ] Domain-tag namespacing in key derivation so future mobile-number support doesn't collide
-- [ ] On-chain ed25519 attestation verification in `register_merchant` over canonical message `blake2b256("SUIQR_CLAIM_V1" || uen_bytes || bcs(claimer_addr) || nonce)`
+- [ ] On-chain ed25519 attestation verification in `register_merchant` over canonical message `blake2b256("QUAY_CLAIM_V1" || uen_bytes || bcs(claimer_addr) || nonce)`
 - [ ] Replay-nonce table to prevent attestation reuse
 - [ ] `pay<T>` generic over Coin<T>; takes raw `uen_bytes`, re-hashes on chain; emits PaymentReceipt with deterministic receipt_id
 - [ ] `refund<T>` entry function with original_receipt_id linkage
@@ -65,7 +65,7 @@ Generated 2026-05-12 from office-hours design session + hackathon scoping.
 
 ### Operational
 - [ ] Replace dev-key issuer attestation with multisig or DAO control
-- [ ] Self-attestation V1 design (remove suiqr as attestation issuer)
+- [ ] Self-attestation V1 design (remove quay as attestation issuer)
 - [ ] Bug bounty program post-mainnet (Immunefi tier-1, ~$10k initial)
 - [ ] Indexer self-hosted vs. Shinami/BlockVision evaluation
 - [ ] Cross-border expansion design (Malaysia DuitNow QR is very similar to SGQR)

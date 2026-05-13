@@ -27,8 +27,8 @@ export const runtime = "nodejs";
  */
 
 const SERVER_SALT_SECRET =
-  process.env.SUIQR_ZKLOGIN_SALT_SECRET ??
-  "suiqr-zklogin-testnet-v1-replace-in-mainnet";
+  process.env.QUAY_ZKLOGIN_SALT_SECRET ??
+  "quay-zklogin-testnet-v1-replace-in-mainnet";
 
 const SALT_BYTES = 16; // 128-bit salt — within zkLogin's accepted range
 

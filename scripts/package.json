@@ -1,5 +1,5 @@
 {
-  "name": "suiqr-scripts",
+  "name": "quay-scripts",
   "private": true,
   "type": "module",
   "scripts": {

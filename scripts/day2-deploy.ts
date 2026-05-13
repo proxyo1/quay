@@ -1,5 +1,5 @@
 /**
- * Day 2: publish suiqr::payments to Sui testnet, set initial issuer pubkey,
+ * Day 2: publish quay::payments to Sui testnet, set initial issuer pubkey,
  * register a test merchant, and run a pay flow end-to-end.
  *
  * Run: bun run scripts/day2-deploy.ts
@@ -222,7 +222,7 @@ async function main() {
           pubkey_hex: Buffer.from(issuerPubkey).toString("hex"),
           sui_address: issuerKp.toSuiAddress(),
           generated_at: new Date().toISOString(),
-          note: "Local dev key for suiqr testnet attestations. NOT for mainnet.",
+          note: "Local dev key for quay testnet attestations. NOT for mainnet.",
         },
         null,
         2,
@@ -256,7 +256,7 @@ async function main() {
     console.log(`   modules: ${buildJson.modules.length}; deps: ${buildJson.dependencies.length}`);
 
     // ── Step 4: Publish ───────────────────────────────────────────────
-    logStep(4, "Publish suiqr::payments to testnet");
+    logStep(4, "Publish quay::payments to testnet");
     const publishTx = new Transaction();
     publishTx.setGasBudget(GAS_BUDGET_PUBLISH);
     const [upgradeCap] = publishTx.publish({

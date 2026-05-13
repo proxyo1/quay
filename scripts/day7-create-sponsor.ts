@@ -1,5 +1,5 @@
 /**
- * Day 7 prep: generate the suiqr sponsor wallet, fund it from dev, and
+ * Day 7 prep: generate the quay sponsor wallet, fund it from dev, and
  * write the keypair to .secrets/sponsor-testnet.json.
  *
  * The sponsor is the wallet whose SUI pays gas for sponsored transactions
@@ -60,7 +60,7 @@ function loadOrGenerateSponsor(): { kp: Ed25519Keypair; isNew: boolean } {
         pubkey_hex: Buffer.from(kp.getPublicKey().toRawBytes()).toString("hex"),
         sui_address: kp.toSuiAddress(),
         generated_at: new Date().toISOString(),
-        note: "suiqr sponsored-tx gas wallet. Testnet only. Top up via day7-create-sponsor.ts.",
+        note: "quay sponsored-tx gas wallet. Testnet only. Top up via day7-create-sponsor.ts.",
       },
       null,
       2,

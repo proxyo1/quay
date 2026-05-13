@@ -52,7 +52,7 @@ function LoginInner() {
         <h1 className="text-3xl font-semibold tracking-tight">Sign in</h1>
         <p className="text-sm text-gray-500">
           One Google account = one Sui address = one merchant entry on chain.
-          Suiqr never sees your password; Google does the identity work and
+          quay never sees your password; Google does the identity work and
           Enoki binds it to your Sui wallet with a Groth16 zk proof.
         </p>
       </header>

@@ -135,7 +135,7 @@ function loadOrGenerateDemo(): { kp: Ed25519Keypair; isNew: boolean } {
         pubkey_hex: Buffer.from(kp.getPublicKey().toRawBytes()).toString("hex"),
         sui_address: kp.toSuiAddress(),
         generated_at: new Date().toISOString(),
-        note: "suiqr demo-day merchant. Owns multiple UENs for the dress rehearsal.",
+        note: "quay demo-day merchant. Owns multiple UENs for the dress rehearsal.",
       },
       null,
       2,

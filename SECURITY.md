@@ -1,6 +1,6 @@
 # Security policy
 
-suiqr is a hackathon submission on Sui testnet. There is no mainnet
+quay is a hackathon submission on Sui testnet. There is no mainnet
 deployment and no production users to harm — but the Move contract is
 intended to migrate to mainnet, and the trust model below is what
 governs that migration.
@@ -18,7 +18,7 @@ issues for un-patched vulnerabilities.
 
 ## Threat model summary
 
-### What suiqr promises
+### What quay promises
 
 - **Merchants are who they say they are** — bound by the issuer
   ed25519 attestation over a BCS-encoded `ClaimMessage`.
@@ -30,10 +30,10 @@ issues for un-patched vulnerabilities.
   `chain_id`; a testnet attestation cannot register on mainnet.
 - **Expiry-bound attestations** — every `ClaimMessage` carries
   `expires_at_ms`; the Move side enforces `clock.now <= expires_at_ms`.
-- **No suiqr-custody of user funds** — merchants own their address;
-  payers pay directly; suiqr never holds anyone's coins.
+- **No quay-custody of user funds** — merchants own their address;
+  payers pay directly; quay never holds anyone's coins.
 
-### What suiqr does NOT promise (V0)
+### What quay does NOT promise (V0)
 
 - **The issuer key is single-key.** Compromise of
   `.secrets/issuer-testnet.json` (or the prod equivalent) lets the
@@ -48,7 +48,7 @@ issues for un-patched vulnerabilities.
 - **No bug bounty until post-mainnet.** Targeted Immunefi-tier-1
   program planned ($10k starter pool).
 - **No formal Singapore counsel opinion** on PSA / DPT-SP scope. The
-  V0 design memo argues that suiqr-as-protocol is NOT a payment service
+  V0 design memo argues that quay-as-protocol is NOT a payment service
   (no custody, no fiat conversion) but a counsel opinion is required
   before mainnet.
 
@@ -73,14 +73,14 @@ issues for un-patched vulnerabilities.
 | Spam claims | Auto-issued for valid-shaped UEN | Manual review or NETS-controlled signer |
 | Sponsor wallet drainage | 5/day per-claimer rate limit, 20% balance floor | Captcha + per-IP rate limit + auto-faucet |
 | `pay<T>` slippage from off-chain Pyth quote | UI shows the rate the user accepted; on-chain settlement uses whatever Coin the wallet sends | Day 5.5+ Cetus on-chain swap with `amount_limit` slippage cap |
-| Phishing site impersonation | None — single deploy at suiqr.com (when mainnet) | DNSSEC + HSTS + Tag 59 strict allowlist on rendered names (AD29) |
+| Phishing site impersonation | None — single deploy at quay.com (when mainnet) | DNSSEC + HSTS + Tag 59 strict allowlist on rendered names (AD29) |
 | Mobile-number PayNow gap | Not supported in V0 | `PAYNOW_MOBILE_V1` namespace via the domain-tag scheme |
 
 ## Code structure that matters
 
 The trust-critical Move surface is small:
 
-- [`move/suiqr/sources/payments.move`](move/suiqr/sources/payments.move)
+- [`move/quay/sources/payments.move`](move/quay/sources/payments.move)
   — ~290 LOC. `register_merchant`, `set_initial_issuer_pubkey`,
   `rotate_issuer_pubkey`, and the BCS `ClaimMessage` shape are the
   load-bearing pieces. `pay` and `refund` are essentially

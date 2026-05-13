@@ -1,4 +1,4 @@
-# Contributing to suiqr
+# Contributing to quay
 
 Thanks for the interest. This is a hackathon submission first and a real
 codebase second — if you're poking at it before mainnet ships, expect rough
@@ -9,10 +9,10 @@ edges.
 ```bash
 brew install sui pnpm
 git clone <repo>
-cd suiqr
+cd quay
 
 # 1. Move
-cd move/suiqr
+cd move/quay
 sui move build       # 0 errors expected
 sui move test        # 18 / 18 expected
 
@@ -52,7 +52,7 @@ Sorted by **how much it advances the demo or unblocks mainnet**:
 3. **USDsui mainnet settlement** — when USDsui lands on testnet (or we
    move directly to mainnet for V0.5), swap the default
    `COIN_TYPES.SUI` → USDsui in the pay path. Pure constant change in
-   [`frontend/src/lib/suiqr/pay.ts`](frontend/src/lib/suiqr/pay.ts); no
+   [`frontend/src/lib/quay/pay.ts`](frontend/src/lib/quay/pay.ts); no
    on-chain redeploy.
 4. **Real-photo SGQR field test (AD5)** — the `SgqrCameraScanner` is
    wired and tuned (`facingMode: environment`, `TRY_HARDER`, reticle
@@ -88,8 +88,8 @@ vulnerabilities.
 
 ## What NOT to merge
 
-- Anything that adds a custodial path (suiqr holding user keys / coins).
-  The whole point of this protocol is that suiqr never custodies user
+- Anything that adds a custodial path (quay holding user keys / coins).
+  The whole point of this protocol is that quay never custodies user
   funds.
 - Anything that hardcodes mainnet contract addresses without a
   documented multisig rotation plan for the issuer key.

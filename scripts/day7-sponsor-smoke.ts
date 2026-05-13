@@ -1,6 +1,6 @@
 /**
  * Day 7 smoke: a fresh zero-SUI wallet registers a merchant via the
- * suiqr sponsored-gas mechanism. The sponsor wallet pays the gas; the
+ * quay sponsored-gas mechanism. The sponsor wallet pays the gas; the
  * fresh wallet only signs to authorize. Proves AD: sponsored-tx works
  * end-to-end on testnet against the live payments module.
  *

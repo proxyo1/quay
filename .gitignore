@@ -58,3 +58,4 @@ sui_keystore
 
 # Local deploy secrets (issuer privkey, etc.)
 .secrets/
+.gstack/

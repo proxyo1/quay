@@ -27,7 +27,7 @@ Two things:
    client ID.
 3. If prompted, configure the consent screen first:
    - User type: **External**
-   - App name: `suiqr` (or whatever you call it)
+   - App name: `quay` (or whatever you call it)
    - User support email: your email
    - Scopes: `openid`, `email`, `profile`
    - Test users: add the Gmail accounts that will sign in during the
@@ -35,10 +35,10 @@ Two things:
 4. Back at Credentials, application type: **Web application**.
 5. Authorized JavaScript origins:
    - `http://localhost:3000` (dev)
-   - whatever Vercel URL you deploy to (e.g., `https://suiqr.vercel.app`)
+   - whatever Vercel URL you deploy to (e.g., `https://quay.vercel.app`)
 6. Authorized redirect URIs (exact-match, including path):
    - `http://localhost:3000/auth/google/callback`
-   - `https://suiqr.vercel.app/auth/google/callback` (or your deploy URL)
+   - `https://quay.vercel.app/auth/google/callback` (or your deploy URL)
 7. Click **Create**. Copy the Client ID — it looks like
    `1234567890-abc...def.apps.googleusercontent.com`.
 
@@ -55,7 +55,7 @@ Two things:
    This is what makes Enoki accept your JWTs — without it, the proof
    endpoint returns `invalid_client_id`.
 4. Enable the **zkLogin** feature on **Testnet** (Mainnet requires a
-   paid plan). Sponsored Transactions can stay off — suiqr uses its
+   paid plan). Sponsored Transactions can stay off — quay uses its
    own sponsor wallet (`/api/sponsor/register`) for gas.
 5. Create a **Public** API key. The string starts with `enoki_public_`.
 

@@ -213,7 +213,7 @@ export default function OnboardPage() {
         </Link>
         <h1 className="text-3xl font-semibold">Onboard a UEN</h1>
         <p className="text-sm text-gray-500">
-          Scan your SGQR sticker or type the UEN. Suiqr signs an attestation,
+          Scan your SGQR sticker or type the UEN. quay signs an attestation,
           your Google identity signs the register tx via zkLogin, the sponsor
           covers gas.
         </p>

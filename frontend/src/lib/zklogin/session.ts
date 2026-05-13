@@ -31,7 +31,7 @@ export interface ZkLoginSession {
   createdAt: number;
 }
 
-const STORAGE_KEY = "suiqr.merchant_session.v2";
+const STORAGE_KEY = "quay.merchant_session.v2";
 
 export function loadSession(): ZkLoginSession | null {
   if (typeof window === "undefined") return null;

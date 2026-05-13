@@ -13,7 +13,7 @@ export function useZkLoginSession() {
     setSession(loadSession());
     setHydrated(true);
     const onStorage = (e: StorageEvent) => {
-      if (e.key === "suiqr.merchant_session.v1") setSession(loadSession());
+      if (e.key === "quay.merchant_session.v2") setSession(loadSession());
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);

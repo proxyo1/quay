@@ -16,7 +16,7 @@ import {
 
 const sui = new SuiClient({ network: "testnet", url: getFullnodeUrl("testnet") });
 
-const PENDING_KEY = "suiqr.zklogin.pending.v1";
+const PENDING_KEY = "quay.zklogin.pending.v1";
 
 interface PendingState {
   ephemeralPrivKeyBech32: string;

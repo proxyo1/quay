@@ -6,11 +6,6 @@ Gmail account = one Sui address — and the quay-the-company sponsor
 wallet covers gas so a brand-new merchant doesn't need a single SUI to
 register.
 
-> Internal note: the on-chain Move module is still named `suiqr::payments`
-> for V0 (renaming requires a redeploy and would invalidate the existing
-> registry). The product brand is **quay** — the Move rename is bundled
-> with the next planned redeploy (Move audit / mainnet promotion).
-
 > **Submission for the Sui Overflow hackathon.** Live on Sui testnet. Mainnet
 > path documented below.
 
@@ -58,9 +53,9 @@ register.
 
 ## Architecture
 
-### Move module — `suiqr::payments` (~290 LOC)
+### Move module — `quay::payments` (~290 LOC)
 
-[`move/suiqr/sources/payments.move`](move/suiqr/sources/payments.move). Single shared
+[`move/quay/sources/payments.move`](move/quay/sources/payments.move). Single shared
 `MerchantRegistry`, `Coin<T>`-generic `pay`/`refund`, ed25519-attested
 `register_merchant`, AdminCap-gated issuer rotation.
 
@@ -250,7 +245,7 @@ sui client new-address ed25519 dev
 # fund via https://faucet.sui.io/?address=<your dev address>
 
 # 2. Build + test
-cd move/suiqr
+cd move/quay
 sui move build
 sui move test  # 18/18 pass
 
@@ -309,7 +304,7 @@ setInterval(async () => {
 The quay codebase is structured so a non-SG implementation is mostly a
 parser + naming change:
 
-1. **Fork & rename** — `suiqr::payments` → `<country>qr::payments`. Move
+1. **Fork & rename** — `quay::payments` → `<country>qr::payments`. Move
    module structure stays the same.
 2. **Update the EMVCo MAI parser** — `frontend/src/lib/sgqr/parser.ts`
    already finds the local payment scheme by GUID match across tags
@@ -382,8 +377,8 @@ Demo flow on chain (V3):
 ## Repo layout
 
 ```
-suiqr/
-├── move/suiqr/                    # Move 2024 edition package
+quay/
+├── move/quay/                     # Move 2024 edition package
 │   ├── sources/payments.move      # ~290 LOC, all AD additions applied
 │   └── tests/payments_tests.move  # 18 unit tests, all green
 ├── frontend/                      # Next.js 16 + React 19 + Tailwind 4
@@ -405,7 +400,7 @@ suiqr/
 │   └── src/lib/
 │       ├── sgqr/                  # EMVCo MPM parser + sanitizer + builder
 │       ├── pyth/                  # Hermes client + SGD/USD/SUI quote math
-│       ├── suiqr/                 # buildPaySuiTx + buildRegisterTx
+│       ├── quay/                  # buildPaySuiTx + buildRegisterTx
 │       ├── server/                # issuer.ts, sponsor.ts (server-only)
 │       └── sui-config.ts          # network IDs (mirrors deploy-testnet.json)
 ├── scripts/                       # bun-runnable testnet automation

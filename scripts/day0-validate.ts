@@ -1,7 +1,7 @@
 /**
  * Day 0 testnet validation (AD1)
  *
- * Pragmatic kill-switch checks for the suiqr Sui Overflow hackathon build.
+ * Pragmatic kill-switch checks for the quay Sui Overflow hackathon build.
  * Goal: catch load-bearing-hypothesis failures BEFORE writing production code.
  *
  *   1. Pyth SGD/USD feed presence (Hermes off-chain API)
