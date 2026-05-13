@@ -2,6 +2,7 @@
 
 import { ConnectButton, useCurrentAccount, useSuiClient } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { PayPanel } from "@/components/PayPanel";
@@ -163,9 +164,15 @@ export default function ScanPage() {
         <span className="text-sm">
           Wallet:{" "}
           {account ? (
-            <code className="font-mono text-xs">
-              {account.address.slice(0, 6)}…{account.address.slice(-4)}
-            </code>
+            <>
+              <code className="font-mono text-xs">
+                {account.address.slice(0, 6)}…{account.address.slice(-4)}
+              </code>{" "}
+              ·{" "}
+              <Link href="/history" className="text-xs text-blue-600 hover:underline">
+                history →
+              </Link>
+            </>
           ) : (
             <span className="text-gray-400">not connected</span>
           )}

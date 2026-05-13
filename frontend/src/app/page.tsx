@@ -36,6 +36,16 @@ export default function Home() {
         </Link>
       </section>
 
+      <p className="text-sm text-gray-500">
+        Already paid through quay?{" "}
+        <Link
+          href="/history"
+          className="text-blue-600 hover:underline"
+        >
+          View your payment history →
+        </Link>
+      </p>
+
       <footer className="text-xs text-gray-500 pt-8 border-t border-gray-100 dark:border-gray-800 space-y-1">
         <p>
           Registry:{" "}
