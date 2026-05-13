@@ -24,8 +24,8 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "quay", statusBarStyle: "black-translucent" },
   icons: {
-    icon: "/icon-192.svg",
-    apple: "/icon-192.svg",
+    icon: "/quay.png",
+    apple: "/quay.png",
   },
 };
 

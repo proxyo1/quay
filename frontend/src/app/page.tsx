@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { QUAY, objectUrl } from "@/lib/sui-config";
@@ -5,8 +6,18 @@ import { QUAY, objectUrl } from "@/lib/sui-config";
 export default function Home() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-16 space-y-10">
-      <header className="space-y-2">
-        <h1 className="text-4xl font-semibold tracking-tight">quay</h1>
+      <header className="space-y-3">
+        <div className="flex items-center gap-3">
+          <Image
+            src="/quay.png"
+            alt="quay"
+            width={56}
+            height={56}
+            className="rounded-xl"
+            priority
+          />
+          <h1 className="text-4xl font-semibold tracking-tight">quay</h1>
+        </div>
         <p className="text-lg text-gray-600 dark:text-gray-400">
           Scan any Singapore SGQR sticker, pay any Sui token, settle as USDC.
         </p>
