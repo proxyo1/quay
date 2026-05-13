@@ -17,7 +17,7 @@ import {
   type SgqrPayload,
 } from "@/lib/sgqr";
 import { QUAY, objectUrl } from "@/lib/sui-config";
-import { DEFAULT_RECEIVE_TOKEN, type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
+import { LEGACY_RECEIVE_TOKEN, type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
 
 type Source = "scan" | "manual";
 
@@ -122,7 +122,9 @@ export default function ScanPage() {
         }
         // Fetch the merchant profile (logo + preferred receive token) from
         // Walrus. fetchMerchantProfile degrades gracefully — a Walrus failure
-        // returns a legacy profile defaulting to SUI receive.
+        // returns a legacy profile defaulting to SUI. When the on-chain
+        // metadata_uri is `null` (legacy merchants registered before the v1
+        // schema), preserve the pre-feature behavior by defaulting to SUI.
         const profile = await fetchMerchantProfile(result.metadataBlobId).catch(
           () => null,
         );
@@ -130,7 +132,7 @@ export default function ScanPage() {
         setLookup({
           kind: "registered",
           address: result.owner,
-          receiveToken: profile?.receiveToken ?? DEFAULT_RECEIVE_TOKEN,
+          receiveToken: profile?.receiveToken ?? LEGACY_RECEIVE_TOKEN,
           logoBlobId: profile?.logoBlobId ?? null,
           profileName: profile?.merchantName,
         });
