@@ -7,7 +7,6 @@ import {
   useSuiClient,
 } from "@mysten/dapp-kit";
 import { blake2b } from "@noble/hashes/blake2.js";
-import type { TransactionObjectArgument } from "@mysten/sui/transactions";
 import { useMemo, useState } from "react";
 
 import {
@@ -219,40 +218,21 @@ export function PayPanel({
         return;
       }
 
-      // ─── Generic path: direct USDC or aggregator-routed swap.
+      // ─── Generic path: direct USDC, or aggregator-routed swap.
       // Walrus receipt pre-upload is skipped for aggregator paths because the
       // delivered amount can vary with positive slippage; the on-chain
       // PaymentReceipt still carries full Pyth metadata + the dex breadcrumb.
-      let payerCoin: TransactionObjectArgument;
+      //
+      // Resolve the source-coin reference:
+      //   * SUI input → "gas" sentinel (dapp-kit fills in the wallet's gas
+      //     coin at sign time; buildPayAnyTokenPtb splits from tx.gas).
+      //   * Non-SUI input → pick the user's largest Coin<T> object id and
+      //     pass it in. If the user has zero balance of that token, bail
+      //     before constructing the PTB.
+      let payerCoinSource: "gas" | { objectId: string };
       if (payerCoinType === COIN_TYPES.SUI) {
-        // The dapp-kit signer maps tx.gas to the wallet's SUI gas coin.
-        // For non-SUI inputs we have to resolve a coin object explicitly.
-        // For SUI we just split from gas in buildPayAnyTokenPtb.
-        const { tx, routedVia, expectedInputAmount, venues } = await buildPayAnyTokenPtb({
-          cetus: dexClients.cetusAggregator,
-          uen,
-          payerCoinType,
-          merchantReceiveType,
-          payerCoin: { kind: "Input", index: 0, type: "object", value: "GAS" } as unknown as TransactionObjectArgument,
-          outputAmount,
-          sgdMinorUnits,
-          memo: memo.trim() || undefined,
-          quoteMetadata: v1Bytes,
-        });
-        // The placeholder above is wrong — for SUI source we want tx.gas.
-        // buildPayAnyTokenPtb constructs a fresh Transaction; we need to
-        // hand it the gas coin reference from that PTB, not from here.
-        // Easier: special-case SUI input by building the PTB ourselves below.
-        void tx;
-        void routedVia;
-        void expectedInputAmount;
-        void venues;
-        throw new Error(
-          "SUI-source aggregator path requires a manual PTB shape; this code path is not yet enabled in V0. " +
-            "Use direct transfer (payer token = merchant token) for the V0 demo.",
-        );
+        payerCoinSource = "gas";
       } else {
-        // Non-SUI source: resolve the user's largest coin of `payerCoinType`.
         const coins = await sui.getCoins({
           owner: account.address,
           coinType: payerCoinType,
@@ -264,27 +244,29 @@ export function PayPanel({
         const largest = coins.data.reduce((a, b) =>
           BigInt(a.balance) >= BigInt(b.balance) ? a : b,
         );
-        const built = await buildPayAnyTokenPtb({
-          cetus: dexClients.cetusAggregator,
-          uen,
-          payerCoinType,
-          merchantReceiveType,
-          payerCoin: { kind: "Input", index: 0, type: "object", value: largest.coinObjectId } as unknown as TransactionObjectArgument,
-          outputAmount,
-          sgdMinorUnits,
-          memo: memo.trim() || undefined,
-          quoteMetadata: v1Bytes,
-        });
-        setPay({ kind: "submitting", phase: "awaiting-signature" });
-        const result = await signAndExecute({ transaction: built.tx });
-        await sui.waitForTransaction({ digest: result.digest });
-        setPay({
-          kind: "success",
-          digest: result.digest,
-          routedVia: built.routedVia,
-        });
-        return;
+        payerCoinSource = { objectId: largest.coinObjectId };
       }
+
+      const built = await buildPayAnyTokenPtb({
+        cetus: dexClients.cetusAggregator,
+        uen,
+        payerCoinType,
+        merchantReceiveType,
+        payerCoinSource,
+        outputAmount,
+        sgdMinorUnits,
+        memo: memo.trim() || undefined,
+        quoteMetadata: v1Bytes,
+      });
+      setPay({ kind: "submitting", phase: "awaiting-signature" });
+      const result = await signAndExecute({ transaction: built.tx });
+      await sui.waitForTransaction({ digest: result.digest });
+      setPay({
+        kind: "success",
+        digest: result.digest,
+        routedVia: built.routedVia,
+      });
+      return;
     } catch (e) {
       if (e instanceof AggregatorRouteError) {
         setPay({

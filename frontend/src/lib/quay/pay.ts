@@ -124,6 +124,22 @@ export function encodeQuoteMetadata(meta: Record<string, unknown>): Uint8Array {
 
 // ─── Feature 2: pay-any-token, settle-any-token ─────────────────────────
 
+/**
+ * Where the input coin comes from inside the PTB.
+ *
+ *   `"gas"`               → split off `tx.gas` (used for SUI inputs; dapp-kit
+ *                           resolves the wallet's gas coin at sign time).
+ *   `{ objectId: "..." }` → reference a specific `Coin<T>` object the user
+ *                           already holds (used for non-SUI inputs; the
+ *                           caller picks the user's largest balance via
+ *                           `suiClient.getCoins({ owner, coinType })`).
+ *
+ * Keeping this as a discriminator means `buildPayAnyTokenPtb` is the only
+ * thing that needs to know about Sui's gas-coin special case — callers just
+ * tell us "use gas" or "use this object."
+ */
+export type PayerCoinSource = "gas" | { readonly objectId: string };
+
 export interface BuildPayAnyTokenInputs {
   /** Aggregator client from `getDexClients(suiClient).cetusAggregator`. */
   cetus: AggregatorClient;
@@ -134,11 +150,9 @@ export interface BuildPayAnyTokenInputs {
   /** Sui Move type of the token the merchant wants to receive. */
   merchantReceiveType: string;
   /**
-   * The full Coin<T> object id the payer is paying from. The PTB will split
-   * the required input off this coin. For SUI this is normally `tx.gas`;
-   * for non-SUI coins the caller resolves the user's largest balance.
+   * How to find the input coin inside the PTB. See `PayerCoinSource` above.
    */
-  payerCoin: TransactionObjectArgument;
+  payerCoinSource: PayerCoinSource;
   /**
    * The exact amount of `merchantReceiveType` the merchant must receive
    * (smallest units, e.g. MIST for SUI, 6-decimal microunits for USDC).
@@ -185,6 +199,17 @@ export async function buildPayAnyTokenPtb(
 
   const tx = new Transaction();
 
+  // Resolve the payer-side coin reference inside this PTB. `tx.gas` is the
+  // gas-coin sentinel the dapp-kit signer fills in at sign time; for non-SUI
+  // tokens we wrap the object ID the caller picked from the user's wallet.
+  const payerCoinRef =
+    input.payerCoinSource === "gas"
+      ? tx.gas
+      : tx.object(input.payerCoinSource.objectId);
+
+  // `payCoin` can come from either `splitCoins` (a nested-result coin) or
+  // from the aggregator's `routerSwap` (the output coin argument). Both are
+  // valid `TransactionObjectArgument`s for the `payments::pay<T>` call.
   let payCoin: TransactionObjectArgument;
   let routedVia: "direct" | "aggregator";
   let expectedInputAmount: bigint;
@@ -192,7 +217,7 @@ export async function buildPayAnyTokenPtb(
 
   if (input.payerCoinType === input.merchantReceiveType) {
     // Same token — split the exact amount off the payer's coin, no aggregator.
-    [payCoin] = tx.splitCoins(input.payerCoin, [tx.pure.u64(input.outputAmount)]);
+    [payCoin] = tx.splitCoins(payerCoinRef, [tx.pure.u64(input.outputAmount)]);
     routedVia = "direct";
     expectedInputAmount = input.outputAmount;
     venues = [];
@@ -204,7 +229,7 @@ export async function buildPayAnyTokenPtb(
     });
     if (quote.kind === "direct") {
       // Defensive — should not happen because we checked equality above.
-      [payCoin] = tx.splitCoins(input.payerCoin, [tx.pure.u64(input.outputAmount)]);
+      [payCoin] = tx.splitCoins(payerCoinRef, [tx.pure.u64(input.outputAmount)]);
       routedVia = "direct";
       expectedInputAmount = input.outputAmount;
       venues = [];
@@ -216,7 +241,7 @@ export async function buildPayAnyTokenPtb(
       assertOutputWithinSlippage(input.outputAmount, minOutAcceptable);
 
       // Split the exact required input off the payer's coin (BN.toString-safe).
-      const [inputCoinForSwap] = tx.splitCoins(input.payerCoin, [
+      const [inputCoinForSwap] = tx.splitCoins(payerCoinRef, [
         tx.pure.u64(quote.amountIn),
       ]);
       payCoin = await appendSwapToPtb(input.cetus, {
