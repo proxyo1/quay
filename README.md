@@ -43,15 +43,57 @@ register.
 
 | Feature | Status | Why |
 |---|---|---|
-| Cetus swap-and-pay (any-token → USDC) | 📋 catalog only | Move contract is `Coin<T>`-generic; testnet pool liquidity uncertain; deferred to focused session |
-| Cetus swap-and-pay PTB on mainnet | 📋 V0.5 | Move contract is `Coin<T>`-generic; testnet liquidity uncertain |
+| Cetus Aggregator swap-and-pay (any token → merchant's preferred) | ✅ shipped (mainnet); ⚠️ no testnet routes | [`frontend/src/lib/dex/aggregator.ts`](frontend/src/lib/dex/aggregator.ts) + [`buildPayAnyTokenPtb`](frontend/src/lib/quay/pay.ts). Testnet caveat below. |
+| Merchant settlement-token choice (SUI / USDC) | ✅ shipped | New picker at `/merchant/onboard` Step 4. Stored in versioned v1 Walrus profile blob. Default USDC. |
+| Cetus Aggregator referral fee-share | ✅ shipped | Quay's treasury address passed on every routed swap. Cetus splits ~10-20% of the swap fee back. |
+| DeepBook rate-lock via limit orders | 📋 V0.5 — scaffolded | [`frontend/src/lib/dex/deepbookLimits.ts`](frontend/src/lib/dex/deepbookLimits.ts) has the SDK wrapping. Not wired into UI: requires a one-time BalanceManager + deposit step, and the testnet SUI/USDC pool uses DBUSDC ≠ Quay's USDC type. Production-ready on mainnet once CCTP USDC lands. |
+| LP-mode inventory market-making | 📋 V0.5+ | Aggregator referral covers V0 revenue ($0 capital). Inventory mode adds spread capture once volume justifies $10k–$50k seed. |
 | Gasless stablecoin retail path (USDsui / USDC) | 📋 V0.5 | Protocol-level gasless via [`0x2::balance::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers); dual-path with `payments::pay<T>` retained for the receipted path |
 | Mobile-number PayNow (~70% of SG hawkers) | 📋 V1 | Domain-tag namespacing (`PAYNOW_UEN_V1` vs future `PAYNOW_MOBILE_V1`) is already on chain |
 | SuiNS optional name attach | 📋 V0.5 | Address truncation works for V0 demo |
 
+### Testnet aggregator caveat
+
+Cetus Aggregator's testnet subgraph has no liquidity for routing between
+Quay's frontend USDC type (`0xa1ec7fc…::usdc::USDC`) and SUI — the
+testnet pools route through DeepBook's `DBUSDC` instead. We confirmed
+this empirically with [`scripts/day13-cetus-aggregator-smoke.ts`](scripts/day13-cetus-aggregator-smoke.ts).
+The UI degrades gracefully: any cross-token payment surfaces
+`AggregatorRouteError` ("swap on Cetus first") before signing, so the
+demo never tries a transaction that would revert. Same-token payments
+(direct transfer, no aggregator) work on testnet without issue —
+[`buildPayAnyTokenPtb`](frontend/src/lib/quay/pay.ts) bypasses the
+aggregator when `payerCoinType === merchantReceiveType`.
+
+On mainnet, real Circle USDC (post-CCTP) has aggregator coverage and the
+swap-and-pay flow works without the type mismatch.
+
 ---
 
 ## Architecture
+
+### DEX integration — hybrid: DeepBook + Cetus Aggregator
+
+Quay routes payments through two Sui-native venues, picking each where it
+genuinely wins:
+
+- **Cetus Aggregator** ([`frontend/src/lib/dex/aggregator.ts`](frontend/src/lib/dex/aggregator.ts))
+  for **swap-and-pay**. The aggregator falls through DeepBook v3 + Cetus
+  CLMM + every other Sui DEX automatically, picks the best route, returns a
+  `Coin<T>` that flows straight into `payments::pay<T>`. Quay's treasury
+  passes as the `partner` parameter on every routed swap, so Cetus's
+  referral fee-share accrues with zero on-chain bookkeeping.
+
+- **DeepBook v3** ([`frontend/src/lib/dex/deepbookLimits.ts`](frontend/src/lib/dex/deepbookLimits.ts))
+  for **rate-lock** (scaffolded, V0.5). It's the only Sui venue with native
+  orderbook semantics, so a post-only limit order can freeze the
+  SGD-equivalent for the user's wallet-fumble window without an off-chain
+  keeper bot. Not in V0 UI — see the "What's live" table for blockers.
+
+`Coin<T>`-generic `payments::pay<T>` means the Move contract doesn't care
+which path the PTB took, only that a coin of the merchant's preferred
+type lands on the call. No on-chain change between V0 and the
+fully-routed V0.5.
 
 ### Move module — `quay::payments` (~290 LOC)
 
