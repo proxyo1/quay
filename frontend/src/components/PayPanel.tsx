@@ -6,6 +6,7 @@ import {
   useSignAndExecuteTransaction,
   useSuiClient,
 } from "@mysten/dapp-kit";
+import { blake2b } from "@noble/hashes/blake2.js";
 import { useMemo, useState } from "react";
 
 import {
@@ -19,13 +20,17 @@ import {
   usePythPrices,
 } from "@/lib/pyth";
 import { sanitizeMerchantName } from "@/lib/sgqr";
-import { buildPaySuiTx, encodeQuoteMetadata } from "@/lib/suiqr";
+import { encodeV2 } from "@/lib/sgqr/quote-metadata";
+import { buildPaySuiTx, deriveUenHash, encodeQuoteMetadata } from "@/lib/quay";
+import { COIN_TYPES } from "@/lib/quay/pay";
 import { txUrl } from "@/lib/sui-config";
+
+type PayPhase = "uploading-receipt" | "awaiting-signature";
 
 type PayState =
   | { kind: "idle" }
-  | { kind: "submitting" }
-  | { kind: "success"; digest: string }
+  | { kind: "submitting"; phase: PayPhase }
+  | { kind: "success"; digest: string; blobId?: string }
   | { kind: "error"; message: string };
 
 /**
@@ -78,12 +83,15 @@ export function PayPanel({
     !stale;
 
   async function handlePay() {
-    if (!quote || !pricesQ.data) return;
-    setPay({ kind: "submitting" });
+    if (!quote || !pricesQ.data || !account) return;
+    setPay({ kind: "submitting", phase: "uploading-receipt" });
     try {
       const usdSgd = pricesQ.data.get(PYTH_FEEDS.USD_SGD)!;
       const suiUsd = pricesQ.data.get(PYTH_FEEDS.SUI_USD)!;
-      const meta = encodeQuoteMetadata({
+
+      // v1 quote inputs — same shape as before so any existing decoders
+      // (and the verifier dApp's v1 inner-payload parser) keep working.
+      const v1Quote = {
         v: 1,
         src: "pyth-hermes",
         sgd_minor: quote.sgdMinorUnits,
@@ -96,20 +104,69 @@ export function PayPanel({
         sui_usd_expo: suiUsd.expo,
         sui_usd_publish_time: suiUsd.publishTime,
         mist: quote.suiMist.toString(),
+      };
+      const v1Bytes = encodeQuoteMetadata(v1Quote);
+
+      // Phase 3 (D3, D10): receipt upload BEFORE wallet popup. The signed
+      // tx must include the blob_id in quote_metadata, so the upload has
+      // to land before signAndExecute fires. Sub-status text keeps the
+      // ~1-3s latency visible. On hard-fail (D7), pay tx never submits.
+      const predictedTimestampMs = Date.now();
+      const receiptIdHex = predictReceiptIdHex({
+        uen,
+        payer: account.address,
+        timestampMs: predictedTimestampMs,
+        amount: quote.suiMist,
       });
+
+      const receiptReq = {
+        receipt_id_hex: receiptIdHex,
+        payer: account.address,
+        merchant: merchantAddress,
+        uen_raw: uen,
+        amount: quote.suiMist.toString(),
+        token_type: COIN_TYPES.SUI,
+        sgd_minor_units: quote.sgdMinorUnits,
+        timestamp_ms: predictedTimestampMs,
+        quote: {
+          feed: PYTH_FEEDS.SUI_USD,
+          price_usd: quote.usd.toFixed(6),
+          sgd_per_usd: quote.rates.sgdPerUsd.toFixed(6),
+        },
+        memo: memo.trim() || undefined,
+      };
+
+      const upRes = await fetch("/api/receipts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(receiptReq),
+      });
+      if (!upRes.ok) {
+        const err = await upRes
+          .json()
+          .catch(() => ({ error: `HTTP ${upRes.status}` }));
+        // D7 hard-fail: pay tx does not submit if Walrus upload fails.
+        throw new Error(`receipt prep failed: ${err.error ?? `HTTP ${upRes.status}`}`);
+      }
+      const { blob_id: blobId } = (await upRes.json()) as { blob_id: string };
+
+      // Wrap v1 inputs + blob_id in v2 BCS payload for the on-chain field.
+      const v2Bytes = encodeV2(v1Bytes, blobId);
+
+      setPay({ kind: "submitting", phase: "awaiting-signature" });
       const tx = buildPaySuiTx({
         uen,
         mistAmount: quote.suiMist,
         sgdMinorUnits: quote.sgdMinorUnits,
         memo: memo.trim() || undefined,
-        quoteMetadata: meta,
+        quoteMetadata: v2Bytes,
       });
       const result = await signAndExecute({
         transaction: tx,
       });
       // Wait for tx to be visible across the network before claiming success
       await sui.waitForTransaction({ digest: result.digest });
-      setPay({ kind: "success", digest: result.digest });
+      setPay({ kind: "success", digest: result.digest, blobId });
     } catch (e) {
       setPay({
         kind: "error",
@@ -202,6 +259,12 @@ function PayButton({
   onClick: () => void;
 }) {
   const submitting = state.kind === "submitting";
+  const phaseLabel =
+    state.kind === "submitting"
+      ? state.phase === "uploading-receipt"
+        ? "Preparing receipt on Walrus…"
+        : "Awaiting wallet signature…"
+      : null;
   return (
     <button
       type="button"
@@ -210,12 +273,12 @@ function PayButton({
       className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-3 transition"
     >
       {submitting ? (
-        "Submitting on testnet…"
+        phaseLabel
       ) : quote ? (
         <>
           Pay {formatSui(quote.sui)} for {formatSgd(quote.sgd)}
           <span className="block text-xs font-normal opacity-80 mt-0.5">
-            payments::pay&lt;SUI&gt; · split from gas coin · testnet
+            payments::pay&lt;SUI&gt; · split from gas · Walrus receipt
           </span>
         </>
       ) : (
@@ -229,9 +292,9 @@ function PayResult({ state }: { state: PayState }) {
   if (state.kind === "idle" || state.kind === "submitting") return null;
   if (state.kind === "success") {
     return (
-      <div className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-100 dark:bg-emerald-900/30 p-3 text-sm">
+      <div className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-100 dark:bg-emerald-900/30 p-3 text-sm space-y-1">
         <p className="font-medium">✓ Paid on testnet.</p>
-        <p className="mt-1 text-xs">
+        <p className="text-xs">
           <a
             href={txUrl(state.digest)}
             target="_blank"
@@ -242,6 +305,19 @@ function PayResult({ state }: { state: PayState }) {
           </a>{" "}
           — `payments::pay&lt;SUI&gt;` emitted a PaymentReceipt event.
         </p>
+        {state.blobId && (
+          <p className="text-xs">
+            <a
+              href={`/verify/${encodeURIComponent(state.blobId)}`}
+              className="font-mono text-emerald-700 dark:text-emerald-300 hover:underline"
+            >
+              Verify receipt →
+            </a>{" "}
+            <span className="text-gray-500">
+              ({state.blobId.slice(0, 8)}…{state.blobId.slice(-6)} on Walrus)
+            </span>
+          </p>
+        )}
       </div>
     );
   }
@@ -334,4 +410,64 @@ function parseSgdInput(s: string): number {
   const n = parseFloat(s);
   if (!Number.isFinite(n) || n < 0) return 0;
   return Math.round(n * 100);
+}
+
+/**
+ * Mirror of `payments::pay`'s on-chain receipt_id derivation:
+ *   blake2b256(uen_hash || bcs(payer) || bcs(timestamp_ms) || bcs(amount))
+ *
+ * BCS layout for primitives:
+ *   address: 32 raw bytes
+ *   u64:     8 bytes little-endian
+ *
+ * The on-chain receipt_id will differ slightly because Move uses
+ * `Clock::timestamp_ms` at execution time, not the predicted value
+ * we use here. The verifier matches by (payer, merchant, amount,
+ * timestamp ±60s) rather than exact receipt_id, so this approximation
+ * is fine for V0.
+ */
+function predictReceiptIdHex(input: {
+  uen: string;
+  payer: string;
+  timestampMs: number;
+  amount: bigint;
+}): string {
+  const uenHash = deriveUenHash(input.uen);
+  const payerBytes = hexAddrToBytes(input.payer);
+  const tsBytes = u64Le(BigInt(input.timestampMs));
+  const amountBytes = u64Le(input.amount);
+
+  const buf = new Uint8Array(uenHash.length + 32 + 8 + 8);
+  let off = 0;
+  buf.set(uenHash, off);
+  off += uenHash.length;
+  buf.set(payerBytes, off);
+  off += 32;
+  buf.set(tsBytes, off);
+  off += 8;
+  buf.set(amountBytes, off);
+
+  const hash = blake2b(buf, { dkLen: 32 });
+  return Array.from(hash)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function hexAddrToBytes(addr: string): Uint8Array {
+  const hex = addr.replace(/^0x/, "").padStart(64, "0");
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function u64Le(n: bigint): Uint8Array {
+  const out = new Uint8Array(8);
+  let v = n;
+  for (let i = 0; i < 8; i++) {
+    out[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return out;
 }

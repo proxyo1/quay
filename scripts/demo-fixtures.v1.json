@@ -1,0 +1,46 @@
+{
+  "network": "testnet",
+  "package_id": "0x46398f18d42864b8325c0089bd0ae6ba439c85d02510412738ce273c53ce167e",
+  "registry_id": "0x00148a23a4e120142965ed011370b39a42e858174aec98d5fac079a834c1e5e1",
+  "merchant_address": "0x2084bbffd0e742beff5e07f587a84d372326b2ef40524762ae96d64d42bd0c57",
+  "captured_at": "2026-05-12T14:54:43.474Z",
+  "note": "Historical V1 fixtures (pre-Walrus). The V1 package is stranded on testnet but no longer referenced by the frontend. These merchants were registered against V1 only and are NOT visible to the V2 frontend.",
+  "merchants": [
+    {
+      "uen": "T11KH0001A",
+      "name": "KOPI HOUSE",
+      "city": "Singapore",
+      "suggested_sgd": "3.50",
+      "description": "$3.50 SGD kopi-o + kaya toast set",
+      "merchant_address": "0x2084bbffd0e742beff5e07f587a84d372326b2ef40524762ae96d64d42bd0c57",
+      "sgqr_static": "00020101021126370009SG.PAYNOW010120210T11KH0001A030105204000053037025802SG5910KOPI HOUSE6009Singapore6304BFAC",
+      "sgqr_with_amount": "00020101021126370009SG.PAYNOW010120210T11KH0001A0301052040000530370254043.505802SG5910KOPI HOUSE6009Singapore63040FFB",
+      "register_tx": "Gvvw24XXZq2jkeVs3Cwf6dr787A26FmJyp1irQXzMbVZ",
+      "status": "registered_on_v1"
+    },
+    {
+      "uen": "T11CR0002B",
+      "name": "AH HUAT CHICKEN RICE",
+      "city": "Singapore",
+      "suggested_sgd": "5.00",
+      "description": "$5.00 SGD chicken rice plate",
+      "merchant_address": "0x2084bbffd0e742beff5e07f587a84d372326b2ef40524762ae96d64d42bd0c57",
+      "sgqr_static": "00020101021126370009SG.PAYNOW010120210T11CR0002B030105204000053037025802SG5920AH HUAT CHICKEN RICE6009Singapore6304CE32",
+      "sgqr_with_amount": "00020101021126370009SG.PAYNOW010120210T11CR0002B0301052040000530370254045.005802SG5920AH HUAT CHICKEN RICE6009Singapore6304DF43",
+      "register_tx": "4Ziftr4QW5KZS8ePUUSZGWomYGnbuoivTamgHLXtnsmB",
+      "status": "registered_on_v1"
+    },
+    {
+      "uen": "T11PS0003C",
+      "name": "WEST COAST PRINT SHOP",
+      "city": "Singapore",
+      "suggested_sgd": "12.00",
+      "description": "$12.00 SGD bulk photocopy job",
+      "merchant_address": "0x2084bbffd0e742beff5e07f587a84d372326b2ef40524762ae96d64d42bd0c57",
+      "sgqr_static": "00020101021126370009SG.PAYNOW010120210T11PS0003C030105204000053037025802SG5921WEST COAST PRINT SHOP6009Singapore6304CBEF",
+      "sgqr_with_amount": "00020101021126370009SG.PAYNOW010120210T11PS0003C03010520400005303702540512.005802SG5921WEST COAST PRINT SHOP6009Singapore630415C6",
+      "register_tx": "DbocnpxQHByLA5spjJhRauLDyv4hubTvtvLpdCW9uuPq",
+      "status": "registered_on_v1"
+    }
+  ]
+}

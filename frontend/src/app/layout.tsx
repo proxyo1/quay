@@ -19,10 +19,10 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "suiqr — SGQR payments on Sui",
+  title: "quay — SGQR payments on Sui",
   description: "Scan any SGQR sticker, pay any Sui token, settle on-chain.",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, title: "suiqr", statusBarStyle: "black-translucent" },
+  appleWebApp: { capable: true, title: "quay", statusBarStyle: "black-translucent" },
   icons: {
     icon: "/icon-192.svg",
     apple: "/icon-192.svg",

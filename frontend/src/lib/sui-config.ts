@@ -7,12 +7,15 @@
 
 export const SUI_NETWORK = "testnet" as const;
 
-export const SUIQR = {
+export const QUAY = {
   network: "testnet" as const,
   chainId: 0,
-  packageId: "0x46398f18d42864b8325c0089bd0ae6ba439c85d02510412738ce273c53ce167e",
-  registryId: "0x00148a23a4e120142965ed011370b39a42e858174aec98d5fac079a834c1e5e1",
-  adminCapId: "0x622f8c06080c324eb1a76d5ba199ab90aeb3a57f2953b12c46c44c1110e1e0ec",
+  // V3 redeploy (2026-05-13): renames module suiqr::payments → quay::payments
+  // and bumps the canonical attestation domain tag to QUAY_CLAIM_V1.
+  // V1 + V2 packages archived as scripts/deploy-testnet.v{1,2}.json.
+  packageId: "0x70631c59a94e74594af10eabcd20e6cf88564ccca985610c8c1c9b100462a87c",
+  registryId: "0xa572e59aa755af7a93c2a0b0216639b3debe6b5ecdb4074c763d3484e879645b",
+  adminCapId: "0xfb7a3d740324ff2e158d71f1abffdc81b1495a4de6535fc1461fef850f366c40",
   adminAddress: "0xa91644aa47914b16b73258c1de984e3296ef15e40a838ffd3b8fa533b27def2f",
   issuerPubkeyHex: "5d44735e96af7d30d245936458efc03f5fdc4ba042046848afc4ad9dd8d115c8",
   /** Convenience: the on-chain Clock object ID (same on all networks). */

@@ -1,6 +1,6 @@
 import { Transaction } from "@mysten/sui/transactions";
 
-import { SUIQR } from "@/lib/sui-config";
+import { QUAY } from "@/lib/sui-config";
 
 export interface BuildRegisterTxInputs {
   /** Raw UEN string (e.g., "202412345Z"). Encoded as vector<u8> on chain. */
@@ -11,40 +11,57 @@ export interface BuildRegisterTxInputs {
   attestation: Uint8Array;
   /** Unix-ms expiry encoded in the ClaimMessage. The Move side enforces clock <= expires_at_ms. */
   expiresAtMs: bigint;
-  /** Optional merchant profile pointer (https/ipfs URI). Frontend allowlist (AD30). */
-  metadataUri?: string;
+  /**
+   * Bare Walrus blob ID for the merchant's profile (logo), per D5.
+   * The frontend constructs the aggregator URL on read.
+   * Undefined → on-chain `metadata_uri` is None (no logo).
+   */
+  metadataBlobId?: string;
+  /**
+   * 32-byte blake2b256 of the issuer-verified evidence content, per D8.
+   * Must match the `evidence_hash` the issuer signed inside ClaimMessage.
+   */
+  evidenceHash: Uint8Array;
 }
 
 /**
  * Build a `payments::register_merchant` PTB. The merchant is the tx sender;
  * the registered MerchantEntry will record `tx_context::sender()` as the
  * merchant address. The issuer signature must be over the same ClaimMessage
- * (chain_id, UEN, claimer, nonce, expires_at_ms) using the BCS shape the
- * Move side reconstructs.
+ * (chain_id, UEN, claimer, nonce, expires_at_ms, evidence_hash) using the
+ * BCS shape the Move side reconstructs.
  */
 export function buildRegisterTx(input: BuildRegisterTxInputs): Transaction {
   if (input.attestation.length !== 64) {
     throw new Error(`expected 64-byte ed25519 sig, got ${input.attestation.length}`);
   }
+  if (input.evidenceHash.length !== 32) {
+    throw new Error(`expected 32-byte evidence_hash, got ${input.evidenceHash.length}`);
+  }
   const tx = new Transaction();
   tx.moveCall({
-    target: `${SUIQR.packageId}::payments::register_merchant`,
+    target: `${QUAY.packageId}::payments::register_merchant`,
     arguments: [
-      tx.object(SUIQR.registryId),
+      tx.object(QUAY.registryId),
       tx.pure.vector("u8", Array.from(new TextEncoder().encode(input.uen))),
       tx.pure.vector("u8", Array.from(input.nonce)),
       tx.pure.vector("u8", Array.from(input.attestation)),
       tx.pure.u64(input.expiresAtMs),
-      input.metadataUri
-        ? tx.pure.option("string", input.metadataUri)
+      input.metadataBlobId
+        ? tx.pure.option("string", input.metadataBlobId)
         : tx.pure.option("string", null),
-      tx.object(SUIQR.clockId),
+      tx.pure.vector("u8", Array.from(input.evidenceHash)),
+      tx.object(QUAY.clockId),
     ],
   });
   return tx;
 }
 
-/** Allowlist for the optional metadata URI per AD30: https or ipfs only. */
-export function isAllowedMetadataUri(uri: string): boolean {
-  return /^(https:\/\/|ipfs:\/\/)[A-Za-z0-9._\-/?=:#&%]+$/.test(uri);
+/**
+ * Validate a bare Walrus blob ID per D5. Walrus blob IDs are base64url-encoded
+ * 32-byte digests (typically 43-44 chars; the trailing `=` padding is omitted).
+ * Reject anything else to keep the on-chain field disciplined.
+ */
+export function isAllowedBlobId(s: string): boolean {
+  return /^[A-Za-z0-9_-]{40,48}$/.test(s);
 }

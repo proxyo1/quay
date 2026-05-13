@@ -11,8 +11,8 @@ export default function MerchantHome() {
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">For merchants</h1>
         <p className="text-gray-600 dark:text-gray-400">
-          Sign in once. Your suiqr wallet is derived from your identity — same
-          email, same Sui address, same merchant entry on chain. Suiqr pays
+          Sign in once. Your quay wallet is derived from your identity — same
+          email, same Sui address, same merchant entry on chain. Quay pays
           the gas while you onboard.
         </p>
       </header>

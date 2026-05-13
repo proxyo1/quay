@@ -9,13 +9,20 @@ import { Transaction } from "@mysten/sui/transactions";
 import { blake2b } from "@noble/hashes/blake2.js";
 import { NextResponse } from "next/server";
 
+import { appendAuditRow } from "@/lib/server/issuer-audit-log";
 import { loadIssuerKeypair } from "@/lib/server/issuer";
 import {
   checkAndIncrementSponsorUsage,
   loadSponsorKeypair,
 } from "@/lib/server/sponsor";
 import { looksLikeUen } from "@/lib/sgqr";
-import { SUIQR } from "@/lib/sui-config";
+import { deriveUenHash } from "@/lib/quay";
+import { QUAY } from "@/lib/sui-config";
+import {
+  uploadBlob,
+  WalrusRateLimitError,
+  WalrusUploadError,
+} from "@/lib/walrus/client";
 
 export const runtime = "nodejs";
 
@@ -35,7 +42,7 @@ export const runtime = "nodejs";
  * executeTransactionBlock with both signatures.
  *
  * This makes the new-merchant onboarding flow work from a wallet with
- * 0 SUI — the suiqr-the-company sponsor pays gas.
+ * 0 SUI — the quay-the-company sponsor pays gas.
  */
 
 const DAILY_CAP = 5;
@@ -49,6 +56,7 @@ const ClaimMessage = bcs.struct("ClaimMessage", {
   claimer: bcs.bytes(32),
   nonce: bcs.vector(bcs.u8()),
   expires_at_ms: bcs.u64(),
+  evidence_hash: bcs.vector(bcs.u8()),
 });
 
 const sui = new SuiClient({ network: "testnet", url: getFullnodeUrl("testnet") });
@@ -56,7 +64,18 @@ const sui = new SuiClient({ network: "testnet", url: getFullnodeUrl("testnet") }
 interface SponsorRegisterRequest {
   uen: string;
   claimer: string;
-  metadata_uri?: string;
+  /** Bare Walrus blob ID for merchant logo (D5). Optional. */
+  metadata_blob_id?: string;
+  /** Hex-encoded 32-byte blake2b256 of the evidence content (D8). */
+  evidence_hash_hex: string;
+  /**
+   * Raw bytes of the evidence content as a UTF-8 string (typically the
+   * canonical JSON snapshot the merchant submitted). The server computes
+   * blake2b256 over these bytes and verifies it matches evidence_hash_hex
+   * before signing — guarantees the issuer signs over exactly what gets
+   * uploaded to Walrus.
+   */
+  evidence_content?: string;
   ttlSeconds?: number;
 }
 
@@ -77,6 +96,13 @@ function parseAddress(addr: string): Uint8Array | null {
   return out;
 }
 
+function parseEvidenceHash(s: string | undefined): Uint8Array | null {
+  if (!s || !/^[0-9a-fA-F]{64}$/.test(s)) return null;
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
 export async function POST(req: Request) {
   let body: SponsorRegisterRequest;
   try {
@@ -93,6 +119,59 @@ export async function POST(req: Request) {
   const claimerBytes = parseAddress(body.claimer);
   if (!claimerBytes) {
     return NextResponse.json({ error: "invalid claimer address" }, { status: 400 });
+  }
+  const evidenceHash = parseEvidenceHash(body.evidence_hash_hex);
+  if (!evidenceHash) {
+    return NextResponse.json(
+      { error: "evidence_hash_hex must be a 64-char hex string (32 bytes)" },
+      { status: 400 },
+    );
+  }
+
+  // Phase 4 (D7, D8): if the client supplied evidence content, verify
+  // the hash matches the bytes it computed it from, then upload to
+  // Walrus and write the audit row. Hard-fail on Walrus error (D7).
+  // If no content supplied (legacy clients), skip — the on-chain
+  // evidence_hash is still signed-over and verifiable; the blob_id
+  // mapping is just absent in the operator audit log.
+  let walrusBlobId: string | null = null;
+  if (typeof body.evidence_content === "string" && body.evidence_content.length > 0) {
+    const contentBytes = new TextEncoder().encode(body.evidence_content);
+    const actualHash = blake2b(contentBytes, { dkLen: 32 });
+    if (!constantTimeEqual(actualHash, evidenceHash)) {
+      return NextResponse.json(
+        {
+          error:
+            "evidence_hash_hex does not match blake2b256 of evidence_content — refusing to sign",
+        },
+        { status: 400 },
+      );
+    }
+    try {
+      const uploaded = await uploadBlob(contentBytes);
+      walrusBlobId = uploaded.blobId;
+    } catch (e) {
+      if (e instanceof WalrusRateLimitError) {
+        return NextResponse.json(
+          { error: "Walrus rate-limited; retry shortly", upstream: "walrus" },
+          { status: 429 },
+        );
+      }
+      if (e instanceof WalrusUploadError) {
+        return NextResponse.json(
+          {
+            error: `evidence upload failed (D7 hard-fail): ${e.message}`,
+            upstream: "walrus",
+            retryable: e.retryable,
+          },
+          { status: 502 },
+        );
+      }
+      return NextResponse.json(
+        { error: `unexpected: ${e instanceof Error ? e.message : String(e)}` },
+        { status: 500 },
+      );
+    }
   }
 
   // Rate limit — production-only. Dev skips the cap because the counter is
@@ -144,12 +223,13 @@ export async function POST(req: Request) {
   const expiresAtMs = Date.now() + ttl * 1000;
 
   const msgBytes = ClaimMessage.serialize({
-    domain_tag: Array.from(new TextEncoder().encode("SUIQR_CLAIM_V1")),
-    chain_id: SUIQR.chainId,
+    domain_tag: Array.from(new TextEncoder().encode("QUAY_CLAIM_V1")),
+    chain_id: QUAY.chainId,
     uen: Array.from(new TextEncoder().encode(body.uen)),
     claimer: claimerBytes,
     nonce: Array.from(nonce),
     expires_at_ms: BigInt(expiresAtMs),
+    evidence_hash: Array.from(evidenceHash),
   }).toBytes();
   const msgHash = blake2b(msgBytes, { dkLen: 32 });
   const sig = await issuer.sign(msgHash);
@@ -160,16 +240,17 @@ export async function POST(req: Request) {
   tx.setGasOwner(sponsorAddr);
   tx.setGasBudget(20_000_000n);
   tx.moveCall({
-    target: `${SUIQR.packageId}::payments::register_merchant`,
+    target: `${QUAY.packageId}::payments::register_merchant`,
     arguments: [
-      tx.object(SUIQR.registryId),
+      tx.object(QUAY.registryId),
       tx.pure.vector("u8", Array.from(new TextEncoder().encode(body.uen))),
       tx.pure.vector("u8", Array.from(nonce)),
       tx.pure.vector("u8", Array.from(sig)),
       tx.pure.u64(BigInt(expiresAtMs)),
-      body.metadata_uri
-        ? tx.pure.option("string", body.metadata_uri)
+      body.metadata_blob_id
+        ? tx.pure.option("string", body.metadata_blob_id)
         : tx.pure.option("string", null),
+      tx.pure.vector("u8", Array.from(evidenceHash)),
       tx.object(CLOCK),
     ],
   });
@@ -187,6 +268,21 @@ export async function POST(req: Request) {
   // 3. Sponsor signs
   const sponsorSig = await sponsor.signTransaction(txBytes);
 
+  // 4. Phase 4 (D8): append the operator audit row. Non-blocking — a
+  // Supabase outage or missing config logs a warning but doesn't fail
+  // the attestation. The on-chain evidence_hash is the load-bearing
+  // commitment; the audit row is the operator-side blob_id index.
+  if (walrusBlobId) {
+    const uenHashHex = toHex(deriveUenHash(body.uen));
+    await appendAuditRow({
+      evidenceHash: body.evidence_hash_hex.toLowerCase(),
+      walrusBlobId,
+      uenHashHex,
+      signedAtMs: Date.now(),
+      claimer: body.claimer,
+    });
+  }
+
   const response: SponsorRegisterResponse = {
     tx_bytes_b64: Buffer.from(txBytes).toString("base64"),
     sponsor_signature: sponsorSig.signature,
@@ -195,4 +291,15 @@ export async function POST(req: Request) {
     daily_cap: DAILY_CAP,
   };
   return NextResponse.json(response);
+}
+
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+function toHex(b: Uint8Array): string {
+  return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
 }

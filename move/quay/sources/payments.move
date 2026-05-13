@@ -1,6 +1,6 @@
-/// suiqr::payments — SGQR-compatible Sui payments.
+/// quay::payments — SGQR-compatible Sui payments.
 ///
-/// The trust root is a single ed25519 issuer pubkey held by suiqr (V0).
+/// The trust root is a single ed25519 issuer pubkey held by quay (V0).
 /// Merchants register by presenting an attestation signed by the issuer
 /// over a canonical BCS-encoded message including their UEN, claimer
 /// address, nonce, chain_id, and expiry. Payments emit a typed
@@ -18,8 +18,8 @@
 /// Domain tags:
 ///   b"PAYNOW_UEN_V1" — registry key derivation (room for future
 ///                     mobile-number proxies via PAYNOW_MOBILE_V1)
-///   b"SUIQR_CLAIM_V1" — canonical attestation message
-module suiqr::payments;
+///   b"QUAY_CLAIM_V1" — canonical attestation message
+module quay::payments;
 
 use std::string::String;
 use std::type_name::{Self, TypeName};
@@ -54,7 +54,7 @@ const E_REFUND_AMOUNT_ZERO: u64 = 12;
 /// Shared singleton registry. Created in `init`.
 public struct MerchantRegistry has key {
     id: UID,
-    /// 32-byte ed25519 pubkey of the suiqr attestation issuer.
+    /// 32-byte ed25519 pubkey of the quay attestation issuer.
     /// Empty until `set_initial_issuer_pubkey` is called by admin.
     issuer_pubkey: vector<u8>,
     /// Chain identifier baked into attestations to prevent cross-network replay.
@@ -67,13 +67,26 @@ public struct MerchantRegistry has key {
     used_nonces: Table<vector<u8>, bool>,
 }
 
-/// One entry per claimed UEN. Key = uen_hash (in the table); not duplicated here.
+/// One entry per claimed UEN. Key = uen_hash (in the table); raw UEN bytes
+/// duplicated here so the terminal can recover the human-readable UEN on any
+/// device without storing it in a side channel.
 public struct MerchantEntry has store {
     sui_address: address,
     claimed_at_ms: u64,
-    /// Optional IPFS / Walrus pointer for merchant profile. Frontend enforces
-    /// a scheme allowlist (https / ipfs) per AD30.
+    /// Raw UEN bytes (8-10 ASCII chars). Lets `/merchant/terminal` and
+    /// `/m/<uen>` show the UEN that produced this entry without reversing
+    /// the one-way blake2b key hash.
+    uen_raw: vector<u8>,
+    /// Walrus blob ID (string) for the merchant's profile (logo). Frontend
+    /// builds the aggregator URL `${WALRUS_AGGREGATOR_URL}/v1/${blobId}` on
+    /// read. Optional — onboarding may proceed without a logo per D7.
     metadata_uri: Option<String>,
+    /// blake2b256 of the issuer-verified evidence content (e.g., signed
+    /// merchant form snapshot). The Walrus blob ID for the evidence itself
+    /// lives in the operator's audit log keyed by this hash. On-chain
+    /// reference proves the issuer signed off after reviewing specific
+    /// evidence.
+    evidence_hash: vector<u8>,
 }
 
 /// AdminCap — separate object holder, transferable. Used for rotating the
@@ -85,12 +98,17 @@ public struct AdminCap has key, store {
 /// Canonical attestation message (BCS-encoded, then blake2b256 hashed)
 /// AD19 — explicit struct shape, deterministic across SDKs.
 public struct ClaimMessage has copy, drop {
-    domain_tag: vector<u8>,   // b"SUIQR_CLAIM_V1"
+    domain_tag: vector<u8>,   // b"QUAY_CLAIM_V1"
     chain_id: u8,             // AD24
     uen: vector<u8>,
     claimer: address,         // AD20: the Sui address that will hold the entry
     nonce: vector<u8>,
     expires_at_ms: u64,       // AD22
+    /// blake2b256(evidence_bytes). Binds the issuer's signature to specific
+    /// evidence content (off-chain JSON / form snapshot stored on Walrus).
+    /// Re-uploads don't break verification because the hash binds to content,
+    /// not the Walrus blob ID.
+    evidence_hash: vector<u8>,
 }
 
 // ─── Events ─────────────────────────────────────────────────────────────
@@ -211,6 +229,7 @@ public fun register_merchant(
     attestation: vector<u8>,
     expires_at_ms: u64,
     metadata_uri: Option<String>,
+    evidence_hash: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -227,14 +246,17 @@ public fun register_merchant(
 
     let sender = ctx.sender();
 
-    // AD19 + AD24: BCS-encode the canonical message including chain_id.
+    // AD19 + AD24: BCS-encode the canonical message including chain_id +
+    // evidence_hash. The issuer signs over evidence content; on-chain
+    // verification proves the attestation was bound to that evidence.
     let msg = ClaimMessage {
-        domain_tag: b"SUIQR_CLAIM_V1",
+        domain_tag: b"QUAY_CLAIM_V1",
         chain_id: registry.chain_id,
         uen: uen_bytes,
         claimer: sender,
         nonce,
         expires_at_ms,
+        evidence_hash,
     };
     let msg_bytes = bcs::to_bytes(&msg);
     let msg_hash = hash::blake2b256(&msg_bytes);
@@ -249,7 +271,9 @@ public fun register_merchant(
         MerchantEntry {
             sui_address: sender,
             claimed_at_ms: now,
+            uen_raw: msg.uen,
             metadata_uri,
+            evidence_hash: msg.evidence_hash,
         },
     );
 
@@ -397,15 +421,17 @@ public fun canonical_claim_bytes(
     claimer: address,
     nonce: vector<u8>,
     expires_at_ms: u64,
+    evidence_hash: vector<u8>,
 ): vector<u8> {
     bcs::to_bytes(
         &ClaimMessage {
-            domain_tag: b"SUIQR_CLAIM_V1",
+            domain_tag: b"QUAY_CLAIM_V1",
             chain_id,
             uen,
             claimer,
             nonce,
             expires_at_ms,
+            evidence_hash,
         },
     )
 }
@@ -417,8 +443,11 @@ public fun canonical_claim_hash(
     claimer: address,
     nonce: vector<u8>,
     expires_at_ms: u64,
+    evidence_hash: vector<u8>,
 ): vector<u8> {
-    hash::blake2b256(&canonical_claim_bytes(chain_id, uen, claimer, nonce, expires_at_ms))
+    hash::blake2b256(&canonical_claim_bytes(
+        chain_id, uen, claimer, nonce, expires_at_ms, evidence_hash,
+    ))
 }
 
 #[test_only]
@@ -446,7 +475,9 @@ public fun register_for_testing(
         MerchantEntry {
             sui_address: merchant,
             claimed_at_ms: now,
+            uen_raw: uen_bytes,
             metadata_uri: option::none(),
+            evidence_hash: vector::empty<u8>(),
         },
     );
     let _ = ctx;

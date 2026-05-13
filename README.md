@@ -1,10 +1,15 @@
-# suiqr
+# quay
 
 **SGQR-compatible Sui payments.** Scan any Singapore SGQR sticker, pay any Sui
 token, settle on chain. Merchants onboard with **Google zkLogin** — one
-Gmail account = one Sui address — and the suiqr-the-company sponsor
+Gmail account = one Sui address — and the quay-the-company sponsor
 wallet covers gas so a brand-new merchant doesn't need a single SUI to
 register.
+
+> Internal note: the on-chain Move module is still named `suiqr::payments`
+> for V0 (renaming requires a redeploy and would invalidate the existing
+> registry). The product brand is **quay** — the Move rename is bundled
+> with the next planned redeploy (Move audit / mainnet promotion).
 
 > **Submission for the Sui Overflow hackathon.** Live on Sui testnet. Mainnet
 > path documented below.
@@ -39,7 +44,7 @@ register.
 | `/merchant/onboard` — claim a UEN | ✅ Google zkLogin + sponsored gas | Wallet-connect path removed for merchants |
 | `/merchant/terminal` — live PaymentReceipt feed | ✅ 2s refresh, SGD-prominent | client-side merchant filter |
 | `/api/attest` — issuer signs ed25519 attestations | ✅ server-side, `.secrets`/env keys |
-| `/api/sponsor/register` — suiqr pays merchant onboarding gas | ✅ 5/day per address, 20% balance floor |
+| `/api/sponsor/register` — quay pays merchant onboarding gas | ✅ 5/day per address, 20% balance floor |
 
 | Feature | Status | Why |
 |---|---|---|
@@ -99,10 +104,10 @@ that says which proxy type it is (`0` mobile, `2` UEN, `5` VPA). The UEN is
 the merchant's existing public, ACRA-controlled identifier.
 
 Treating that UEN as the on-chain registry key means:
-- **Zero new identifiers** — merchants don't get a new "suiqr ID"; they use
+- **Zero new identifiers** — merchants don't get a new "quay ID"; they use
   what they already have on the back of their SGQR sticker.
 - **The existing sticker keeps working** — any SGQR scanner (banks, NETS,
-  TouchNGo, etc.) ignores fields it doesn't understand; suiqr is opt-in.
+  TouchNGo, etc.) ignores fields it doesn't understand; quay is opt-in.
 - **Domain-tag namespacing** (`blake2b256("PAYNOW_UEN_V1" || uen)`) leaves
   room for `PAYNOW_MOBILE_V1` and `PAYNOW_VPA_V1` slots without collision.
 
@@ -116,16 +121,16 @@ rate.
 ## Why not just off-ramp? (the demo Q&A defense)
 
 This is the question every Singaporean hears: "PayNow + Coinhako/StraitsX/
-Crypto.com Card already work — what's suiqr for?"
+Crypto.com Card already work — what's quay for?"
 
-**Honest answer:** PayNow works for 99% of SG users. suiqr targets the
+**Honest answer:** PayNow works for 99% of SG users. quay targets the
 crypto-native 1% and the merchants who want to serve them.
 
 **Payer-side differentiators** (crypto-native customer):
 - **Non-custodial throughout.** No exchange holds your tokens between
   earning and spending.
 - **No exchange KYC at point of sale.** Your Sui wallet stays anonymous.
-  Off-ramping to fiat requires KYC; suiqr doesn't.
+  Off-ramping to fiat requires KYC; quay doesn't.
 - **One tax event.** Direct payment with crypto = single disposition.
   Off-ramp + spend = two events to track and report.
 - **Multi-token at point of sale.** Pay in whatever you hold; no
@@ -136,7 +141,7 @@ crypto-native 1% and the merchants who want to serve them.
 **Merchant-side differentiators** (NOT anonymous — UEN is public, ACRA-
 registered):
 - **Lower fees vs Visa MDR.** Cetus swap spread is <0.1% vs Visa
-  2-3% merchant discount rate. PayNow is free for receivers — suiqr can't
+  2-3% merchant discount rate. PayNow is free for receivers — quay can't
   beat free for SGD merchants, but for merchants who want to receive
   USDC, the cost stack is dramatically lower than card networks.
 - **Self-custody of received USDC.** No Coinhako solvency risk; the
@@ -168,7 +173,7 @@ merchant might want voluntary ID, B2B invoicing, and
 subscription-with-consumer-protection — all V1+ territory.
 
 **Honest merchant demand caveat:** PayNow is free for receivers in SG.
-suiqr cannot beat free. The real merchant motivation is ideological /
+quay cannot beat free. The real merchant motivation is ideological /
 brand (crypto-friendly positioning) or treasury (want USDC for yield).
 Target = the 50–500 crypto-friendly merchants in SG who already
 informally accept crypto.
@@ -184,15 +189,15 @@ product is the demo instance.
 | Choice | Why | Alternative |
 |---|---|---|
 | SGQR (Singapore) | The spec embeds UEN in a structured way and 200k+ stickers already exist | DuitNow / UPI / QRIS / PIX — same code, different parser |
-| UEN as registry key | Public, ACRA-controlled, NOT NETS-controlled (so suiqr isn't beholden to NETS) | Mobile-number PayNow (V1 — adds `PAYNOW_MOBILE_V1` namespace) |
+| UEN as registry key | Public, ACRA-controlled, NOT NETS-controlled (so quay isn't beholden to NETS) | Mobile-number PayNow (V1 — adds `PAYNOW_MOBILE_V1` namespace) |
 | Manual ed25519 attestation (V0) | Simplest trust root; rotatable via AdminCap | NETS-controlled signer (mainnet), or trustless self-attestation via BizFile+ federation |
 | Pyth (off-chain via Hermes for the UI quote) | Cross-chain feed parity; on-chain Pyth update happens in the swap PTB on V1 | DIA, Switchboard, or self-managed oracle |
-| Cetus (planned for V1 swap) | Deepest Sui CLMM liquidity; partner-fee program supports the suiqr partner cap | DeepBook orderbook, Bluefin, Aftermath |
+| Cetus (planned for V1 swap) | Deepest Sui CLMM liquidity; partner-fee program supports the quay partner cap | DeepBook orderbook, Bluefin, Aftermath |
 | Wormhole-bridged USDC initially | Available on testnet today | Circle CCTP-native USDC on mainnet — see USDC note below |
 | `Coin<T>` generic instead of fixed-asset | Same code supports SUI / USDC / future stables / future swap | Per-asset entry functions (would explode the API surface) |
 | Sui Move 2024 edition | Recommended path; module-label syntax | Legacy edition (no benefit, more boilerplate) |
 | blake2b256 for the canonical hash | Sui-native, cross-chain-friendly | keccak256 (also available; blake2b is the Sui-canonical choice) |
-| Off-chain rate-limit for sponsored gas | Simplest V0; suiqr-the-company controls the route | On-chain `SponsorRegistry` with per-day counters (Phase 2) |
+| Off-chain rate-limit for sponsored gas | Simplest V0; quay-the-company controls the route | On-chain `SponsorRegistry` with per-day counters (Phase 2) |
 
 ---
 
@@ -217,7 +222,7 @@ than with the bridged version — be precise about which one in the demo.
 
 ## Issuer key storage policy
 
-The current testnet issuer key is held by suiqr-the-company in
+The current testnet issuer key is held by quay-the-company in
 `.secrets/issuer-testnet.json` (gitignored). For production:
 
 - **V0 mainnet**: air-gapped hardware key (Ledger or YubiHSM2) on a
@@ -278,7 +283,7 @@ Full step-by-step demo flow: [`docs/DRESS_REHEARSAL.md`](docs/DRESS_REHEARSAL.md
 import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
 
 const sui = new SuiClient({ network: "testnet", url: getJsonRpcFullnodeUrl("testnet") });
-const PKG = "0x46398f18d42864b8325c0089bd0ae6ba439c85d02510412738ce273c53ce167e";
+const PKG = "0x70631c59a94e74594af10eabcd20e6cf88564ccca985610c8c1c9b100462a87c";
 const merchant = "0x..."; // your address
 
 // Poll every 2s for recent PaymentReceipt events targeting you
@@ -301,7 +306,7 @@ setInterval(async () => {
 
 ## Fork this for your country
 
-The suiqr codebase is structured so a non-SG implementation is mostly a
+The quay codebase is structured so a non-SG implementation is mostly a
 parser + naming change:
 
 1. **Fork & rename** — `suiqr::payments` → `<country>qr::payments`. Move
@@ -350,26 +355,27 @@ is essentially country-agnostic.
 
 ## Testnet deployment
 
+V3 redeploy (2026-05-13) — module renamed to `quay::payments`, canonical
+attestation domain tag bumped to `QUAY_CLAIM_V1`. V1 (pre-Walrus) and V2
+(Walrus, still `suiqr::payments`) artifacts preserved as
+[`scripts/deploy-testnet.v1.json`](scripts/deploy-testnet.v1.json) and
+[`scripts/deploy-testnet.v2.json`](scripts/deploy-testnet.v2.json).
+
 ```
 Network:          testnet (chain_id = 4c78adac)
-Package:          0x46398f18d42864b8325c0089bd0ae6ba439c85d02510412738ce273c53ce167e
-MerchantRegistry: 0x00148a23a4e120142965ed011370b39a42e858174aec98d5fac079a834c1e5e1
+Package:          0x70631c59a94e74594af10eabcd20e6cf88564ccca985610c8c1c9b100462a87c
+MerchantRegistry: 0xa572e59aa755af7a93c2a0b0216639b3debe6b5ecdb4074c763d3484e879645b
 AdminCap owner:   0xa91644aa47914b16b73258c1de984e3296ef15e40a838ffd3b8fa533b27def2f
 Issuer pubkey:    0x5d44735e96af7d30d245936458efc03f5fdc4ba042046848afc4ad9dd8d115c8
 Sponsor wallet:   0xbe085e2a3fedcf5da35c1602ea6278da41e565fbd2edb35971aa4a2da5ebb4ce
 ```
 
-Demo flow on chain:
+Demo flow on chain (V3):
 
-- Publish: [`41WRCow…E3p`](https://suiscan.xyz/testnet/tx/41WRCow4ZhXGzHA8vLt7v6vZEubXBgk4kBcEWbrDbE3p)
-- Set initial issuer pubkey: [`CFEfJoE…R1U`](https://suiscan.xyz/testnet/tx/CFEfJoEBrb87N3M7u8fq46RDA7SU5JCPqTKr3bwGUR1U)
-- Register merchant1 (UEN `202412345Z`): [`DQ8ayrS…2hXK`](https://suiscan.xyz/testnet/tx/DQ8ayrSsHyLxr1U8ekNaBz434Cw8DjgmBV1J4fkT2hXK)
-- Pay merchant1 $1.50 SGD (1.5M MIST): [`B6YpJM7…sNae`](https://suiscan.xyz/testnet/tx/B6YpJM7CcKPRXVL9kbTavYioY6VhuDemwcoYuikVsNae)
-- Day 5 smoke pay $0.05 SGD: [`D58nkcm…qLLq`](https://suiscan.xyz/testnet/tx/D58nkcmLAVTo6oEu4X3X8hhccbbdPQvv7ABE2yrjqLLq)
-- Day 6 fresh-wallet register: [`4CVDAB7…d8kE`](https://suiscan.xyz/testnet/tx/4CVDAB7jB3MrBD29p3S7PTqpKdn493x6LoRcLsXAd8kE)
-- Day 7 sponsored register from 0-SUI wallet: [`6MXKy9D…QefF`](https://suiscan.xyz/testnet/tx/6MXKy9DhAcVFQMZDPekWXiYZ3JFxp6tGaAyQZmKnQefF)
-- Day 11 staged demo merchants: `KOPI HOUSE`, `AH HUAT CHICKEN RICE`,
-  `WEST COAST PRINT SHOP` (see [`scripts/demo-fixtures.json`](scripts/demo-fixtures.json))
+- Publish: [`EQAFEAw…X9pZ`](https://suiscan.xyz/testnet/tx/EQAFEAwZcPCUhXnoVfSKU2KzU8YAbkNivpeTsQVvX9pZ)
+- Set initial issuer pubkey: [`EynoQ2e…x7sM`](https://suiscan.xyz/testnet/tx/EynoQ2eN1cYJBD5qHZGnxaJVYsh81PyLTgbZ3JEox7sM)
+- Register merchant1 (UEN `202412345Z`): [`7NdB95w…g8gY`](https://suiscan.xyz/testnet/tx/7NdB95wjHva8yCuhAnrpEfhjbkELGiEc78Zouv8zg8gY)
+- Pay merchant1 $1.50 SGD (1.5M MIST): [`HTK15pc…R385s`](https://suiscan.xyz/testnet/tx/HTK15pcvesY3uiXZZ2yuk8nuR7Lcy83on6jytn8R385s)
 
 ---
 

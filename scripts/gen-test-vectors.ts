@@ -18,6 +18,7 @@ const ClaimMessage = bcs.struct("ClaimMessage", {
   claimer: bcs.bytes(32),
   nonce: bcs.vector(bcs.u8()),
   expires_at_ms: bcs.u64(),
+  evidence_hash: bcs.vector(bcs.u8()),
 });
 
 function hex(b: Uint8Array): string {
@@ -33,14 +34,17 @@ CLAIMER_ADDR[31] = 0xA2; // matches @0xA2 in Move tests
 const UEN = new TextEncoder().encode("202012345Z"); // sample SG UEN
 const NONCE = new Uint8Array(32).fill(0xAB);
 const EXPIRES_AT_MS = 9_999_999_999_999n; // far future
+// blake2b256("test-evidence") — stable bytes for reproducible vectors.
+const EVIDENCE_HASH = new Uint8Array(32).fill(0xEE);
 
 const msgBytes = ClaimMessage.serialize({
-  domain_tag: Array.from(new TextEncoder().encode("SUIQR_CLAIM_V1")),
+  domain_tag: Array.from(new TextEncoder().encode("QUAY_CLAIM_V1")),
   chain_id: CHAIN_ID_TEST,
   uen: Array.from(UEN),
   claimer: CLAIMER_ADDR,
   nonce: Array.from(NONCE),
   expires_at_ms: EXPIRES_AT_MS,
+  evidence_hash: Array.from(EVIDENCE_HASH),
 }).toBytes();
 
 // blake2b256
@@ -61,3 +65,4 @@ console.log(`const TEST_NONCE: vector<u8> = ${vecLit(NONCE)};`);
 console.log(`const TEST_EXPIRES_AT_MS: u64 = ${EXPIRES_AT_MS};`);
 console.log(`const TEST_CLAIMER: address = @0xA2;`);
 console.log(`const TEST_CHAIN_ID: u8 = ${CHAIN_ID_TEST};`);
+console.log(`const TEST_EVIDENCE_HASH: vector<u8> = ${vecLit(EVIDENCE_HASH)};`);

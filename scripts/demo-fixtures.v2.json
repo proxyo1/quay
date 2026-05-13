@@ -1,0 +1,19 @@
+{
+  "network": "testnet",
+  "package_id": "0x72ee99410083ac5c4cc5b97e4808788871cb6cec20a9f27e3abcb1d70f68a8ad",
+  "registry_id": "0xffbbc42be06236fc3a4a080791b353bdb817b718472e617005b22aca5741b108",
+  "captured_at": "2026-05-13T01:35:40.843Z",
+  "note": "Historical V2 fixtures: Walrus integration (uen_raw + evidence_hash) shipped on the still-named-suiqr module. The V2 package is stranded on testnet but no longer referenced. V3 renames the Move module to quay::payments.",
+  "merchants": [
+    {
+      "uen": "202412345Z",
+      "name": "Merchant",
+      "city": "Singapore",
+      "suggested_sgd": "1.50",
+      "description": "Demo merchant registered by V2 redeploy",
+      "merchant_address": "0x95ad0ca1e40335f1f92b4d5f913598591715d5c7f5baf360376e04b527d2629b",
+      "register_tx": "Eiqwk1qJHsp5qurCRhfatzdpLgiQNY9Nte7h4bcj6rEa",
+      "status": "registered_on_v2"
+    }
+  ]
+}

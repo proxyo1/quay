@@ -11,7 +11,18 @@
  * Assumptions:
  *   - sui client is configured for testnet (`sui client active-env` = testnet)
  *   - The active address has at least 0.5 SUI in gas
- *   - `sui move build` works in move/suiqr/
+ *   - `sui move build` works in move/quay/
+ *
+ * Walrus integration redeploy (D4 cutover):
+ *   The ClaimMessage shape and MerchantEntry shape both changed for the
+ *   Walrus integration (uen_raw + evidence_hash). Old attestations cannot
+ *   verify against the new contract. To force a clean redeploy:
+ *     1. Move scripts/deploy-testnet.json to scripts/deploy-testnet.v1.json
+ *        (or delete it). Resume mode skips if package_id is set.
+ *     2. Run `bun run scripts/day2-deploy.ts`.
+ *     3. Update frontend/src/lib/sui-config.ts with the new package_id /
+ *        merchant_registry_id from the freshly written deploy-testnet.json.
+ *     4. Re-onboard any test merchants through /merchant/onboard.
  */
 
 import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
@@ -28,7 +39,7 @@ import { join } from "node:path";
 // ────────────────────────────────────────────────────────────────────────
 
 const REPO_ROOT = "/Users/ryan/projects/suiqr";
-const MOVE_PKG = `${REPO_ROOT}/move/suiqr`;
+const MOVE_PKG = `${REPO_ROOT}/move/quay`;
 const SECRETS_DIR = `${REPO_ROOT}/.secrets`;
 const ISSUER_KEY_FILE = `${SECRETS_DIR}/issuer-testnet.json`;
 const DEPLOY_CONFIG_FILE = `${REPO_ROOT}/scripts/deploy-testnet.json`;
@@ -67,7 +78,16 @@ const ClaimMessage = bcs.struct("ClaimMessage", {
   claimer: bcs.bytes(32),
   nonce: bcs.vector(bcs.u8()),
   expires_at_ms: bcs.u64(),
+  // Walrus integration (D8): the issuer signs over a 32-byte content hash
+  // of the off-chain evidence (form snapshot, sticker photo, etc.). The
+  // demo uses a stable placeholder so the deploy is reproducible.
+  evidence_hash: bcs.vector(bcs.u8()),
 });
+
+// 32 bytes of 0xEE — matches the test-vector evidence_hash so deploy
+// behavior mirrors the unit tests. Real merchants get a hash derived
+// from their actual evidence content via /api/sponsor/register.
+const DEMO_EVIDENCE_HASH = new Uint8Array(32).fill(0xee);
 
 function signClaim(args: {
   issuerSecretKey: Uint8Array;
@@ -79,7 +99,7 @@ function signClaim(args: {
 }): { msgBytes: Uint8Array; msgHash: Uint8Array; sig: Uint8Array; pubkey: Uint8Array } {
   const issuerKp = Ed25519Keypair.fromSecretKey(args.issuerSecretKey);
   const msgBytes = ClaimMessage.serialize({
-    domain_tag: Array.from(new TextEncoder().encode("SUIQR_CLAIM_V1")),
+    domain_tag: Array.from(new TextEncoder().encode("QUAY_CLAIM_V1")),
     chain_id: args.chainId,
     uen: Array.from(args.uen),
     claimer: args.claimer,
@@ -374,12 +394,13 @@ async function main() {
   const claimerBytes = addressToBytes(merchant1Addr);
 
   const msgBytes = ClaimMessage.serialize({
-    domain_tag: Array.from(new TextEncoder().encode("SUIQR_CLAIM_V1")),
+    domain_tag: Array.from(new TextEncoder().encode("QUAY_CLAIM_V1")),
     chain_id: CHAIN_ID_TESTNET,
     uen: Array.from(merchantUen),
     claimer: claimerBytes,
     nonce: Array.from(nonce),
     expires_at_ms: expiresAtMs,
+    evidence_hash: Array.from(DEMO_EVIDENCE_HASH),
   }).toBytes();
   const msgHash = blake2b(msgBytes, { dkLen: 32 });
   const sig = await issuerKp.sign(msgHash);
@@ -400,7 +421,12 @@ async function main() {
       registerTx.pure.vector("u8", Array.from(nonce)),
       registerTx.pure.vector("u8", Array.from(sig)),
       registerTx.pure.u64(expiresAtMs),
-      registerTx.pure.option("string", "ipfs://merchant1-meta"),
+      // D5: metadata_uri is now a bare Walrus blob ID. The demo leaves it
+      // None — real merchants supply one via the onboarding logo picker.
+      registerTx.pure.option("string", null),
+      // D8: evidence_hash (32 bytes) — the issuer's commitment to the
+      // off-chain evidence content. Must match what's in the signed message.
+      registerTx.pure.vector("u8", Array.from(DEMO_EVIDENCE_HASH)),
       registerTx.object("0x6"), // Clock — well-known shared object
     ],
   });

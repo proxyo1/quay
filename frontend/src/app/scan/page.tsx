@@ -14,7 +14,7 @@ import {
   sanitizeMerchantName,
   type SgqrPayload,
 } from "@/lib/sgqr";
-import { SUIQR, objectUrl } from "@/lib/sui-config";
+import { QUAY, objectUrl } from "@/lib/sui-config";
 
 type Source = "scan" | "manual";
 
@@ -36,8 +36,9 @@ type Lookup =
   | { kind: "not_registered" }
   | { kind: "error"; message: string };
 
-/** UEN of the staged demo merchant (KOPI HOUSE) for the "Try an example" link. */
-const EXAMPLE_UEN = "T11KH0001A";
+/** UEN of the staged demo merchant for the "Try an example" link.
+ *  Registered by scripts/day2-deploy.ts against the V2 package. */
+const EXAMPLE_UEN = "202412345Z";
 
 export default function ScanPage() {
   const account = useCurrentAccount();
@@ -150,7 +151,7 @@ export default function ScanPage() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-10 space-y-8">
       <header className="space-y-1">
-        <h1 className="text-3xl font-semibold">suiqr · scan</h1>
+        <h1 className="text-3xl font-semibold">quay · scan</h1>
         <p className="text-sm text-gray-500">
           Scan a merchant&apos;s SGQR sticker with your camera, or type their UEN
           directly. Camera capture auto-fills the UEN once a valid QR is in
@@ -239,14 +240,14 @@ export default function ScanPage() {
         <p>
           On-chain registry:{" "}
           <a
-            href={objectUrl(SUIQR.registryId)}
+            href={objectUrl(QUAY.registryId)}
             target="_blank"
             rel="noreferrer noopener"
             className="text-blue-600 hover:underline font-mono"
           >
-            {SUIQR.registryId.slice(0, 10)}…{SUIQR.registryId.slice(-6)}
+            {QUAY.registryId.slice(0, 10)}…{QUAY.registryId.slice(-6)}
           </a>{" "}
-          on {SUIQR.network}
+          on {QUAY.network}
         </p>
       </footer>
 
@@ -337,8 +338,8 @@ function RegistryStatus({ lookup, typed }: { lookup: Lookup; typed: boolean }) {
     return (
       <p className="text-xs text-gray-600 dark:text-gray-400">
         {typed
-          ? "This UEN isn't on the suiqr registry yet."
-          : "This merchant isn't on the suiqr registry yet — their SGQR will keep working for regular PayNow, just not on chain."}
+          ? "This UEN isn't on the quay registry yet."
+          : "This merchant isn't on the quay registry yet — their SGQR will keep working for regular PayNow, just not on chain."}
       </p>
     );
   }
@@ -359,9 +360,9 @@ function CameraIcon() {
 function buildDevInspectQuery(uenBytes: Uint8Array): Transaction {
   const tx = new Transaction();
   tx.moveCall({
-    target: `${SUIQR.packageId}::payments::merchant_address`,
+    target: `${QUAY.packageId}::payments::merchant_address`,
     arguments: [
-      tx.object(SUIQR.registryId),
+      tx.object(QUAY.registryId),
       tx.pure.vector("u8", Array.from(uenBytes)),
     ],
   });

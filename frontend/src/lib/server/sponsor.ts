@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Load the suiqr sponsored-gas wallet. Same key-source-precedence pattern
+ * Load the quay sponsored-gas wallet. Same key-source-precedence pattern
  * as the issuer (env hex → env bech32 → .secrets file).
  *
  * Server-only — never import from a client component.

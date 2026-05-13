@@ -5,7 +5,7 @@ import { blake2b } from "@noble/hashes/blake2.js";
 import { NextResponse } from "next/server";
 
 import { loadIssuerKeypair } from "@/lib/server/issuer";
-import { SUIQR } from "@/lib/sui-config";
+import { QUAY } from "@/lib/sui-config";
 import { looksLikeUen } from "@/lib/sgqr";
 
 export const runtime = "nodejs";
@@ -15,7 +15,7 @@ export const runtime = "nodejs";
  *
  * V0 demo: auto-issues an attestation for any well-shaped UEN + Sui
  * address. The hackathon README is honest about this — production
- * gates issuance behind an SGQR-photo + BizFile+ review by suiqr
+ * gates issuance behind an SGQR-photo + BizFile+ review by quay
  * staff (or replaces this entirely with a NETS-controlled key once
  * MAS / NETS sign off).
  *
@@ -23,7 +23,7 @@ export const runtime = "nodejs";
  * exactly the shape Move reconstructs in register_merchant.
  *
  * Rate limiting / abuse prevention is out of scope for V0 — only the
- * suiqr-the-company instance can run this route because it requires
+ * quay-the-company instance can run this route because it requires
  * access to the issuer secret key.
  */
 
@@ -34,11 +34,14 @@ const ClaimMessage = bcs.struct("ClaimMessage", {
   claimer: bcs.bytes(32),
   nonce: bcs.vector(bcs.u8()),
   expires_at_ms: bcs.u64(),
+  evidence_hash: bcs.vector(bcs.u8()),
 });
 
 interface AttestRequest {
   uen: string;
   claimer: string;
+  /** Hex-encoded 32-byte blake2b256 of the evidence content (D8). */
+  evidence_hash_hex: string;
   ttlSeconds?: number;
 }
 
@@ -63,6 +66,13 @@ function parseAddress(addr: string): Uint8Array | null {
   return out;
 }
 
+function parseEvidenceHash(s: string | undefined): Uint8Array | null {
+  if (!s || !/^[0-9a-fA-F]{64}$/.test(s)) return null;
+  const out = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
 export async function POST(req: Request) {
   let body: AttestRequest;
   try {
@@ -84,6 +94,13 @@ export async function POST(req: Request) {
   if (!claimerBytes) {
     return NextResponse.json({ error: `invalid claimer address '${body.claimer}'` }, { status: 400 });
   }
+  const evidenceHash = parseEvidenceHash(body.evidence_hash_hex);
+  if (!evidenceHash) {
+    return NextResponse.json(
+      { error: "evidence_hash_hex must be a 64-char hex string (32 bytes)" },
+      { status: 400 },
+    );
+  }
   const ttl = Math.max(60, Math.min(MAX_TTL_SECONDS, body.ttlSeconds ?? DEFAULT_TTL_SECONDS));
 
   let issuer;
@@ -101,12 +118,13 @@ export async function POST(req: Request) {
   const expiresAtMs = Date.now() + ttl * 1000;
 
   const msgBytes = ClaimMessage.serialize({
-    domain_tag: Array.from(new TextEncoder().encode("SUIQR_CLAIM_V1")),
-    chain_id: SUIQR.chainId,
+    domain_tag: Array.from(new TextEncoder().encode("QUAY_CLAIM_V1")),
+    chain_id: QUAY.chainId,
     uen: Array.from(new TextEncoder().encode(body.uen)),
     claimer: claimerBytes,
     nonce: Array.from(nonce),
     expires_at_ms: BigInt(expiresAtMs),
+    evidence_hash: Array.from(evidenceHash),
   }).toBytes();
   const msgHash = blake2b(msgBytes, { dkLen: 32 });
   const sig = await issuer.sign(msgHash);
@@ -116,7 +134,7 @@ export async function POST(req: Request) {
     nonce_hex: Buffer.from(nonce).toString("hex"),
     expires_at_ms: expiresAtMs,
     issuer_pubkey_hex: Buffer.from(issuer.getPublicKey().toRawBytes()).toString("hex"),
-    chain_id: SUIQR.chainId,
+    chain_id: QUAY.chainId,
     msg_hash_hex: Buffer.from(msgHash).toString("hex"),
   };
   return NextResponse.json(response);

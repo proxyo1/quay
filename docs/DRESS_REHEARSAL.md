@@ -1,6 +1,6 @@
 # Demo-day dress rehearsal
 
-5-minute runbook for the suiqr Sui Overflow submission demo.
+5-minute runbook for the quay Sui Overflow submission demo.
 
 ## Pre-demo (do this once, day-of, before judges arrive)
 
@@ -43,16 +43,18 @@
    bun run day11-stage-demo.ts
    ```
 
-   Should print "already registered — skipping" for KOPI HOUSE, AH
-   HUAT CHICKEN RICE, and WEST COAST PRINT SHOP. If not, it'll register
-   them fresh (still safe).
+   After the V2 redeploy (2026-05-13) the registry starts empty
+   except for the deploy-script's demo merchant `202412345Z`. The
+   stage script registers KOPI HOUSE, AH HUAT CHICKEN RICE, and
+   WEST COAST PRINT SHOP fresh on V2. Subsequent runs print
+   "already registered — skipping" once they're on chain.
 
 4. **Pre-stage your demoer-side merchant** — the one whose terminal
    you'll show in Act 2. This is a real zkLogin-derived address you
    own.
 
    - Open `/merchant/login`, sign in with the Gmail account you'll
-     demo with (e.g., a `suiqr-demo@gmail.com` test account).
+     demo with (e.g., a `quay-demo@gmail.com` test account).
    - On `/merchant/onboard`, claim a memorable UEN
      (e.g., `T11DEMO123` — anything 8-10 alphanumeric).
    - Sponsored gas is checked by default — the merchant's wallet
@@ -75,13 +77,13 @@ they're paying is one of the pre-staged fixtures.
 
 1. **Open /scan** ([localhost:3000/scan](http://localhost:3000/scan)).
 2. **Click "Scan SGQR"** or, if no real sticker is in frame, click
-   "↳ Try the demo UEN (T11KH0001A)" — the same KOPI HOUSE that's
-   pre-registered on chain.
+   "↳ Try the demo UEN (202412345Z)" — the deploy-script-registered
+   merchant on the V2 package.
 3. **Point out the parsed view + on-chain status**:
-   - PayNow UEN `T11KH0001A` extracted (from camera) or accepted
+   - PayNow UEN `202412345Z` extracted (from camera) or accepted
      (from manual)
-   - "✓ Registered — pays to 0x2084…0c57" badge resolved via
-     `devInspectTransactionBlock`
+   - "✓ Registered — pays to 0x95ad…629b" badge resolved via the
+     on-chain registry lookup
 4. **Connect the payer's Sui Wallet** (right-side button).
 5. **Type $3.50 in the amount box**. Live Pyth quote appears:
    "≈ X.XX SUI · 1 USD = 1.27 SGD · 1 SUI = $Y.YY · live (Ns ago)".
@@ -168,7 +170,7 @@ These are pre-baked from the build plan's AD48 ("Why not just off-ramp?"):
   ecosystem (buybacks + DeFi incentives), issued under US law by
   Stripe's Bridge — same compliance posture as USDC plus a fee story
   USDC can't match.
-- **"Centralization?"** — V0 has a single ed25519 issuer key (suiqr).
+- **"Centralization?"** — V0 has a single ed25519 issuer key (quay).
   V1 rotates to multisig / DAO via `rotate_issuer_pubkey` (gated by
   AdminCap). The Move contract supports this on day one.
 - **"What does zkLogin give merchants vs just connecting a wallet?"** —

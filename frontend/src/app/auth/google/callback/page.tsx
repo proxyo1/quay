@@ -106,7 +106,7 @@ export default function OAuthCallbackPage() {
       <header>
         <h1 className="text-2xl font-semibold">Signing in</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Connecting your Google identity to your suiqr Sui address.
+          Connecting your Google identity to your quay Sui address.
         </p>
       </header>
 
@@ -115,7 +115,7 @@ export default function OAuthCallbackPage() {
           <p className="font-medium">{state.step}…</p>
           <p className="text-xs text-gray-500 mt-1">
             Ephemeral keypair + Groth16 proof via Enoki — your password
-            never touches suiqr.
+            never touches quay.
           </p>
         </section>
       )}

@@ -1,44 +1,18 @@
 {
   "network": "testnet",
-  "package_id": "0x46398f18d42864b8325c0089bd0ae6ba439c85d02510412738ce273c53ce167e",
-  "registry_id": "0x00148a23a4e120142965ed011370b39a42e858174aec98d5fac079a834c1e5e1",
-  "merchant_address": "0x2084bbffd0e742beff5e07f587a84d372326b2ef40524762ae96d64d42bd0c57",
-  "captured_at": "2026-05-12T14:54:43.474Z",
+  "package_id": "0x70631c59a94e74594af10eabcd20e6cf88564ccca985610c8c1c9b100462a87c",
+  "registry_id": "0xa572e59aa755af7a93c2a0b0216639b3debe6b5ecdb4074c763d3484e879645b",
+  "captured_at": "2026-05-13T04:42:12.657Z",
+  "note": "V3 redeploy on 2026-05-13: module renamed to quay::payments, domain tag bumped to QUAY_CLAIM_V1. V1 + V2 fixtures preserved as demo-fixtures.v1.json (pre-Walrus) and demo-fixtures.v2.json (Walrus, suiqr module). To re-stage the KOPI HOUSE / AH HUAT CHICKEN RICE / WEST COAST PRINT SHOP merchants on V3, run scripts/day11-stage-demo.ts.",
   "merchants": [
     {
-      "uen": "T11KH0001A",
-      "name": "KOPI HOUSE",
+      "uen": "202412345Z",
+      "name": "Merchant",
       "city": "Singapore",
-      "suggested_sgd": "3.50",
-      "description": "$3.50 SGD kopi-o + kaya toast set",
-      "merchant_address": "0x2084bbffd0e742beff5e07f587a84d372326b2ef40524762ae96d64d42bd0c57",
-      "sgqr_static": "00020101021126370009SG.PAYNOW010120210T11KH0001A030105204000053037025802SG5910KOPI HOUSE6009Singapore6304BFAC",
-      "sgqr_with_amount": "00020101021126370009SG.PAYNOW010120210T11KH0001A0301052040000530370254043.505802SG5910KOPI HOUSE6009Singapore63040FFB",
-      "register_tx": "Gvvw24XXZq2jkeVs3Cwf6dr787A26FmJyp1irQXzMbVZ",
-      "status": "registered"
-    },
-    {
-      "uen": "T11CR0002B",
-      "name": "AH HUAT CHICKEN RICE",
-      "city": "Singapore",
-      "suggested_sgd": "5.00",
-      "description": "$5.00 SGD chicken rice plate",
-      "merchant_address": "0x2084bbffd0e742beff5e07f587a84d372326b2ef40524762ae96d64d42bd0c57",
-      "sgqr_static": "00020101021126370009SG.PAYNOW010120210T11CR0002B030105204000053037025802SG5920AH HUAT CHICKEN RICE6009Singapore6304CE32",
-      "sgqr_with_amount": "00020101021126370009SG.PAYNOW010120210T11CR0002B0301052040000530370254045.005802SG5920AH HUAT CHICKEN RICE6009Singapore6304DF43",
-      "register_tx": "4Ziftr4QW5KZS8ePUUSZGWomYGnbuoivTamgHLXtnsmB",
-      "status": "registered"
-    },
-    {
-      "uen": "T11PS0003C",
-      "name": "WEST COAST PRINT SHOP",
-      "city": "Singapore",
-      "suggested_sgd": "12.00",
-      "description": "$12.00 SGD bulk photocopy job",
-      "merchant_address": "0x2084bbffd0e742beff5e07f587a84d372326b2ef40524762ae96d64d42bd0c57",
-      "sgqr_static": "00020101021126370009SG.PAYNOW010120210T11PS0003C030105204000053037025802SG5921WEST COAST PRINT SHOP6009Singapore6304CBEF",
-      "sgqr_with_amount": "00020101021126370009SG.PAYNOW010120210T11PS0003C03010520400005303702540512.005802SG5921WEST COAST PRINT SHOP6009Singapore630415C6",
-      "register_tx": "DbocnpxQHByLA5spjJhRauLDyv4hubTvtvLpdCW9uuPq",
+      "suggested_sgd": "1.50",
+      "description": "Demo merchant registered by scripts/day2-deploy.ts during V3 redeploy",
+      "merchant_address": "0xf2e175ccd45db38a7fb3ffb73be679dfac3c3975f4c245ba06cb2adbea3a8a39",
+      "register_tx": "7NdB95wjHva8yCuhAnrpEfhjbkELGiEc78Zouv8zg8gY",
       "status": "registered"
     }
   ]

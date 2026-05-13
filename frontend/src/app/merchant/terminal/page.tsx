@@ -7,8 +7,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 
 import { useZkLoginSession } from "@/lib/zklogin";
-import { getEntriesTableId } from "@/lib/suiqr";
-import { SUIQR, objectUrl, txUrl } from "@/lib/sui-config";
+import { getEntriesTableId } from "@/lib/quay";
+import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
+import { getBlobUrl } from "@/lib/walrus/client";
 
 interface PaymentReceiptEvent {
   receipt_id: number[];
@@ -63,6 +64,8 @@ interface MerchantUen {
   uen: string;
   digest: string;
   timestamp: number;
+  /** Walrus blob ID for the merchant's logo (D5). null if not set. */
+  metadataBlobId: string | null;
 }
 
 interface MerchantRegisteredEvent {
@@ -74,16 +77,15 @@ interface MerchantRegisteredEvent {
 /**
  * Read the merchant's claimed UENs from chain.
  *
- * Flow:
+ * Flow (post-D1 migration):
  *   1. Fetch recent MerchantRegistered events, filter to this address.
  *   2. For each event's uen_hash, read the registry's dynamic field to get
- *      the MerchantEntry's `metadata_uri`.
- *   3. metadata_uri is stamped at register time as "uen:<UEN>" — we strip
- *      the prefix to recover the raw UEN.
+ *      the MerchantEntry struct.
+ *   3. The entry has `uen_raw` (D1) — read it directly as the human UEN.
+ *      Logo lives at `metadata_uri` as a bare Walrus blob ID (D5).
  *
- * Older entries with metadata_uri=null are invisible here (we can't reverse
- * the on-chain uen_hash). Re-onboarding a different UEN under the new flow
- * surfaces it correctly.
+ * Old pre-migration entries with the "uen:<UEN>" string in metadata_uri are
+ * NOT supported — D4 mandates a hard cutover (wipe + redeploy + re-register).
  */
 function useMerchantUens(address: string | undefined) {
   const sui = useSuiClient();
@@ -93,9 +95,9 @@ function useMerchantUens(address: string | undefined) {
       if (!address) return [];
       // entries is a Table<vector<u8>, MerchantEntry> — dynamic fields live
       // under the table's UID, NOT the parent registry's. Resolve once.
-      const tableId = await getEntriesTableId(sui, SUIQR.registryId);
+      const tableId = await getEntriesTableId(sui, QUAY.registryId);
       const events = await sui.queryEvents({
-        query: { MoveEventType: `${SUIQR.packageId}::payments::MerchantRegistered` },
+        query: { MoveEventType: `${QUAY.packageId}::payments::MerchantRegistered` },
         order: "descending",
         limit: 100,
       });
@@ -110,10 +112,11 @@ function useMerchantUens(address: string | undefined) {
               parentId: tableId,
               name: { type: "vector<u8>", value: ev.uen_hash },
             });
-            const uen = extractUenFromEntry(field.data?.content);
-            if (!uen) return null;
+            const extracted = extractEntryFields(field.data?.content);
+            if (!extracted) return null;
             return {
-              uen,
+              uen: extracted.uen,
+              metadataBlobId: extracted.metadataBlobId,
               digest: e.id.txDigest,
               timestamp: Number(ev.timestamp_ms),
             };
@@ -129,15 +132,29 @@ function useMerchantUens(address: string | undefined) {
   });
 }
 
-function extractUenFromEntry(content: unknown): string | null {
+function extractEntryFields(
+  content: unknown,
+): { uen: string; metadataBlobId: string | null } | null {
   if (!content || typeof content !== "object") return null;
   const c = content as { dataType?: string; fields?: Record<string, unknown> };
   if (c.dataType !== "moveObject") return null;
   const value = c.fields?.value as { fields?: Record<string, unknown> } | undefined;
-  const meta = value?.fields?.metadata_uri;
-  if (typeof meta !== "string") return null;
-  if (meta.startsWith("uen:")) return meta.slice(4);
-  return null;
+  const fields = value?.fields;
+  if (!fields) return null;
+
+  const uenRaw = fields.uen_raw;
+  let uen: string | null = null;
+  if (Array.isArray(uenRaw)) {
+    uen = new TextDecoder().decode(new Uint8Array(uenRaw as number[]));
+  } else if (typeof uenRaw === "string") {
+    uen = uenRaw;
+  }
+  if (!uen) return null;
+
+  const meta = fields.metadata_uri;
+  const metadataBlobId = typeof meta === "string" && meta.length > 0 ? meta : null;
+
+  return { uen, metadataBlobId };
 }
 
 function TerminalView({
@@ -153,7 +170,7 @@ function TerminalView({
   const { data, error, isLoading } = useSuiClientQuery(
     "queryEvents",
     {
-      query: { MoveEventType: `${SUIQR.packageId}::payments::PaymentReceipt` },
+      query: { MoveEventType: `${QUAY.packageId}::payments::PaymentReceipt` },
       order: "descending",
       limit: 50,
     },
@@ -262,12 +279,12 @@ function TerminalView({
         <p>
           Registry:{" "}
           <a
-            href={objectUrl(SUIQR.registryId)}
+            href={objectUrl(QUAY.registryId)}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-blue-600 hover:underline"
           >
-            {SUIQR.registryId.slice(0, 10)}…{SUIQR.registryId.slice(-6)}
+            {QUAY.registryId.slice(0, 10)}…{QUAY.registryId.slice(-6)}
           </a>
         </p>
       </footer>
@@ -323,12 +340,15 @@ function UenList({
             key={u.uen}
             className="flex items-center justify-between gap-3 text-sm"
           >
-            <span className="font-mono font-medium">{u.uen}</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <MerchantLogo blobId={u.metadataBlobId} alt={u.uen} />
+              <span className="font-mono font-medium truncate">{u.uen}</span>
+            </div>
             <a
               href={txUrl(u.digest)}
               target="_blank"
               rel="noreferrer"
-              className="text-xs text-blue-600 hover:underline font-mono"
+              className="text-xs text-blue-600 hover:underline font-mono shrink-0"
               title={`Registered ${new Date(u.timestamp).toLocaleString()}`}
             >
               registration tx ↗
@@ -337,6 +357,40 @@ function UenList({
         ))}
       </ul>
     </section>
+  );
+}
+
+/**
+ * Render the merchant's Walrus-stored logo with onerror → initials fallback.
+ * Browser image cache + Cache-Control from the aggregator handle repeat renders;
+ * a blob_id with 404 silently falls back without a "broken image" icon.
+ */
+function MerchantLogo({ blobId, alt }: { blobId: string | null; alt: string }) {
+  const initial = alt.charAt(0).toUpperCase();
+  if (!blobId) {
+    return (
+      <span className="inline-flex items-center justify-center h-6 w-6 rounded-sm bg-gray-200 dark:bg-gray-700 text-[10px] font-medium text-gray-600 dark:text-gray-300 shrink-0">
+        {initial}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={getBlobUrl(blobId)}
+      alt={alt}
+      width={24}
+      height={24}
+      loading="lazy"
+      decoding="async"
+      onError={(e) => {
+        // Fallback: hide the broken img; the parent span will show initials
+        // via a sibling element we render alongside.
+        e.currentTarget.style.display = "none";
+        const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+        if (fallback) fallback.style.display = "inline-flex";
+      }}
+      className="h-6 w-6 rounded-sm object-cover shrink-0"
+    />
   );
 }
 

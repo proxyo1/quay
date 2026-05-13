@@ -47,7 +47,7 @@ export default function WalletPage() {
       <header className="space-y-1">
         <h1 className="text-3xl font-semibold">Wallet</h1>
         <p className="text-sm text-gray-500">
-          Your suiqr merchant wallet — bound to your Google identity via Sui
+          Your quay merchant wallet — bound to your Google identity via Sui
           zkLogin. There&apos;s no private key to lose, no recovery phrase to
           back up. Sign back in with the same Google account from any device
           and your wallet is there.

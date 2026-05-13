@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Load the suiqr attestation issuer keypair.
+ * Load the quay attestation issuer keypair.
  *
  * Priority:
  *   1. SUIQR_ISSUER_SECRET_KEY_HEX env var (preferred for production)

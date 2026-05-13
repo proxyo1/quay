@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quay.example/receipts/v1",
+  "title": "quay Receipt",
+  "description": "Canonical payment receipt stored on Walrus. The blob is content-addressed; the on-chain PaymentReceipt event's quote_metadata (v2 BCS) carries the matching blob_id.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "payer",
+    "merchant",
+    "uen_raw",
+    "amount",
+    "token_type",
+    "sgd_minor_units",
+    "timestamp_ms"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "blake2b256(uen_hash || payer || timestamp_ms || amount), lowercase hex."
+    },
+    "payer": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]+$"
+    },
+    "merchant": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]+$"
+    },
+    "uen_raw": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw UEN string recovered from on-chain MerchantEntry.uen_raw."
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Token base units as a decimal string (bigint-compatible)."
+    },
+    "token_type": {
+      "type": "string",
+      "description": "Sui Move coin type, e.g., 0x2::sui::SUI."
+    },
+    "sgd_minor_units": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timestamp_ms": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "quote": {
+      "type": "object",
+      "description": "Quote inputs used to compute the SGD amount.",
+      "properties": {
+        "feed": { "type": "string" },
+        "price_usd": { "type": "string" },
+        "sgd_per_usd": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "memo": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

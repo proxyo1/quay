@@ -1,6 +1,6 @@
 import { Transaction } from "@mysten/sui/transactions";
 
-import { SUIQR } from "@/lib/sui-config";
+import { QUAY } from "@/lib/sui-config";
 
 export const COIN_TYPES = {
   SUI: "0x2::sui::SUI",
@@ -56,16 +56,16 @@ export function buildPaySuiTx(input: BuildPaySuiInputs): Transaction {
     : tx.pure.option("vector<u8>", null);
 
   tx.moveCall({
-    target: `${SUIQR.packageId}::payments::pay`,
+    target: `${QUAY.packageId}::payments::pay`,
     typeArguments: [COIN_TYPES.SUI],
     arguments: [
-      tx.object(SUIQR.registryId),
+      tx.object(QUAY.registryId),
       tx.pure.vector("u8", Array.from(new TextEncoder().encode(uen))),
       coin,
       memoArg,
       tx.pure.u64(BigInt(sgdMinorUnits)),
       quoteArg,
-      tx.object(SUIQR.clockId),
+      tx.object(QUAY.clockId),
     ],
   });
   return tx;

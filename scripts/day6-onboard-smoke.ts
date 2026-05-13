@@ -100,11 +100,18 @@ async function main() {
     const uen = `T2${Math.floor(Math.random() * 9_000_000) + 1_000_000}A`;
     console.log(`uen:             ${uen}`);
 
-    // 5. Request attestation
+    // 5. Request attestation. Phase 4 (D8): /api/attest now requires
+    // evidence_hash_hex bound to the issuer's signature. Use a stable
+    // placeholder for this smoke test.
+    const demoEvidenceHashHex = "ee".repeat(32);
     const attestRes = await fetch(`http://127.0.0.1:${dev_server.port}/api/attest`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ uen, claimer: merchantAddr }),
+      body: JSON.stringify({
+        uen,
+        claimer: merchantAddr,
+        evidence_hash_hex: demoEvidenceHashHex,
+      }),
     });
     if (!attestRes.ok) {
       const err = await attestRes.json().catch(() => ({}));
@@ -134,6 +141,7 @@ async function main() {
     const sig = Buffer.from(a.attestation_hex, "hex");
     const tx = new Transaction();
     tx.setGasBudget(20_000_000n);
+    const evidenceHashBytes = Buffer.from(demoEvidenceHashHex, "hex");
     tx.moveCall({
       target: `${deploy.package_id}::payments::register_merchant`,
       arguments: [
@@ -142,7 +150,9 @@ async function main() {
         tx.pure.vector("u8", Array.from(nonce)),
         tx.pure.vector("u8", Array.from(sig)),
         tx.pure.u64(BigInt(a.expires_at_ms)),
-        tx.pure.option("string", `ipfs://demo/${uen}`),
+        // D5: metadata_uri is now a bare Walrus blob ID. Smoke test sends None.
+        tx.pure.option("string", null),
+        tx.pure.vector("u8", Array.from(evidenceHashBytes)),
         tx.object(CLOCK),
       ],
     });

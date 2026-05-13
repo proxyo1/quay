@@ -47,7 +47,23 @@ export async function getEntriesTableId(
 
 export type UenLookupResult =
   | { claimed: false }
-  | { claimed: true; owner: string; metadataUri: string | null };
+  | {
+      claimed: true;
+      owner: string;
+      /** Raw UEN bytes recovered from the on-chain `uen_raw` field (D1). */
+      uenRaw: string | null;
+      /**
+       * Walrus blob ID for the merchant's profile (D5). Caller constructs
+       * the aggregator URL via `getBlobUrl()`. `null` if not set.
+       */
+      metadataBlobId: string | null;
+      /**
+       * 32-byte blake2b256 of the issuer-verified evidence (D8). Empty
+       * vector when the merchant was registered via `register_for_testing`
+       * (test-only).
+       */
+      evidenceHashHex: string;
+    };
 
 /**
  * Read-only check whether a UEN is already claimed in the registry. Used as a
@@ -75,11 +91,33 @@ export async function lookupUen(
       .value?.fields;
     const owner = value?.sui_address;
     if (typeof owner !== "string") return { claimed: false };
-    const metadata = value?.metadata_uri;
+
+    const metadataBlobId =
+      typeof value?.metadata_uri === "string" ? (value.metadata_uri as string) : null;
+
+    // uen_raw comes back as either number[] (BCS-decoded) or string.
+    const uenRawRaw = value?.uen_raw;
+    let uenRaw: string | null = null;
+    if (Array.isArray(uenRawRaw)) {
+      uenRaw = new TextDecoder().decode(new Uint8Array(uenRawRaw as number[]));
+    } else if (typeof uenRawRaw === "string") {
+      uenRaw = uenRawRaw;
+    }
+
+    const evidenceHashRaw = value?.evidence_hash;
+    let evidenceHashHex = "";
+    if (Array.isArray(evidenceHashRaw)) {
+      evidenceHashHex = toHex(Uint8Array.from(evidenceHashRaw as number[]));
+    } else if (typeof evidenceHashRaw === "string") {
+      evidenceHashHex = evidenceHashRaw;
+    }
+
     return {
       claimed: true,
       owner,
-      metadataUri: typeof metadata === "string" ? metadata : null,
+      uenRaw,
+      metadataBlobId,
+      evidenceHashHex,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -88,4 +126,8 @@ export async function lookupUen(
     }
     throw e;
   }
+}
+
+function toHex(b: Uint8Array): string {
+  return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
 }

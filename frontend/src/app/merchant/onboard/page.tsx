@@ -1,15 +1,24 @@
 "use client";
 
 import { useSuiClient } from "@mysten/dapp-kit";
+import { blake2b } from "@noble/hashes/blake2.js";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
 import { extractPayNow, looksLikeUen, parseSgqr } from "@/lib/sgqr";
-import { lookupUen } from "@/lib/suiqr";
-import { SUIQR, objectUrl, txUrl } from "@/lib/sui-config";
+import { lookupUen } from "@/lib/quay";
+import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
+import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
 import { useZkLoginSession, zkLoginSign } from "@/lib/zklogin";
+
+const LOGO_MAX_BYTES = 200 * 1024; // 200KB (Phase 2 spec)
+const LOGO_ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function toHex(b: Uint8Array): string {
+  return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
+}
 
 type SponsoredRegister = {
   tx_bytes_b64: string;
@@ -32,6 +41,10 @@ export default function OnboardPage() {
   const sui = useSuiClient();
 
   const [uen, setUen] = useState("");
+  const [merchantName, setMerchantName] = useState("");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const [logoNotice, setLogoNotice] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
@@ -87,11 +100,12 @@ export default function OnboardPage() {
   async function handleSubmit() {
     if (!session) return;
     setState({ kind: "submitting" });
+    setLogoNotice(null);
     try {
       // Pre-flight: check the registry for this uen_hash before the sponsor
       // signs anything. Saves a sponsor signature on hopeless attempts and
       // gives the right next step instead of a raw MoveAbort.
-      const existing = await lookupUen(sui, SUIQR.registryId, uen);
+      const existing = await lookupUen(sui, QUAY.registryId, uen);
       if (existing.claimed) {
         if (existing.owner === session.address) {
           setState({ kind: "already-yours" });
@@ -105,16 +119,44 @@ export default function OnboardPage() {
         return;
       }
 
+      // Phase 2: optional logo upload to Walrus. D7 policy: skip-on-fail.
+      let metadataBlobId: string | undefined;
+      if (logoFile) {
+        try {
+          const buf = new Uint8Array(await logoFile.arrayBuffer());
+          const { blobId } = await uploadBlob(buf);
+          metadataBlobId = blobId;
+        } catch (err) {
+          // Skip-and-proceed (D7). Onboarding still succeeds without a logo.
+          const why = err instanceof WalrusUploadError ? err.message : String(err);
+          setLogoNotice(`Logo upload failed (${why}). Registering without a logo — you can retry later.`);
+        }
+      }
+
+      // Phase 4 (operator side, D7+D8): the issuer signs over evidence_hash.
+      // V0 evidence is a JSON snapshot of the form fields the merchant
+      // filled in (merchant_name + UEN + claimer + timestamp). Hash binds
+      // to content; server uploads the bytes to Walrus + writes the audit
+      // row + signs only after verifying the hash matches.
+      const evidenceObject = {
+        merchant_name: merchantName,
+        uen,
+        claimer: session.address,
+        signed_at_ms: Date.now(),
+      };
+      const evidenceContent = JSON.stringify(evidenceObject);
+      const evidenceBytes = new TextEncoder().encode(evidenceContent);
+      const evidenceHashHex = toHex(blake2b(evidenceBytes, { dkLen: 32 }));
+
       const res = await fetch("/api/sponsor/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        // metadata_uri carries the raw UEN so /merchant/terminal can read it
-        // back on any device from the MerchantEntry's metadata_uri field. The
-        // chain key is still uen_hash; this is just the human-readable mirror.
         body: JSON.stringify({
           uen,
           claimer: session.address,
-          metadata_uri: `uen:${uen}`,
+          metadata_blob_id: metadataBlobId,
+          evidence_hash_hex: evidenceHashHex,
+          evidence_content: evidenceContent,
         }),
       });
       if (!res.ok) {
@@ -139,6 +181,28 @@ export default function OnboardPage() {
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     }
+  }
+
+  function onLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setLogoNotice(null);
+    if (!file) {
+      setLogoFile(null);
+      setLogoError(null);
+      return;
+    }
+    if (!LOGO_ALLOWED_MIME.has(file.type)) {
+      setLogoFile(null);
+      setLogoError(`Unsupported type ${file.type || "(unknown)"} — use JPEG, PNG, or WebP.`);
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      setLogoFile(null);
+      setLogoError(`Image is ${Math.round(file.size / 1024)}KB — max 200KB.`);
+      return;
+    }
+    setLogoFile(file);
+    setLogoError(null);
   }
 
   return (
@@ -203,6 +267,45 @@ export default function OnboardPage() {
             <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{scanFeedback}</p>
           )}
         </div>
+
+        <div>
+          <label htmlFor="merchant-name" className="block text-xs text-gray-500 mb-1">
+            Business name (recorded in evidence)
+          </label>
+          <input
+            id="merchant-name"
+            type="text"
+            value={merchantName}
+            onChange={(e) => setMerchantName(e.target.value)}
+            placeholder="Bob's Cafe"
+            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-3 py-2"
+            disabled={state.kind === "submitting"}
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Hashed into the on-chain <code className="font-mono">evidence_hash</code> alongside your UEN and Sui address.
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="logo" className="block text-xs text-gray-500 mb-1">
+            Logo (optional, JPEG/PNG/WebP, ≤200KB)
+          </label>
+          <input
+            id="logo"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={onLogoChange}
+            className="block text-sm"
+            disabled={state.kind === "submitting"}
+          />
+          {logoFile && !logoError && (
+            <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
+              {logoFile.name} ({Math.round(logoFile.size / 1024)}KB) — will upload to Walrus on submit.
+            </p>
+          )}
+          {logoError && <p className="text-xs text-amber-600 mt-1">{logoError}</p>}
+          {logoNotice && <p className="text-xs text-amber-600 mt-1">{logoNotice}</p>}
+        </div>
       </section>
 
       <SubmitFlow state={state} ready={ready} onSubmit={handleSubmit} />
@@ -211,14 +314,14 @@ export default function OnboardPage() {
         <p>
           Registry:{" "}
           <a
-            href={objectUrl(SUIQR.registryId)}
+            href={objectUrl(QUAY.registryId)}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-blue-600 hover:underline"
           >
-            {SUIQR.registryId.slice(0, 10)}…{SUIQR.registryId.slice(-6)}
+            {QUAY.registryId.slice(0, 10)}…{QUAY.registryId.slice(-6)}
           </a>{" "}
-          on {SUIQR.network}
+          on {QUAY.network}
         </p>
         <p>
           V0 auto-issues attestations for any well-shaped UEN; production gates

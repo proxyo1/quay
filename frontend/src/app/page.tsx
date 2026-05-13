@@ -1,12 +1,12 @@
 import Link from "next/link";
 
-import { SUIQR, objectUrl } from "@/lib/sui-config";
+import { QUAY, objectUrl } from "@/lib/sui-config";
 
 export default function Home() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-16 space-y-10">
       <header className="space-y-2">
-        <h1 className="text-4xl font-semibold tracking-tight">suiqr</h1>
+        <h1 className="text-4xl font-semibold tracking-tight">quay</h1>
         <p className="text-lg text-gray-600 dark:text-gray-400">
           Scan any Singapore SGQR sticker, pay any Sui token, settle as USDC.
         </p>
@@ -40,24 +40,24 @@ export default function Home() {
         <p>
           Registry:{" "}
           <a
-            href={objectUrl(SUIQR.registryId)}
+            href={objectUrl(QUAY.registryId)}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-blue-600 hover:underline"
           >
-            {SUIQR.registryId.slice(0, 10)}…{SUIQR.registryId.slice(-6)}
+            {QUAY.registryId.slice(0, 10)}…{QUAY.registryId.slice(-6)}
           </a>{" "}
-          on Sui {SUIQR.network}
+          on Sui {QUAY.network}
         </p>
         <p>
           Package:{" "}
           <a
-            href={objectUrl(SUIQR.packageId)}
+            href={objectUrl(QUAY.packageId)}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-blue-600 hover:underline"
           >
-            {SUIQR.packageId.slice(0, 10)}…{SUIQR.packageId.slice(-6)}
+            {QUAY.packageId.slice(0, 10)}…{QUAY.packageId.slice(-6)}
           </a>
         </p>
       </footer>

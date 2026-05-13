@@ -29,7 +29,11 @@ const ClaimMessage = bcs.struct("ClaimMessage", {
   claimer: bcs.bytes(32),
   nonce: bcs.vector(bcs.u8()),
   expires_at_ms: bcs.u64(),
+  evidence_hash: bcs.vector(bcs.u8()),
 });
+
+// 32 bytes of 0xEE — stable smoke-test placeholder matching unit-test vectors.
+const DEMO_EVIDENCE_HASH = new Uint8Array(32).fill(0xee);
 
 function loadSponsor(): Ed25519Keypair {
   const j = JSON.parse(
@@ -79,12 +83,13 @@ async function main() {
   const expiresAtMs = BigInt(Date.now() + 30 * 60 * 1000);
 
   const msgBytes = ClaimMessage.serialize({
-    domain_tag: Array.from(new TextEncoder().encode("SUIQR_CLAIM_V1")),
+    domain_tag: Array.from(new TextEncoder().encode("QUAY_CLAIM_V1")),
     chain_id: deploy.chain_id,
     uen: Array.from(new TextEncoder().encode(uen)),
     claimer: addressToBytes(senderAddr),
     nonce: Array.from(nonce),
     expires_at_ms: expiresAtMs,
+    evidence_hash: Array.from(DEMO_EVIDENCE_HASH),
   }).toBytes();
   const msgHash = blake2b(msgBytes, { dkLen: 32 });
   const sig = await issuer.sign(msgHash);
@@ -105,6 +110,7 @@ async function main() {
       tx.pure.vector("u8", Array.from(sig)),
       tx.pure.u64(expiresAtMs),
       tx.pure.option("string", null),
+      tx.pure.vector("u8", Array.from(DEMO_EVIDENCE_HASH)),
       tx.object(CLOCK),
     ],
   });

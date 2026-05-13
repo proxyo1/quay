@@ -1,0 +1,17 @@
+{
+  "amount": "5950000",
+  "memo": "latte",
+  "merchant": "0x1a2b000000000000000000000000000000000000000000000000000000007f",
+  "payer": "0xa1a2000000000000000000000000000000000000000000000000000000007f",
+  "quote": {
+    "feed": "0xfeed",
+    "price_usd": "5.95",
+    "sgd_per_usd": "1.38"
+  },
+  "receipt_id": "a1a2a3a4a5a6a7a8b1b2b3b4b5b6b7b8c1c2c3c4c5c6c7c8d1d2d3d4d5d6d7d8",
+  "schema_version": 1,
+  "sgd_minor_units": 820,
+  "timestamp_ms": 1746000000000,
+  "token_type": "0x2::sui::SUI",
+  "uen_raw": "53123456A"
+}

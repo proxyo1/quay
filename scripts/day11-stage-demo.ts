@@ -82,6 +82,10 @@ function buildSgqr(args: {
 
 // ── ClaimMessage BCS shape (identical to Move) ─────────────────────────
 
+// D8: ClaimMessage gained `evidence_hash` for the Walrus integration
+// redeploy. Demo uses a stable placeholder.
+const DEMO_EVIDENCE_HASH = new Uint8Array(32).fill(0xee);
+
 const ClaimMessage = bcs.struct("ClaimMessage", {
   domain_tag: bcs.vector(bcs.u8()),
   chain_id: bcs.u8(),
@@ -89,6 +93,7 @@ const ClaimMessage = bcs.struct("ClaimMessage", {
   claimer: bcs.bytes(32),
   nonce: bcs.vector(bcs.u8()),
   expires_at_ms: bcs.u64(),
+  evidence_hash: bcs.vector(bcs.u8()),
 });
 
 // ── Keypair loaders ────────────────────────────────────────────────────
@@ -249,12 +254,13 @@ async function main() {
       const expiresAtMs = BigInt(Date.now() + 60 * 60 * 1000);
 
       const msgBytes = ClaimMessage.serialize({
-        domain_tag: Array.from(new TextEncoder().encode("SUIQR_CLAIM_V1")),
+        domain_tag: Array.from(new TextEncoder().encode("QUAY_CLAIM_V1")),
         chain_id: deploy.chain_id,
         uen: Array.from(new TextEncoder().encode(m.uen)),
         claimer: addressToBytes(demoAddr),
         nonce: Array.from(nonce),
         expires_at_ms: expiresAtMs,
+        evidence_hash: Array.from(DEMO_EVIDENCE_HASH),
       }).toBytes();
       const msgHash = blake2b(msgBytes, { dkLen: 32 });
       const sig = await issuer.sign(msgHash);
@@ -270,6 +276,7 @@ async function main() {
           tx.pure.vector("u8", Array.from(sig)),
           tx.pure.u64(expiresAtMs),
           tx.pure.option("string", null),
+          tx.pure.vector("u8", Array.from(DEMO_EVIDENCE_HASH)),
           tx.object(CLOCK),
         ],
       });
