@@ -102,18 +102,21 @@ export default function OAuthCallbackPage() {
   }, [router]);
 
   return (
-    <main className="mx-auto max-w-md px-6 py-16 space-y-6">
+    <main className="relative z-10 mx-auto max-w-md px-5 py-16 space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold">Signing in</h1>
-        <p className="text-sm text-gray-500 mt-1">
+        <h1 className="text-2xl font-semibold tracking-tight text-white">Signing in</h1>
+        <p className="text-sm text-[var(--muted)] mt-1">
           Connecting your Google identity to your quay Sui address.
         </p>
       </header>
 
       {state.kind === "running" && (
-        <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 text-sm">
-          <p className="font-medium">{state.step}…</p>
-          <p className="text-xs text-gray-500 mt-1">
+        <section className="glass-card rounded-2xl p-4 text-sm">
+          <p className="relative z-10 font-medium text-white inline-flex items-center gap-2">
+            <Spinner />
+            {state.step}…
+          </p>
+          <p className="relative z-10 text-xs text-[var(--muted-soft)] mt-1.5">
             Ephemeral keypair + Groth16 proof via Enoki — your password
             never touches quay.
           </p>
@@ -121,31 +124,40 @@ export default function OAuthCallbackPage() {
       )}
 
       {state.kind === "done" && (
-        <section className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 p-4 text-sm">
-          <p className="font-medium">✓ Signed in</p>
-          <p className="text-xs font-mono mt-1">
+        <section className="glass-card-success rounded-2xl p-4 text-sm">
+          <p className="font-medium text-white">✓ Signed in</p>
+          <p className="text-xs font-mono mt-1 text-[var(--muted)]">
             {state.address.slice(0, 10)}…{state.address.slice(-6)}
           </p>
-          <p className="text-xs text-gray-500 mt-2">Redirecting…</p>
+          <p className="text-xs text-[var(--muted-soft)] mt-2">Redirecting…</p>
         </section>
       )}
 
       {state.kind === "error" && (
-        <section className="rounded-md border border-red-300 bg-red-50 dark:bg-red-900/20 p-4 text-sm space-y-3">
+        <section className="glass-card-danger rounded-2xl p-4 text-sm space-y-3">
           <div>
-            <p className="font-medium text-red-700 dark:text-red-300">Sign-in failed</p>
-            <p className="text-xs text-red-700 dark:text-red-300 mt-1 break-words">
+            <p className="font-medium text-red-200">Sign-in failed</p>
+            <p className="text-xs text-red-200/80 mt-1 break-words">
               {state.message}
             </p>
           </div>
           <Link
             href="/merchant/login"
-            className="inline-block text-xs px-3 py-1.5 rounded border border-red-300 hover:bg-red-100"
+            className="glass-chip rounded-lg"
           >
             Try again
           </Link>
         </section>
       )}
     </main>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="animate-spin">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
   );
 }

@@ -35,8 +35,8 @@ export default function WalletPage() {
 
   if (hydrated && !session) {
     return (
-      <main className="mx-auto max-w-2xl px-6 py-16">
-        <p className="text-sm text-gray-500">Redirecting to sign-in…</p>
+      <main className="relative z-10 mx-auto max-w-2xl px-6 py-16">
+        <p className="text-sm text-[var(--muted-soft)]">Redirecting to sign-in…</p>
       </main>
     );
   }
@@ -59,13 +59,13 @@ export default function WalletPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10 space-y-8">
-      <Link href="/merchant" className="text-xs text-blue-600 hover:underline">
-        ← merchant
+    <main className="relative z-10 mx-auto max-w-2xl px-5 py-8 space-y-6">
+      <Link href="/merchant" className="text-xs text-[var(--accent)] hover:underline inline-flex items-center gap-1">
+        <span aria-hidden>←</span> merchant
       </Link>
       <header className="space-y-1">
-        <h1 className="text-3xl font-semibold">Wallet</h1>
-        <p className="text-sm text-gray-500">
+        <h1 className="text-3xl font-semibold tracking-tight">Wallet</h1>
+        <p className="text-sm text-[var(--muted)] leading-relaxed">
           Your quay merchant wallet — bound to your Google identity via Sui
           zkLogin. There&apos;s no private key to lose, no recovery phrase to
           back up. Sign back in with the same Google account from any device
@@ -75,11 +75,11 @@ export default function WalletPage() {
 
       <SettlementPreferenceSection session={session} />
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-2">
-        <p className="text-xs uppercase tracking-wide text-gray-500">Identity</p>
-        <p className="text-sm">{session.email}</p>
+      <section className="glass-card rounded-2xl p-5 space-y-2">
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Identity</p>
+        <p className="relative z-10 text-sm text-white">{session.email}</p>
         {claims && (
-          <ul className="text-[11px] text-gray-500 font-mono pt-1 space-y-0.5">
+          <ul className="relative z-10 text-[11px] text-[var(--muted-soft)] font-mono pt-1 space-y-0.5">
             <li>iss: {claims.iss}</li>
             <li>sub: {claims.sub?.slice(0, 24)}…</li>
             <li>aud: {Array.isArray(claims.aud) ? claims.aud[0] : claims.aud}</li>
@@ -87,41 +87,41 @@ export default function WalletPage() {
         )}
       </section>
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-gray-500">Sui address</p>
-            <p className="font-mono text-sm break-all mt-1">{session.address}</p>
+      <section className="glass-card rounded-2xl p-5 space-y-3">
+        <div className="relative z-10 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Sui address</p>
+            <p className="font-mono text-sm text-white break-all mt-1">{session.address}</p>
           </div>
           <button
             type="button"
             onClick={() => copy(session.address)}
-            className="text-xs px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+            className="glass-chip rounded-lg shrink-0"
           >
             Copy
           </button>
         </div>
-        <p className="text-xs text-gray-500">
+        <p className="relative z-10 text-xs text-[var(--muted-soft)]">
           View on Sui:{" "}
           <a
             href={objectUrl(session.address)}
             target="_blank"
             rel="noreferrer"
-            className="text-blue-600 hover:underline"
+            className="text-[var(--accent)] hover:underline"
           >
             suiscan ↗
           </a>
         </p>
       </section>
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-gray-500">zkLogin session</p>
-        <ul className="text-[11px] text-gray-500 font-mono space-y-1">
+      <section className="glass-card rounded-2xl p-5 space-y-3">
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">zkLogin session</p>
+        <ul className="relative z-10 text-[11px] text-[var(--muted-soft)] font-mono space-y-1">
           <li>maxEpoch: {session.maxEpoch}</li>
           <li>addressSeed: {session.proof.addressSeed.slice(0, 24)}…</li>
           <li>ephemeral: bech32 stored in localStorage (rotated per session)</li>
         </ul>
-        <p className="text-[11px] text-gray-500 leading-relaxed">
+        <p className="relative z-10 text-[11px] text-[var(--muted)] leading-relaxed">
           The ephemeral keypair signs transaction bytes; Enoki&apos;s Groth16
           proof binds those signatures to your Google identity. Once Sui
           advances past <code className="font-mono">maxEpoch</code>, sign in
@@ -130,19 +130,19 @@ export default function WalletPage() {
         </p>
       </section>
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-gray-500">Session</p>
+      <section className="glass-card rounded-2xl p-5 space-y-3">
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Session</p>
         <button
           type="button"
           onClick={() => {
             signOut();
             router.replace("/merchant");
           }}
-          className="text-sm px-3 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+          className="relative z-10 glass-chip rounded-lg"
         >
           Sign out
         </button>
-        <p className="text-[11px] text-gray-500">
+        <p className="relative z-10 text-[11px] text-[var(--muted-soft)]">
           Signing out clears the local session. Sign in again with the same
           Google account to land on the same Sui address.
         </p>
@@ -226,25 +226,25 @@ function SettlementPreferenceSection({ session }: { session: ZkLoginSession }) {
   const uens = uensQ.data ?? [];
 
   return (
-    <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5 space-y-3">
-      <div>
-        <p className="text-xs uppercase tracking-wide text-gray-500">Settlement preference</p>
-        <p className="text-[11px] text-gray-500 mt-0.5">
+    <section className="glass-card rounded-2xl p-5 space-y-3">
+      <div className="relative z-10">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">Settlement preference</p>
+        <p className="text-[11px] text-[var(--muted-soft)] mt-0.5">
           Choose the token Quay delivers when a payer scans your SGQR. Payers
           can pay in anything — the aggregator handles the conversion.
         </p>
       </div>
       {uensQ.isLoading ? (
-        <p className="text-xs text-gray-500">Loading your registered UENs…</p>
+        <p className="relative z-10 text-xs text-[var(--muted-soft)]">Loading your registered UENs…</p>
       ) : uens.length === 0 ? (
-        <p className="text-sm text-gray-500">
+        <p className="relative z-10 text-sm text-[var(--muted)]">
           You haven&apos;t claimed any UENs yet.{" "}
-          <Link href="/merchant/onboard" className="text-blue-600 hover:underline">
+          <Link href="/merchant/onboard" className="text-[var(--accent)] hover:underline">
             Onboard one →
           </Link>
         </p>
       ) : (
-        <ul className="space-y-3">
+        <ul className="relative z-10 space-y-3">
           {uens.map((row) => (
             <UenPreferenceRow key={row.uen} row={row} session={session} onSaved={() => uensQ.refetch()} />
           ))}
@@ -347,12 +347,12 @@ function UenPreferenceRow({
   }
 
   return (
-    <li className="rounded border border-gray-100 dark:border-gray-800 p-3 space-y-2">
+    <li className="rounded-xl border border-white/10 bg-white/[0.02] backdrop-blur-md p-3 space-y-2">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-sm">{row.uen}</p>
-          <p className="text-[11px] text-gray-500">
-            Currently receiving in <span className="text-gray-700 dark:text-gray-300 font-medium">{receiveLabel(current)}</span>
+          <p className="font-mono text-sm text-white">{row.uen}</p>
+          <p className="text-[11px] text-[var(--muted-soft)]">
+            Currently receiving in <span className="text-white font-medium">{receiveLabel(current)}</span>
           </p>
         </div>
         {!editing && (
@@ -363,7 +363,7 @@ function UenPreferenceRow({
               setEditing(true);
               setSave({ kind: "idle" });
             }}
-            className="text-xs px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 shrink-0"
+            className="glass-chip rounded-lg shrink-0"
           >
             Change
           </button>
@@ -381,14 +381,14 @@ function UenPreferenceRow({
                   type="button"
                   onClick={() => setChosen(opt.type)}
                   disabled={save.kind !== "idle" && save.kind !== "error"}
-                  className={`rounded border px-3 py-2 text-left transition disabled:opacity-50 ${
+                  className={`rounded-xl border px-3 py-2 text-left transition disabled:opacity-50 backdrop-blur-md ${
                     selected
-                      ? "border-blue-500 bg-blue-50 dark:bg-blue-950"
-                      : "border-gray-200 dark:border-gray-700 hover:border-gray-400"
+                      ? "border-[var(--accent)] bg-[var(--accent)]/12 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_0_18px_-10px_var(--accent-glow)]"
+                      : "border-white/10 bg-white/[0.03] text-[var(--muted)] hover:border-white/25"
                   }`}
                 >
                   <p className="text-sm font-medium">{opt.label}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">{opt.description}</p>
+                  <p className="text-[10px] text-[var(--muted-soft)] mt-0.5">{opt.description}</p>
                 </button>
               );
             })}
@@ -398,7 +398,7 @@ function UenPreferenceRow({
               type="button"
               onClick={() => chosen && handleSave(chosen)}
               disabled={!chosen || chosen === current || (save.kind !== "idle" && save.kind !== "error")}
-              className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              className="glass-btn-primary text-xs py-2 px-3 disabled:opacity-50"
             >
               {save.kind === "idle" || save.kind === "error"
                 ? "Save"
@@ -419,22 +419,22 @@ function UenPreferenceRow({
                 setSave({ kind: "idle" });
               }}
               disabled={save.kind !== "idle" && save.kind !== "error"}
-              className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              className="glass-chip rounded-lg disabled:opacity-50"
             >
               Cancel
             </button>
           </div>
           {save.kind === "error" && (
-            <p className="text-[11px] text-red-500 break-words">Error: {save.message}</p>
+            <p className="text-[11px] text-red-300 break-words">Error: {save.message}</p>
           )}
-          <p className="text-[10px] text-gray-500">
+          <p className="text-[10px] text-[var(--muted-soft)]">
             Quay pays the testnet gas via the sponsor wallet — you don&apos;t need any SUI.
           </p>
         </div>
       )}
 
       {save.kind === "success" && !editing && (
-        <p className="text-[11px] text-green-600">
+        <p className="text-[11px] text-[var(--success)]">
           Saved · tx{" "}
           <a
             href={txUrl(save.digest)}

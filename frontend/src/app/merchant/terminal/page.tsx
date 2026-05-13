@@ -49,7 +49,7 @@ export default function TerminalPage() {
   if (hydrated && !session) {
     return (
       <main className="relative z-10 mx-auto w-full max-w-md px-5 py-16">
-        <p className="text-sm text-neutral-500">Redirecting to sign-in…</p>
+        <p className="text-sm text-[var(--muted-soft)]">Redirecting to sign-in…</p>
       </main>
     );
   }
@@ -201,7 +201,7 @@ function TerminalView({
         <button
           type="button"
           onClick={onSignOut}
-          className="text-xs px-3 py-1.5 rounded-full border border-white/15 text-neutral-300 hover:bg-white/5"
+          className="glass-chip rounded-full"
         >
           Sign out
         </button>
@@ -210,28 +210,27 @@ function TerminalView({
       <section className="space-y-1">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-semibold tracking-tight">Terminal</h1>
-          <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-[var(--accent)]">
+          <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
             live
           </span>
         </div>
         {session && (
-          <p className="text-[11px] text-neutral-500 font-mono">
+          <p className="text-[11px] text-[var(--muted-soft)] font-mono">
             {session.email} · {session.address.slice(0, 8)}…{session.address.slice(-6)}
           </p>
         )}
       </section>
 
-      <section className="relative rounded-3xl border border-[var(--accent)]/30 bg-gradient-to-b from-[var(--accent)]/[0.08] to-transparent p-6 overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(500px_240px_at_50%_-60px,var(--accent-glow),transparent_60%)]" />
-        <p className="text-[11px] uppercase tracking-wider text-neutral-400">
+      <section className="glass-card-accent rounded-3xl p-6 overflow-hidden">
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">
           Today · {todayCount} payment{todayCount === 1 ? "" : "s"}
         </p>
-        <p className="mt-1 text-5xl font-semibold tabular-nums text-white">
-          ${todayTotalSgd.toFixed(2)}
-          <span className="ml-2 text-xl text-neutral-500 font-normal">SGD</span>
+        <p className="relative z-10 mt-1 text-5xl font-semibold tabular-nums">
+          <span className="glass-shimmer">${todayTotalSgd.toFixed(2)}</span>
+          <span className="ml-2 text-xl text-[var(--muted-soft)] font-normal">SGD</span>
         </p>
-        <div className="mt-3 flex gap-4 text-[11px] text-neutral-400">
+        <div className="relative z-10 mt-3 flex gap-4 text-[11px] text-[var(--muted)]">
           <span>
             avg <span className="text-white tabular-nums">${avgTicket.toFixed(2)}</span>
           </span>
@@ -241,18 +240,18 @@ function TerminalView({
       </section>
 
       {latest && latestIsRecent && (
-        <section className="rounded-2xl border border-[var(--success)]/30 bg-[var(--success)]/[0.06] p-3 animate-in fade-in">
+        <section className="glass-card-success rounded-2xl p-3 glass-rise">
           <div className="flex items-center gap-3">
             <span className="inline-block h-2 w-2 rounded-full bg-[var(--success)] live-dot shrink-0" />
             <div className="flex-1 min-w-0 text-sm text-white">
               <span className="font-semibold tabular-nums">
                 ${(latest.sgdMinorUnits / 100).toFixed(2)} SGD
               </span>
-              <span className="text-neutral-400"> from </span>
+              <span className="text-[var(--muted)]"> from </span>
               <span className="font-mono">
                 {latest.payer.slice(0, 6)}…{latest.payer.slice(-4)}
               </span>
-              <span className="text-neutral-400"> · {formatRelativeTime(latest.timestampMs)}</span>
+              <span className="text-[var(--muted)]"> · {formatRelativeTime(latest.timestampMs)}</span>
             </div>
           </div>
         </section>
@@ -261,19 +260,19 @@ function TerminalView({
       <UenList state={uens} />
 
       {error ? (
-        <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
-          <p className="text-sm font-medium text-red-300">Event query failed</p>
-          <p className="text-xs text-red-300/80 break-words">
+        <section className="glass-card-danger rounded-2xl p-4 space-y-1">
+          <p className="text-sm font-medium text-red-200">Event query failed</p>
+          <p className="text-xs text-red-200/80 break-words">
             {error instanceof Error ? error.message : String(error)}
           </p>
         </section>
       ) : isLoading && receipts.length === 0 ? (
-        <p className="text-sm text-neutral-500 text-center py-6">Listening for payments…</p>
+        <p className="text-sm text-[var(--muted-soft)] text-center py-6">Listening for payments…</p>
       ) : receipts.length === 0 ? (
         <EmptyState />
       ) : (
         <section className="space-y-2">
-          <h3 className="text-[10px] uppercase tracking-wider text-neutral-500 px-1">Recent</h3>
+          <h3 className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-soft)] px-1">Recent</h3>
           <ul className="space-y-2">
             {receipts.map((r, i) => (
               <ReceiptCard key={r.receiptId} r={r} highlight={i === 0 && latestIsRecent} />
@@ -282,7 +281,7 @@ function TerminalView({
         </section>
       )}
 
-      <footer className="text-[11px] text-neutral-500 pt-4 border-t border-white/5">
+      <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5">
         Registry:{" "}
         <a
           href={objectUrl(QUAY.registryId)}
@@ -299,21 +298,21 @@ function TerminalView({
 
 function EmptyState() {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 text-center space-y-2">
-      <div className="mx-auto h-12 w-12 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/30 flex items-center justify-center">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <section className="glass-card rounded-2xl p-6 text-center space-y-2">
+      <div className="relative z-10 mx-auto h-12 w-12 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/35 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_24px_-8px_var(--accent-glow)]">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-strong)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
         </svg>
       </div>
-      <p className="text-base font-medium text-white">No payments yet</p>
-      <p className="text-xs text-neutral-500">
+      <p className="relative z-10 text-base font-medium text-white">No payments yet</p>
+      <p className="relative z-10 text-xs text-[var(--muted-soft)]">
         Once a payer scans your SGQR, the payment appears here ~2s after finality.
       </p>
-      <div className="pt-1 flex justify-center gap-3">
+      <div className="relative z-10 pt-1 flex justify-center gap-3">
         <Link href="/merchant/onboard" className="text-xs text-[var(--accent)] hover:underline">
           Onboard UEN →
         </Link>
-        <span className="text-neutral-700">·</span>
+        <span className="text-[var(--muted-soft)]">·</span>
         <Link href="/scan" className="text-xs text-[var(--accent)] hover:underline">
           Test from scan →
         </Link>
@@ -325,17 +324,17 @@ function EmptyState() {
 function UenList({ state }: { state: ReturnType<typeof useMerchantUens> }) {
   if (state.isLoading) {
     return (
-      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-        <p className="text-[11px] uppercase tracking-wider text-neutral-500">Your UENs</p>
-        <p className="mt-2 text-sm text-neutral-500">Loading from chain…</p>
+      <section className="glass-card rounded-2xl p-4">
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Your UENs</p>
+        <p className="relative z-10 mt-2 text-sm text-[var(--muted-soft)]">Loading from chain…</p>
       </section>
     );
   }
   if (state.error) {
     return (
-      <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
-        <p className="text-[11px] uppercase tracking-wider text-red-300">Your UENs</p>
-        <p className="mt-1 text-xs text-red-300/80">
+      <section className="glass-card-danger rounded-2xl p-4">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-red-200">Your UENs</p>
+        <p className="mt-1 text-xs text-red-200/80">
           {state.error instanceof Error ? state.error.message : String(state.error)}
         </p>
       </section>
@@ -344,9 +343,9 @@ function UenList({ state }: { state: ReturnType<typeof useMerchantUens> }) {
   const uens = state.data ?? [];
   if (uens.length === 0) {
     return (
-      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-        <p className="text-[11px] uppercase tracking-wider text-neutral-500">Your UENs</p>
-        <p className="mt-2 text-sm text-neutral-400">
+      <section className="glass-card rounded-2xl p-4">
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Your UENs</p>
+        <p className="relative z-10 mt-2 text-sm text-[var(--muted)]">
           No UENs claimed yet.{" "}
           <Link href="/merchant/onboard" className="text-[var(--accent)] hover:underline">
             Onboard one →
@@ -356,11 +355,11 @@ function UenList({ state }: { state: ReturnType<typeof useMerchantUens> }) {
     );
   }
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-2">
-      <p className="text-[11px] uppercase tracking-wider text-neutral-500">
+    <section className="glass-card rounded-2xl p-4 space-y-2">
+      <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
         Your UEN{uens.length > 1 ? "s" : ""}
       </p>
-      <ul className="space-y-2">
+      <ul className="relative z-10 space-y-2">
         {uens.map((u) => (
           <li key={u.uen} className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -387,7 +386,7 @@ function MerchantLogo({ blobId, alt }: { blobId: string | null; alt: string }) {
   const initial = alt.charAt(0).toUpperCase();
   if (!blobId) {
     return (
-      <span className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-[var(--accent)]/15 border border-[var(--accent)]/40 text-[10px] font-semibold text-[var(--accent-strong)] shrink-0">
+      <span className="inline-flex items-center justify-center h-7 w-7 rounded-lg bg-[var(--accent)]/20 border border-[var(--accent)]/40 text-[10px] font-semibold text-[var(--accent-strong)] shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
         {initial}
       </span>
     );
@@ -406,10 +405,10 @@ function MerchantLogo({ blobId, alt }: { blobId: string | null; alt: string }) {
           const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
           if (fallback) fallback.style.display = "inline-flex";
         }}
-        className="h-7 w-7 rounded-lg object-cover"
+        className="h-7 w-7 rounded-lg object-cover ring-1 ring-white/20"
       />
       <span
-        className="absolute inset-0 hidden items-center justify-center rounded-lg bg-[var(--accent)]/15 border border-[var(--accent)]/40 text-[10px] font-semibold text-[var(--accent-strong)]"
+        className="absolute inset-0 hidden items-center justify-center rounded-lg bg-[var(--accent)]/20 border border-[var(--accent)]/40 text-[10px] font-semibold text-[var(--accent-strong)]"
       >
         {initial}
       </span>
@@ -421,29 +420,31 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
   const tokenLabel = shortTokenLabel(r.tokenType);
   return (
     <li
-      className={`rounded-2xl border bg-white/[0.02] p-4 ${
-        highlight ? "border-[var(--accent)]/40 shadow-[0_0_30px_-12px_var(--accent-glow)]" : "border-white/10"
+      className={`rounded-2xl p-4 ${
+        highlight
+          ? "glass-card-accent"
+          : "glass-card"
       }`}
     >
-      <div className="flex items-start gap-3">
-        <div className="h-9 w-9 rounded-full bg-[var(--success)]/10 border border-[var(--success)]/40 flex items-center justify-center text-[var(--success)] shrink-0">
+      <div className="relative z-10 flex items-start gap-3">
+        <div className="h-9 w-9 rounded-full bg-[var(--success)]/15 border border-[var(--success)]/40 flex items-center justify-center text-[var(--success)] shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)]">
           <ArrowDown />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline justify-between gap-2">
             <p className="text-lg font-semibold tabular-nums text-white">
               ${(r.sgdMinorUnits / 100).toFixed(2)}{" "}
-              <span className="text-xs text-neutral-500 font-normal">SGD</span>
+              <span className="text-xs text-[var(--muted-soft)] font-normal">SGD</span>
             </p>
-            <span className="text-[11px] text-neutral-500 tabular-nums shrink-0">
+            <span className="text-[11px] text-[var(--muted-soft)] tabular-nums shrink-0">
               {formatRelativeTime(r.timestampMs)}
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-neutral-400 font-mono truncate">
+          <p className="mt-0.5 text-xs text-[var(--muted)] font-mono truncate">
             {formatTokenAmount(r.amount, tokenLabel)} from {r.payer.slice(0, 6)}…{r.payer.slice(-4)}
           </p>
           {r.memo && (
-            <p className="mt-1.5 text-xs text-neutral-300 italic">&ldquo;{r.memo}&rdquo;</p>
+            <p className="mt-1.5 text-xs text-[var(--muted)] italic">&ldquo;{r.memo}&rdquo;</p>
           )}
           <a
             href={txUrl(r.txDigest)}

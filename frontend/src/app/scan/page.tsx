@@ -157,15 +157,15 @@ export default function ScanPage() {
         <Link href="/" className="text-[var(--accent)] hover:underline text-sm inline-flex items-center gap-1">
           <span aria-hidden>←</span> home
         </Link>
-        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] uppercase tracking-wider text-neutral-400">
-          <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot align-middle" />
+        <span className="glass-pill">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
           testnet
         </span>
       </header>
 
       <section className="space-y-1">
         <h1 className="text-3xl font-semibold tracking-tight">Scan to pay</h1>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-[var(--muted)]">
           Point your camera at any SGQR sticker — or type a UEN below.
         </p>
       </section>
@@ -177,17 +177,17 @@ export default function ScanPage() {
       <button
         type="button"
         onClick={() => setScanOpen(true)}
-        className="group flex w-full items-center justify-between rounded-2xl bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-medium py-4 px-5 transition shadow-[0_8px_30px_-8px_var(--accent-glow)]"
+        className="glass-btn-primary group w-full"
       >
         <span className="flex items-center gap-2.5">
           <CameraIcon />
           Open camera
         </span>
-        <span className="text-white/70 group-hover:text-white transition">→</span>
+        <span className="text-white/80 group-hover:text-white transition">→</span>
       </button>
 
-      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-2">
-        <label htmlFor="uen" className="block text-[11px] uppercase tracking-wider text-[var(--accent)]">
+      <section className="glass-card rounded-2xl p-4 space-y-2">
+        <label htmlFor="uen" className="block text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
           UEN code
         </label>
         <input
@@ -196,18 +196,18 @@ export default function ScanPage() {
           value={uen}
           onChange={(e) => setManualUen(e.target.value)}
           placeholder="T11KH0001A"
-          className="w-full bg-transparent border-0 px-0 py-1 text-lg font-mono tabular-nums text-white placeholder:text-neutral-600 focus:outline-none"
+          className="w-full bg-transparent border-0 px-0 py-1 text-lg font-mono tabular-nums text-white placeholder:text-[var(--muted-soft)] focus:outline-none"
           autoCapitalize="characters"
           autoComplete="off"
           spellCheck={false}
         />
         <div className="flex items-center justify-between pt-1 border-t border-white/5">
           {uen && !looksLikeUen(uen) ? (
-            <p className="text-[11px] text-amber-400">
+            <p className="text-[11px] text-amber-300">
               Expected 8–10 alphanumeric (e.g., 202012345Z).
             </p>
           ) : (
-            <p className="text-[11px] text-neutral-500">8–10 alphanumeric Singapore UEN</p>
+            <p className="text-[11px] text-[var(--muted-soft)]">8–10 alphanumeric Singapore UEN</p>
           )}
           <button
             type="button"
@@ -220,8 +220,8 @@ export default function ScanPage() {
       </section>
 
       {input.kind === "error" && (
-        <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
-          <p className="text-sm text-red-300">{input.message}</p>
+        <section className="glass-card-danger rounded-2xl p-4">
+          <p className="text-sm text-red-200">{input.message}</p>
         </section>
       )}
 
@@ -240,7 +240,7 @@ export default function ScanPage() {
           />
         )}
 
-      <footer className="text-[11px] text-neutral-500 pt-4 border-t border-white/5">
+      <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5">
         <p>
           On-chain registry:{" "}
           <a
@@ -268,24 +268,24 @@ export default function ScanPage() {
 function WalletCard({ account }: { account: ReturnType<typeof useCurrentAccount> }) {
   if (!account) {
     return (
-      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 flex items-center justify-between gap-3">
+      <section className="glass-card rounded-2xl p-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-wider text-neutral-500">Wallet</p>
-          <p className="text-sm text-neutral-300">Not connected</p>
+          <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Wallet</p>
+          <p className="text-sm text-[var(--muted)]">Not connected</p>
         </div>
         <ConnectButton />
       </section>
     );
   }
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+    <section className="glass-card rounded-2xl p-4">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/40 flex items-center justify-center shrink-0">
+          <div className="h-9 w-9 rounded-full bg-[var(--accent)]/20 border border-[var(--accent)]/40 flex items-center justify-center shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
             <WalletIcon />
           </div>
           <div className="min-w-0">
-            <p className="text-[11px] uppercase tracking-wider text-neutral-500">Wallet</p>
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Wallet</p>
             <p className="text-sm font-mono text-white truncate">
               {account.address.slice(0, 6)}…{account.address.slice(-4)}
             </p>
@@ -302,8 +302,10 @@ function WalletCard({ account }: { account: ReturnType<typeof useCurrentAccount>
 function ScanHeroIllustration() {
   return (
     <div className="relative mx-auto h-[220px] w-full max-w-xs">
-      <div className="absolute inset-x-12 inset-y-2 rounded-[34px] border border-white/15 bg-gradient-to-b from-white/[0.03] to-transparent overflow-hidden shadow-[0_30px_80px_-30px_var(--accent-glow)]">
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-24 w-24 rounded-xl bg-white p-2 shadow-[0_0_60px_-10px_var(--accent-glow)]">
+      {/* iridescent halo behind the device */}
+      <div className="absolute inset-x-4 inset-y-0 -z-10 rounded-[44px] bg-[radial-gradient(60%_50%_at_50%_50%,var(--accent-glow),transparent_70%)] blur-2xl" />
+      <div className="absolute inset-x-12 inset-y-2 rounded-[34px] glass-card overflow-hidden">
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-24 w-24 rounded-xl bg-white p-2 shadow-[0_0_60px_-10px_var(--accent-glow),0_0_0_1px_rgba(255,255,255,0.2)]">
           <svg viewBox="0 0 21 21" className="h-full w-full text-black" aria-hidden>
             <rect x="0" y="0" width="7" height="7" fill="currentColor" />
             <rect x="1" y="1" width="5" height="5" fill="white" />
@@ -356,12 +358,12 @@ function ResultPane({
   const city = sanitizeMerchantCity(payload?.merchantCity);
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+    <section className="glass-card rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] uppercase tracking-wider text-neutral-500">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
           UEN <span className="font-mono text-white normal-case">{input.uen}</span>
         </p>
-        <span className="text-[11px] text-neutral-500">
+        <span className="text-[11px] text-[var(--muted-soft)]">
           {input.source === "scan" ? "captured by camera" : "typed manually"}
         </span>
       </div>
@@ -370,20 +372,20 @@ function ResultPane({
         <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-sm">
           {name && (
             <>
-              <dt className="text-neutral-500 text-xs">Merchant</dt>
+              <dt className="text-[var(--muted-soft)] text-xs">Merchant</dt>
               <dd className="text-white font-medium">{name}</dd>
             </>
           )}
           {city && (
             <>
-              <dt className="text-neutral-500 text-xs">City</dt>
-              <dd className="text-neutral-300">{city}</dd>
+              <dt className="text-[var(--muted-soft)] text-xs">City</dt>
+              <dd className="text-[var(--muted)]">{city}</dd>
             </>
           )}
           {payload.transactionAmount && (
             <>
-              <dt className="text-neutral-500 text-xs">Suggested</dt>
-              <dd className="text-neutral-300">
+              <dt className="text-[var(--muted-soft)] text-xs">Suggested</dt>
+              <dd className="text-[var(--muted)]">
                 {payload.transactionAmount}{" "}
                 {payload.transactionCurrency === "702" ? "SGD" : payload.transactionCurrency}
               </dd>
@@ -400,8 +402,8 @@ function ResultPane({
 function RegistryStatus({ lookup, typed }: { lookup: Lookup; typed: boolean }) {
   if (lookup.kind === "idle" || lookup.kind === "loading") {
     return (
-      <p className="text-xs text-neutral-500 inline-flex items-center gap-2">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-500 animate-pulse" />
+      <p className="text-xs text-[var(--muted-soft)] inline-flex items-center gap-2">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--muted-soft)] animate-pulse" />
         Looking up on chain…
       </p>
     );
@@ -419,7 +421,7 @@ function RegistryStatus({ lookup, typed }: { lookup: Lookup; typed: boolean }) {
   }
   if (lookup.kind === "not_registered") {
     return (
-      <p className="text-xs text-neutral-400">
+      <p className="text-xs text-[var(--muted)]">
         {typed
           ? "This UEN isn't on the quay registry yet."
           : "Merchant isn't on the quay registry — their SGQR still works for regular PayNow."}
@@ -427,7 +429,7 @@ function RegistryStatus({ lookup, typed }: { lookup: Lookup; typed: boolean }) {
     );
   }
   return (
-    <p className="text-xs text-red-400">Lookup failed: {lookup.message}</p>
+    <p className="text-xs text-red-300">Lookup failed: {lookup.message}</p>
   );
 }
 

@@ -146,20 +146,20 @@ export function SgqrCameraScanner({ onDecoded, onCancel }: SgqrCameraScannerProp
   }, [onDecoded]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-lg bg-zinc-950 border border-zinc-800 p-4 space-y-3">
+    <div className="fixed inset-0 z-50 bg-[rgba(2,3,10,0.72)] backdrop-blur-xl flex items-center justify-center p-4">
+      <div className="w-full max-w-md glass-card rounded-2xl p-4 space-y-3 glass-rise">
         <header className="flex items-center justify-between gap-3">
           <p className="text-sm font-medium text-white">Scan an SGQR sticker</p>
           <button
             type="button"
             onClick={onCancel}
-            className="text-xs text-zinc-400 hover:text-white"
+            className="text-xs text-[var(--muted)] hover:text-white px-2 py-1 rounded-md hover:bg-white/5 transition"
           >
             Close
           </button>
         </header>
 
-        <div className="relative aspect-square w-full rounded-md overflow-hidden bg-black border border-zinc-800">
+        <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-black border border-white/10 shadow-[inset_0_0_60px_rgba(0,0,0,0.5)]">
           <video
             ref={videoRef}
             playsInline
@@ -171,7 +171,7 @@ export function SgqrCameraScanner({ onDecoded, onCancel }: SgqrCameraScannerProp
               filling ~60% of the frame at 30cm. */}
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div
-              className="border-2 border-emerald-400/85 rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]"
+              className="border-2 border-emerald-300/90 rounded-2xl shadow-[0_0_0_9999px_rgba(2,3,10,0.55),0_0_30px_-4px_rgba(52,211,153,0.55)]"
               style={{ width: "60%", aspectRatio: "1 / 1" }}
             />
             {/* Corner ticks for visual guidance */}
@@ -201,13 +201,13 @@ function CornerTick({ className }: { className: string }) {
 
 function Status({ state }: { state: State }) {
   if (state.kind === "starting") {
-    return <p className="text-xs text-zinc-400">Starting camera…</p>;
+    return <p className="text-xs text-[var(--muted)]">Starting camera…</p>;
   }
   if (state.kind === "scanning") {
     return (
-      <div className="text-xs text-zinc-400 space-y-1">
+      <div className="text-xs text-[var(--muted)] space-y-1">
         <p>Point the SGQR sticker inside the green box.</p>
-        <p className="text-zinc-500">
+        <p className="text-[var(--muted-soft)]">
           {state.hint} Fills ~60% of the frame at ~30 cm for a typical 50 mm sticker.
         </p>
       </div>
@@ -215,7 +215,7 @@ function Status({ state }: { state: State }) {
   }
   if (state.kind === "permission_denied") {
     return (
-      <p className="text-xs text-amber-400">
+      <p className="text-xs text-amber-300">
         Camera permission denied. Allow it in your browser settings and reload,
         or close this and type the UEN manually.
       </p>
@@ -223,13 +223,13 @@ function Status({ state }: { state: State }) {
   }
   if (state.kind === "no_camera") {
     return (
-      <p className="text-xs text-amber-400">
+      <p className="text-xs text-amber-300">
         No camera available on this device. Close this and type the UEN
         manually instead.
       </p>
     );
   }
   return (
-    <p className="text-xs text-red-400 break-words">Camera error: {state.message}</p>
+    <p className="text-xs text-red-300 break-words">Camera error: {state.message}</p>
   );
 }

@@ -87,7 +87,7 @@ export default function MerchantPage({
   });
 
   return (
-    <main className="mx-auto max-w-md px-4 py-8 space-y-5">
+    <main className="relative z-10 mx-auto max-w-md px-5 py-8 space-y-5">
       {entryQuery.isLoading && <LoadingCard />}
       {entryQuery.error && (
         <ErrorCard message={errMsg(entryQuery.error)} uen={uen} />
@@ -119,8 +119,8 @@ function MerchantView({
   return (
     <>
       {/* 1. Trust badge (verdict-as-hero per D17) */}
-      <section className="rounded-lg border border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-900/20 p-4">
-        <p className="text-emerald-900 dark:text-emerald-100 text-base font-semibold flex items-baseline gap-2">
+      <section className="glass-card-success rounded-2xl p-4">
+        <p className="text-emerald-100 text-base font-semibold flex items-baseline gap-2 tracking-tight">
           <span>✓</span>
           <span>Verified quay merchant</span>
         </p>
@@ -128,29 +128,29 @@ function MerchantView({
 
       {/* 2. Name placeholder + UEN */}
       <section className="space-y-0.5">
-        <p className="text-xl font-semibold">Merchant</p>
-        <p className="text-xs text-gray-500 font-mono">UEN {uen}</p>
+        <p className="text-xl font-semibold tracking-tight text-white">Merchant</p>
+        <p className="text-xs text-[var(--muted-soft)] font-mono">UEN {uen}</p>
       </section>
 
       {/* 3. Activity (aggregate only per D13) */}
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-1.5">
-        <p className="text-xs uppercase tracking-wide text-gray-500">Activity</p>
+      <section className="glass-card rounded-2xl p-4 space-y-1.5">
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Activity</p>
         {activityLoading ? (
-          <p className="text-sm text-gray-500">Loading payment activity…</p>
+          <p className="relative z-10 text-sm text-[var(--muted-soft)]">Loading payment activity…</p>
         ) : aggregate.countLast30d === 0 ? (
-          <p className="text-sm">Verified merchant — no payments yet.</p>
+          <p className="relative z-10 text-sm text-[var(--muted)]">Verified merchant — no payments yet.</p>
         ) : (
           <>
-            <p className="text-sm">
+            <p className="relative z-10 text-sm text-[var(--muted)]">
               Active — last payment{" "}
-              <span className="font-medium">
+              <span className="font-medium text-white">
                 {aggregate.lastSeenMs != null
                   ? formatRelativeTime(aggregate.lastSeenMs)
                   : "recently"}
               </span>
             </p>
-            <p className="text-sm">
-              <span className="font-medium">{aggregate.countLast30d}</span>{" "}
+            <p className="relative z-10 text-sm text-[var(--muted)]">
+              <span className="font-medium text-white">{aggregate.countLast30d}</span>{" "}
               {aggregate.countLast30d === 1 ? "payment" : "payments"} in last 30 days
             </p>
           </>
@@ -163,33 +163,33 @@ function MerchantView({
       </section>
 
       {/* 5. Evidence link (short-hex) */}
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-1">
-        <p className="text-xs uppercase tracking-wide text-gray-500">Evidence</p>
+      <section className="glass-card rounded-2xl p-4 space-y-1">
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Evidence</p>
         {entry.evidenceHashHex && entry.evidenceHashHex.length > 0 ? (
           <p
-            className="text-xs font-mono text-gray-700 dark:text-gray-300 break-all"
+            className="relative z-10 text-xs font-mono text-[var(--muted)] break-all"
             title={`Verified by quay issuer`}
           >
             0x{entry.evidenceHashHex.slice(0, 12)}…{entry.evidenceHashHex.slice(-8)}
           </p>
         ) : (
-          <p className="text-xs text-gray-500">
+          <p className="relative z-10 text-xs text-[var(--muted-soft)]">
             No evidence hash on this entry (legacy registration).
           </p>
         )}
-        <p className="text-xs text-gray-500 mt-1.5">
+        <p className="relative z-10 text-xs text-[var(--muted-soft)] mt-1.5">
           The issuer signed off after reviewing specific evidence content; the
           on-chain hash is the public commitment.
         </p>
       </section>
 
-      <footer className="text-xs text-gray-500 border-t border-gray-100 dark:border-gray-800 pt-4">
+      <footer className="text-xs text-[var(--muted-soft)] border-t border-white/5 pt-4">
         <p>
           Merchant Sui address:{" "}
-          <span className="font-mono">{shortAddr(entry.owner)}</span>
+          <span className="font-mono text-[var(--muted)]">{shortAddr(entry.owner)}</span>
         </p>
         <p className="mt-1">
-          <Link href="/" className="text-blue-600 hover:underline">
+          <Link href="/" className="text-[var(--accent)] hover:underline">
             ← back to quay
           </Link>
         </p>
@@ -202,7 +202,7 @@ function MerchantLogo({ blobId, alt }: { blobId: string | null; alt: string }) {
   const initial = alt.charAt(0).toUpperCase();
   if (!blobId) {
     return (
-      <div className="flex items-center justify-center h-16 w-16 rounded-md bg-gray-200 dark:bg-gray-700 text-xl font-medium text-gray-600 dark:text-gray-300">
+      <div className="flex items-center justify-center h-16 w-16 rounded-2xl bg-[var(--accent)]/15 border border-[var(--accent)]/40 text-xl font-medium text-[var(--accent-strong)] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
         {initial}
       </div>
     );
@@ -216,43 +216,42 @@ function MerchantLogo({ blobId, alt }: { blobId: string | null; alt: string }) {
       loading="lazy"
       decoding="async"
       onError={(e) => {
-        // Fallback: hide the broken img and show initials in its sibling.
         e.currentTarget.style.display = "none";
         const fb = e.currentTarget.nextElementSibling as HTMLElement | null;
         if (fb) fb.style.display = "flex";
       }}
-      className="h-16 w-16 rounded-md object-cover"
+      className="h-16 w-16 rounded-2xl object-cover ring-1 ring-white/15 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.6)]"
     />
   );
 }
 
 function LoadingCard() {
   return (
-    <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5">
-      <p className="text-sm text-gray-500">Looking up merchant…</p>
+    <section className="glass-card rounded-2xl p-5">
+      <p className="relative z-10 text-sm text-[var(--muted-soft)]">Looking up merchant…</p>
     </section>
   );
 }
 
 function ErrorCard({ message, uen }: { message: string; uen: string }) {
   return (
-    <section className="rounded-lg border border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20 p-5 space-y-1">
-      <p className="text-red-900 dark:text-red-100 font-semibold">Lookup failed</p>
-      <p className="text-sm text-red-800 dark:text-red-200">{message}</p>
-      <p className="text-xs text-red-700 dark:text-red-300 font-mono mt-2">UEN {uen}</p>
+    <section className="glass-card-danger rounded-2xl p-5 space-y-1">
+      <p className="text-red-200 font-semibold">Lookup failed</p>
+      <p className="text-sm text-red-200/90">{message}</p>
+      <p className="text-xs text-red-200/70 font-mono mt-2">UEN {uen}</p>
     </section>
   );
 }
 
 function UnknownCard({ uen }: { uen: string }) {
   return (
-    <section className="rounded-lg border border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40 p-5 space-y-1">
-      <p className="text-base font-semibold">✗ Not a quay merchant</p>
-      <p className="text-sm text-gray-600 dark:text-gray-300">
-        UEN <span className="font-mono">{uen}</span>
+    <section className="glass-card rounded-2xl p-5 space-y-1">
+      <p className="relative z-10 text-base font-semibold text-white">✗ Not a quay merchant</p>
+      <p className="relative z-10 text-sm text-[var(--muted)]">
+        UEN <span className="font-mono text-white">{uen}</span>
         {" "}hasn&apos;t been registered.
       </p>
-      <p className="text-xs text-gray-500 mt-2">
+      <p className="relative z-10 text-xs text-[var(--muted-soft)] mt-2">
         Anyone can claim a UEN here on testnet — verification doesn&apos;t imply
         endorsement.
       </p>

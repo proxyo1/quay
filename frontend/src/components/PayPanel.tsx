@@ -314,29 +314,28 @@ export function PayPanel({
   }
 
   return (
-    <section className="relative rounded-3xl border border-[var(--accent)]/30 bg-gradient-to-b from-[var(--accent)]/[0.07] to-transparent p-5 space-y-4 overflow-hidden">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(400px_200px_at_50%_-50px,var(--accent-glow),transparent_60%)]" />
-      <header className="space-y-1">
-        <p className="text-[11px] uppercase tracking-wider text-[var(--accent)] inline-flex items-center gap-1.5">
+    <section className="glass-card-accent rounded-3xl p-5 space-y-4 overflow-hidden">
+      <header className="relative z-10 space-y-1">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--accent-strong)] inline-flex items-center gap-1.5">
           <CheckBadge />
           Registered merchant
         </p>
-        <h2 className="text-2xl font-semibold tracking-tight">Pay {safeName}</h2>
-        <p className="text-[11px] font-mono text-neutral-500">
+        <h2 className="text-2xl font-semibold tracking-tight text-white">Pay {safeName}</h2>
+        <p className="text-[11px] font-mono text-[var(--muted-soft)]">
           UEN {uen} → {merchantAddress.slice(0, 6)}…{merchantAddress.slice(-4)}
         </p>
-        <p className="text-[11px] text-neutral-400 mt-1.5">
+        <p className="text-[11px] text-[var(--muted)] mt-1.5">
           Merchant receives in{" "}
           <span className="text-white font-medium">{RECEIVE_LABEL[merchantReceiveType]}</span>
         </p>
       </header>
 
-      <div className="rounded-2xl border border-white/10 bg-black/30 p-4 space-y-2">
-        <label htmlFor="sgd-amount" className="block text-[11px] uppercase tracking-wider text-neutral-500">
+      <div className="relative z-10 glass-input rounded-2xl p-4 space-y-2">
+        <label htmlFor="sgd-amount" className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
           Amount
         </label>
         <div className="flex items-baseline gap-2">
-          <span className="text-3xl text-neutral-500 font-light">$</span>
+          <span className="text-3xl text-[var(--muted-soft)] font-light">$</span>
           <input
             id="sgd-amount"
             type="text"
@@ -346,11 +345,11 @@ export function PayPanel({
               setSgdInput(sanitizeAmountInput(e.target.value));
               if (pay.kind !== "idle" && pay.kind !== "submitting") setPay({ kind: "idle" });
             }}
-            className="flex-1 bg-transparent border-0 px-0 text-3xl tabular-nums text-white placeholder:text-neutral-700 focus:outline-none"
+            className="flex-1 bg-transparent border-0 px-0 text-3xl tabular-nums text-white placeholder:text-[var(--muted-soft)]/60 focus:outline-none"
             placeholder="0.00"
             disabled={pay.kind === "submitting"}
           />
-          <span className="text-sm text-neutral-500">SGD</span>
+          <span className="text-sm text-[var(--muted-soft)]">SGD</span>
         </div>
       </div>
 
@@ -365,9 +364,9 @@ export function PayPanel({
         />
       )}
 
-      <div className="space-y-1.5">
-        <label htmlFor="memo" className="block text-[11px] uppercase tracking-wider text-neutral-500">
-          Memo <span className="normal-case text-neutral-600">(optional, on-chain)</span>
+      <div className="relative z-10 space-y-1.5">
+        <label htmlFor="memo" className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
+          Memo <span className="normal-case text-[var(--muted-soft)]">(optional, on-chain)</span>
         </label>
         <input
           id="memo"
@@ -376,7 +375,7 @@ export function PayPanel({
           onChange={(e) => setMemo(e.target.value)}
           maxLength={64}
           placeholder="chicken rice"
-          className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-neutral-600 focus:border-[var(--accent)]/50 focus:outline-none transition"
+          className="glass-input w-full px-3 py-2 text-sm"
           disabled={pay.kind === "submitting"}
         />
       </div>
@@ -397,17 +396,19 @@ export function PayPanel({
       />
 
       {!account ? (
-        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+        <div className="relative z-10 glass-card-warning rounded-2xl p-3 space-y-2">
           <p className="text-sm text-amber-100">Connect a Sui wallet to pay.</p>
           <ConnectButton />
         </div>
       ) : (
-        <PayButton
-          state={pay}
-          sgdMinorUnits={sgdMinorUnits}
-          canPay={canPay}
-          onClick={handlePay}
-        />
+        <div className="relative z-10">
+          <PayButton
+            state={pay}
+            sgdMinorUnits={sgdMinorUnits}
+            canPay={canPay}
+            onClick={handlePay}
+          />
+        </div>
       )}
 
       <PayResult state={pay} />
@@ -432,29 +433,29 @@ function SourceTokenPicker({
 }) {
   if (balancesLoading) {
     return (
-      <div className="space-y-1.5">
-        <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
+      <div className="relative z-10 space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
           Pay from
         </label>
-        <p className="text-xs text-neutral-500">Reading wallet balances…</p>
+        <p className="text-xs text-[var(--muted-soft)]">Reading wallet balances…</p>
       </div>
     );
   }
   if (balances.length === 0) {
     return (
-      <div className="space-y-1.5">
-        <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
+      <div className="relative z-10 space-y-1.5">
+        <label className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
           Pay from
         </label>
-        <p className="text-xs text-amber-400">
+        <p className="text-xs text-amber-300">
           Your wallet has no balances on this network. Fund some SUI to start.
         </p>
       </div>
     );
   }
   return (
-    <div className="space-y-1.5">
-      <label className="block text-[11px] uppercase tracking-wider text-neutral-500">
+    <div className="relative z-10 space-y-1.5">
+      <label className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
         Pay from
       </label>
       <ul className="space-y-1" role="radiogroup" aria-label="Source token">
@@ -469,21 +470,21 @@ function SourceTokenPicker({
                 disabled={disabled}
                 role="radio"
                 aria-checked={selected}
-                className={`w-full flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition disabled:opacity-50 ${
+                className={`w-full flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition disabled:opacity-50 backdrop-blur-md ${
                   selected
-                    ? "border-[var(--accent)] bg-[var(--accent)]/[0.08] text-white"
-                    : "border-white/10 bg-black/20 text-neutral-300 hover:border-white/25"
+                    ? "border-[var(--accent)] bg-[var(--accent)]/12 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_0_18px_-10px_var(--accent-glow)]"
+                    : "border-white/10 bg-white/[0.03] text-[var(--muted)] hover:border-white/25"
                 }`}
               >
                 <span className="flex items-center gap-2 min-w-0">
                   <span className="text-sm font-medium">{b.symbol}</span>
                   {direct && (
-                    <span className="text-[10px] uppercase tracking-wider text-[var(--success)]">
+                    <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--success)]">
                       direct
                     </span>
                   )}
                 </span>
-                <span className="text-xs tabular-nums text-neutral-400 shrink-0">
+                <span className="text-xs tabular-nums text-[var(--muted)] shrink-0">
                   {formatBalance(b.balance, b.decimals)}
                 </span>
               </button>
@@ -491,7 +492,7 @@ function SourceTokenPicker({
           );
         })}
       </ul>
-      <p className="text-[10px] text-neutral-500">
+      <p className="text-[10px] text-[var(--muted-soft)]">
         Direct = no routing fee. Other tokens route via Cetus Aggregator.
       </p>
     </div>
@@ -514,21 +515,21 @@ function PreSignReceipt({
   if (sgdMinorUnits <= 0 || !outputAmount) return null;
   const outFormatted = formatTokenAmount(outputAmount, merchantReceiveType);
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3 space-y-1.5 text-xs">
-      <p className="text-[11px] uppercase tracking-wider text-[var(--accent)]">Before you sign</p>
-      <div className="flex items-center justify-between">
-        <span className="text-neutral-400">Merchant receives</span>
+    <div className="relative z-10 glass-card rounded-2xl p-3 space-y-1.5 text-xs">
+      <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">Before you sign</p>
+      <div className="relative z-10 flex items-center justify-between">
+        <span className="text-[var(--muted)]">Merchant receives</span>
         <span className="font-medium tabular-nums text-white">
           {outFormatted} {RECEIVE_LABEL[merchantReceiveType]}
         </span>
       </div>
-      <div className="flex items-center justify-between text-neutral-500">
+      <div className="relative z-10 flex items-center justify-between text-[var(--muted-soft)]">
         <span>You pay from</span>
         <span className="text-white">{payerLabel}</span>
       </div>
-      <div className="flex items-center justify-between text-neutral-500 pt-1.5 border-t border-white/5">
+      <div className="relative z-10 flex items-center justify-between text-[var(--muted-soft)] pt-1.5 border-t border-white/5">
         <span>Route</span>
-        <span className={isDirect ? "text-[var(--success)]" : "text-[var(--accent)]"}>
+        <span className={isDirect ? "text-[var(--success)]" : "text-[var(--accent-strong)]"}>
           {isDirect ? "Direct transfer (no routing fee)" : "Cetus Aggregator (≤1% slippage)"}
         </span>
       </div>
@@ -561,7 +562,7 @@ function PayButton({
       type="button"
       onClick={onClick}
       disabled={!canPay}
-      className="group flex w-full items-center justify-between rounded-2xl bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-white/5 disabled:text-neutral-500 disabled:cursor-not-allowed text-white font-medium py-4 px-5 transition shadow-[0_8px_30px_-8px_var(--accent-glow)] disabled:shadow-none"
+      className="glass-btn-primary group w-full"
     >
       {submitting ? (
         <span className="flex items-center gap-2">
@@ -570,7 +571,7 @@ function PayButton({
       ) : sgdMinorUnits > 0 ? (
         <>
           <span>Pay {formatSgd(sgdMinorUnits / 100)}</span>
-          <span className="text-white/70 group-hover:text-white transition">→</span>
+          <span className="text-white/80 group-hover:text-white transition">→</span>
         </>
       ) : (
         <span>Enter an SGD amount</span>
@@ -583,14 +584,14 @@ function PayResult({ state }: { state: PayState }) {
   if (state.kind === "idle" || state.kind === "submitting") return null;
   if (state.kind === "success") {
     return (
-      <div className="rounded-2xl border border-[var(--success)]/30 bg-[var(--success)]/[0.08] p-4 space-y-2">
+      <div className="relative z-10 glass-card-success rounded-2xl p-4 space-y-2 glass-rise">
         <p className="text-sm font-medium text-white inline-flex items-center gap-2">
           <span className="text-[var(--success)]">
             <CheckIcon />
           </span>
           Paid on testnet · {state.routedVia === "direct" ? "direct transfer" : "via Cetus Aggregator"}
         </p>
-        <p className="text-xs text-neutral-400">
+        <p className="text-xs text-[var(--muted)]">
           <a
             href={txUrl(state.digest)}
             target="_blank"
@@ -609,7 +610,7 @@ function PayResult({ state }: { state: PayState }) {
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
               Verify receipt →
             </a>{" "}
-            <span className="text-neutral-500 font-mono">
+            <span className="text-[var(--muted-soft)] font-mono">
               ({state.blobId.slice(0, 8)}…{state.blobId.slice(-6)})
             </span>
           </p>
@@ -618,9 +619,9 @@ function PayResult({ state }: { state: PayState }) {
     );
   }
   return (
-    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
-      <p className="text-sm font-medium text-red-300">Pay failed</p>
-      <p className="text-xs text-red-300/80 break-words">{state.message}</p>
+    <div className="relative z-10 glass-card-danger rounded-2xl p-4 space-y-1">
+      <p className="text-sm font-medium text-red-200">Pay failed</p>
+      <p className="text-xs text-red-200/80 break-words">{state.message}</p>
     </div>
   );
 }
@@ -637,11 +638,11 @@ function QuoteDisplay({
   stale: boolean;
 }) {
   if (loading && !quote) {
-    return <p className="text-xs text-neutral-500">Fetching live Pyth prices…</p>;
+    return <p className="relative z-10 text-xs text-[var(--muted-soft)]">Fetching live Pyth prices…</p>;
   }
   if (error) {
     return (
-      <p className="text-xs text-amber-400">
+      <p className="relative z-10 text-xs text-amber-300">
         Pyth Hermes unreachable: {error instanceof Error ? error.message : String(error)}.
       </p>
     );
@@ -649,23 +650,23 @@ function QuoteDisplay({
   if (!quote) return null;
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3 space-y-1.5 text-xs">
-      <div className="flex items-center justify-between text-neutral-500">
+    <div className="relative z-10 glass-card rounded-2xl p-3 space-y-1.5 text-xs">
+      <div className="relative z-10 flex items-center justify-between text-[var(--muted-soft)]">
         <span>1 SUI = ${quote.rates.usdPerSui.toFixed(4)} USD</span>
         <span>1 USD = {quote.rates.sgdPerUsd.toFixed(4)} SGD</span>
       </div>
-      <div className="flex items-center justify-between pt-1.5 border-t border-white/5">
-        <span className="text-neutral-500">
+      <div className="relative z-10 flex items-center justify-between pt-1.5 border-t border-white/5">
+        <span className="text-[var(--muted-soft)]">
           {PYTH_FEED_LABELS[PYTH_FEEDS.USD_SGD]} · {PYTH_FEED_LABELS[PYTH_FEEDS.SUI_USD]}
         </span>
         <span
           className={
-            stale ? "text-amber-400 inline-flex items-center gap-1.5" : "text-[var(--success)] inline-flex items-center gap-1.5"
+            stale ? "text-amber-300 inline-flex items-center gap-1.5" : "text-[var(--success)] inline-flex items-center gap-1.5"
           }
         >
           <span
             className={`inline-block h-1.5 w-1.5 rounded-full ${
-              stale ? "bg-amber-400" : "bg-[var(--success)] live-dot"
+              stale ? "bg-amber-300" : "bg-[var(--success)] live-dot"
             }`}
           />
           {stale ? `stale (${quote.maxAgeSeconds}s)` : `live (${quote.maxAgeSeconds}s ago)`}
@@ -677,7 +678,7 @@ function QuoteDisplay({
 
 function CheckBadge() {
   return (
-    <span className="inline-flex h-3 w-3 items-center justify-center rounded-full bg-[var(--accent)]/30 border border-[var(--accent)]/50">
+    <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--accent)]/35 border border-[var(--accent)]/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.32)]">
       <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="20 6 9 17 4 12" />
       </svg>

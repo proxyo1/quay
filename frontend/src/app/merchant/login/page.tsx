@@ -44,28 +44,28 @@ function LoginInner() {
   }
 
   return (
-    <main className="mx-auto max-w-md px-6 py-16 space-y-8">
-      <Link href="/merchant" className="text-xs text-blue-600 hover:underline">
-        ← merchant
+    <main className="relative z-10 mx-auto max-w-md px-5 py-12 space-y-8">
+      <Link href="/merchant" className="text-xs text-[var(--accent)] hover:underline inline-flex items-center gap-1">
+        <span aria-hidden>←</span> merchant
       </Link>
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Sign in</h1>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-[var(--muted)] leading-relaxed">
           One Google account = one Sui address = one merchant entry on chain.
           quay never sees your password; Google does the identity work and
           Enoki binds it to your Sui wallet with a Groth16 zk proof.
         </p>
       </header>
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+      <section className="glass-card rounded-2xl p-6 space-y-4">
         {!configured ? (
-          <div className="text-sm text-amber-700 dark:text-amber-300 space-y-2">
-            <p className="font-medium">Google OAuth not configured</p>
-            <p className="text-xs">
-              Set <code className="font-mono">NEXT_PUBLIC_GOOGLE_CLIENT_ID</code>{" "}
-              in <code className="font-mono">frontend/.env.local</code> and
+          <div className="relative z-10 glass-card-warning rounded-xl p-4 space-y-2">
+            <p className="text-sm font-medium text-amber-200">Google OAuth not configured</p>
+            <p className="text-xs text-amber-200/80">
+              Set <code className="font-mono text-amber-100">NEXT_PUBLIC_GOOGLE_CLIENT_ID</code>{" "}
+              in <code className="font-mono text-amber-100">frontend/.env.local</code> and
               restart the dev server. See{" "}
-              <code className="font-mono">docs/GOOGLE_OAUTH_SETUP.md</code>.
+              <code className="font-mono text-amber-100">docs/GOOGLE_OAUTH_SETUP.md</code>.
             </p>
           </div>
         ) : (
@@ -73,24 +73,26 @@ function LoginInner() {
             type="button"
             onClick={onSignIn}
             disabled={pending}
-            className="w-full rounded-md bg-white text-gray-800 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed border border-gray-300 font-medium py-3 transition flex items-center justify-center gap-2 shadow-sm"
+            className="glass-btn-primary group w-full justify-center"
           >
-            <GoogleMark />
-            {pending ? "Redirecting to Google…" : "Sign in with Google"}
+            <span className="flex items-center gap-2.5">
+              <GoogleMark />
+              {pending ? "Redirecting to Google…" : "Sign in with Google"}
+            </span>
           </button>
         )}
 
         {error && (
-          <p className="text-xs text-red-700 dark:text-red-300">{error}</p>
+          <p className="relative z-10 text-xs text-red-300">{error}</p>
         )}
 
-        <ul className="text-[11px] text-gray-500 space-y-1 pt-1">
+        <ol className="relative z-10 text-[11px] text-[var(--muted-soft)] space-y-1 pt-1">
           <li>1. Browser mints an ephemeral Ed25519 keypair</li>
           <li>2. Google issues an ID token with our ephemeral nonce</li>
           <li>3. Enoki proves the JWT + salt + ephemeral binding in zero knowledge</li>
           <li>4. The proof yields a stable addressSeed → your Sui address</li>
           <li>5. Yours forever — no private key to back up, no seed phrase</li>
-        </ul>
+        </ol>
       </section>
     </main>
   );
