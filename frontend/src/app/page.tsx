@@ -5,83 +5,124 @@ import { QUAY, objectUrl } from "@/lib/sui-config";
 
 export default function Home() {
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16 space-y-10">
-      <header className="space-y-3">
-        <div className="flex items-center gap-3">
+    <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-md flex-col px-5 py-8">
+      <header className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
           <Image
             src="/quay.png"
             alt="quay"
-            width={56}
-            height={56}
-            className="rounded-xl"
+            width={28}
+            height={28}
+            className="rounded-md"
             priority
           />
-          <h1 className="text-4xl font-semibold tracking-tight">quay</h1>
+          <span className="text-base font-semibold tracking-tight">quay</span>
         </div>
-        <p className="text-lg text-gray-600 dark:text-gray-400">
-          Scan any Singapore SGQR sticker, pay any Sui token, settle as USDC.
-        </p>
-        <p className="text-sm text-gray-500">Sui Overflow hackathon submission · testnet only.</p>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] uppercase tracking-wider text-neutral-400">
+          <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot align-middle" />
+          testnet
+        </span>
       </header>
 
-      <section className="grid gap-4 sm:grid-cols-2">
+      <section className="flex-1 flex flex-col justify-center space-y-8 py-10">
+        <ScanMark />
+        <div className="space-y-3">
+          <h1 className="text-[44px] leading-[1.05] font-semibold tracking-tight">
+            SGQR meets Sui.
+            <br />
+            <span className="text-[var(--accent)]">One scan to pay.</span>
+          </h1>
+          <p className="text-base text-neutral-400 leading-relaxed">
+            Scan any Singapore SGQR sticker. Pay any Sui token. Settle as USDC.
+          </p>
+        </div>
+      </section>
+
+      <section className="space-y-2.5">
         <Link
           href="/scan"
-          className="rounded-lg border border-gray-200 dark:border-gray-700 p-5 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition"
+          className="group flex items-center justify-between rounded-2xl bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-medium py-4 px-5 transition"
         >
-          <div className="text-base font-medium">Scan an SGQR →</div>
-          <p className="text-sm text-gray-500 mt-1">
-            Paste a payload, extract the UEN, look it up on-chain.
-          </p>
+          <span>Scan SGQR</span>
+          <span className="text-white/70 group-hover:text-white transition">→</span>
         </Link>
 
         <Link
           href="/merchant"
-          className="rounded-lg border border-gray-200 dark:border-gray-700 p-5 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition"
+          className="group flex items-center justify-between rounded-2xl border border-white/15 hover:border-white/30 hover:bg-white/[0.03] text-white font-medium py-4 px-5 transition"
         >
-          <div className="text-base font-medium">Merchant onboarding →</div>
-          <p className="text-sm text-gray-500 mt-1">
-            Claim your UEN. Connect a Sui wallet today; Google zkLogin lands
-            once an OAuth client is wired.
-          </p>
+          <span>I&apos;m a merchant</span>
+          <span className="text-neutral-400 group-hover:text-white transition">→</span>
+        </Link>
+
+        <Link
+          href="/history"
+          className="block text-center text-sm text-neutral-400 hover:text-white py-3 transition"
+        >
+          View payment history →
         </Link>
       </section>
 
-      <p className="text-sm text-gray-500">
-        Already paid through quay?{" "}
-        <Link
-          href="/history"
-          className="text-blue-600 hover:underline"
+      <footer className="text-[11px] text-neutral-600 pt-8 mt-4 border-t border-white/5">
+        <a
+          href={objectUrl(QUAY.registryId)}
+          target="_blank"
+          rel="noreferrer"
+          className="font-mono hover:text-[var(--accent)]"
         >
-          View your payment history →
-        </Link>
-      </p>
-
-      <footer className="text-xs text-gray-500 pt-8 border-t border-gray-100 dark:border-gray-800 space-y-1">
-        <p>
-          Registry:{" "}
-          <a
-            href={objectUrl(QUAY.registryId)}
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono text-blue-600 hover:underline"
-          >
-            {QUAY.registryId.slice(0, 10)}…{QUAY.registryId.slice(-6)}
-          </a>{" "}
-          on Sui {QUAY.network}
-        </p>
-        <p>
-          Package:{" "}
-          <a
-            href={objectUrl(QUAY.packageId)}
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono text-blue-600 hover:underline"
-          >
-            {QUAY.packageId.slice(0, 10)}…{QUAY.packageId.slice(-6)}
-          </a>
-        </p>
+          registry {QUAY.registryId.slice(0, 6)}…{QUAY.registryId.slice(-4)}
+        </a>
+        {" · "}
+        <a
+          href={objectUrl(QUAY.packageId)}
+          target="_blank"
+          rel="noreferrer"
+          className="font-mono hover:text-[var(--accent)]"
+        >
+          pkg {QUAY.packageId.slice(0, 6)}…{QUAY.packageId.slice(-4)}
+        </a>
+        {" · "}
+        {QUAY.network}
       </footer>
     </main>
+  );
+}
+
+function ScanMark() {
+  return (
+    <div className="relative mx-auto h-28 w-28">
+      {/* soft accent glow behind */}
+      <div className="absolute inset-0 -z-10 rounded-full bg-[var(--accent)]/20 blur-2xl" />
+      {/* corner brackets + QR mark */}
+      <svg viewBox="0 0 100 100" className="h-full w-full" aria-hidden>
+        <g stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" fill="none">
+          <path d="M8 22 L8 8 L22 8" />
+          <path d="M92 22 L92 8 L78 8" />
+          <path d="M8 78 L8 92 L22 92" />
+          <path d="M92 78 L92 92 L78 92" />
+        </g>
+        <g fill="var(--accent)">
+          {/* three finder squares */}
+          <rect x="28" y="28" width="14" height="14" rx="1.5" />
+          <rect x="32" y="32" width="6" height="6" fill="#000" />
+          <rect x="58" y="28" width="14" height="14" rx="1.5" />
+          <rect x="62" y="32" width="6" height="6" fill="#000" />
+          <rect x="28" y="58" width="14" height="14" rx="1.5" />
+          <rect x="32" y="62" width="6" height="6" fill="#000" />
+          {/* a few data modules */}
+          <rect x="48" y="30" width="4" height="4" />
+          <rect x="48" y="38" width="4" height="4" />
+          <rect x="46" y="48" width="4" height="4" />
+          <rect x="54" y="48" width="4" height="4" />
+          <rect x="62" y="48" width="4" height="4" />
+          <rect x="70" y="48" width="4" height="4" />
+          <rect x="48" y="56" width="4" height="4" />
+          <rect x="48" y="64" width="4" height="4" />
+          <rect x="58" y="62" width="4" height="4" />
+          <rect x="66" y="58" width="4" height="4" />
+          <rect x="66" y="66" width="4" height="4" />
+        </g>
+      </svg>
+    </div>
   );
 }

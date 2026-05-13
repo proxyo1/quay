@@ -25,7 +25,6 @@ type Input =
       kind: "ok";
       source: Source;
       uen: string;
-      /** Only present when source === "scan" — the full parsed SGQR payload. */
       payload?: SgqrPayload;
     }
   | { kind: "error"; message: string };
@@ -37,8 +36,6 @@ type Lookup =
   | { kind: "not_registered" }
   | { kind: "error"; message: string };
 
-/** UEN of the staged demo merchant for the "Try an example" link.
- *  Registered by scripts/day2-deploy.ts against the V2 package. */
 const EXAMPLE_UEN = "202412345Z";
 
 export default function ScanPage() {
@@ -56,10 +53,6 @@ export default function ScanPage() {
     setLookup({ kind: "idle" });
     if (!upper) {
       setInput({ kind: "empty" });
-      return;
-    }
-    if (!looksLikeUen(upper)) {
-      setInput({ kind: "ok", source: "manual", uen: upper });
       return;
     }
     setInput({ kind: "ok", source: "manual", uen: upper });
@@ -82,7 +75,7 @@ export default function ScanPage() {
         setInput({
           kind: "error",
           message:
-            "Mobile-number PayNow (proxy type 0) isn't supported in V0 — UEN PayNow only. Type a UEN instead, or scan a business SGQR.",
+            "Mobile-number PayNow isn't supported in V0 — UEN PayNow only. Type a UEN instead.",
         });
         return;
       }
@@ -104,7 +97,6 @@ export default function ScanPage() {
     }
   }
 
-  // Whenever we have a valid UEN, run the on-chain registration lookup.
   useEffect(() => {
     if (input.kind !== "ok" || !looksLikeUen(input.uen)) {
       setLookup({ kind: "idle" });
@@ -148,84 +140,79 @@ export default function ScanPage() {
 
   const okInput = input.kind === "ok" ? input : null;
   const merchantName = okInput?.payload?.merchantName;
+  const showHero = input.kind === "empty";
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10 space-y-8">
-      <header className="space-y-1">
-        <h1 className="text-3xl font-semibold">quay · scan</h1>
-        <p className="text-sm text-gray-500">
-          Scan a merchant&apos;s SGQR sticker with your camera, or type their UEN
-          directly. Camera capture auto-fills the UEN once a valid QR is in
-          frame.
-        </p>
+    <main className="relative z-10 mx-auto w-full max-w-md px-5 py-6 space-y-6">
+      <header className="flex items-center justify-between">
+        <Link href="/" className="text-[var(--accent)] hover:underline text-sm inline-flex items-center gap-1">
+          <span aria-hidden>←</span> home
+        </Link>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] uppercase tracking-wider text-neutral-400">
+          <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot align-middle" />
+          testnet
+        </span>
       </header>
 
-      <section className="flex items-center justify-between rounded-md border border-gray-200 dark:border-gray-700 px-4 py-3">
-        <span className="text-sm">
-          Wallet:{" "}
-          {account ? (
-            <>
-              <code className="font-mono text-xs">
-                {account.address.slice(0, 6)}…{account.address.slice(-4)}
-              </code>{" "}
-              ·{" "}
-              <Link href="/history" className="text-xs text-blue-600 hover:underline">
-                history →
-              </Link>
-            </>
-          ) : (
-            <span className="text-gray-400">not connected</span>
-          )}
-        </span>
-        <ConnectButton />
+      <section className="space-y-1">
+        <h1 className="text-3xl font-semibold tracking-tight">Scan to pay</h1>
+        <p className="text-sm text-neutral-400">
+          Point your camera at any SGQR sticker — or type a UEN below.
+        </p>
       </section>
 
-      <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-gray-500">Merchant</p>
-            <p className="text-sm font-medium">Scan or type a UEN</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setScanOpen(true)}
-            className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 inline-flex items-center gap-1.5"
-          >
-            <CameraIcon />
-            Scan SGQR
-          </button>
-        </div>
+      <WalletCard account={account} />
 
-        <div>
-          <label htmlFor="uen" className="block text-xs text-gray-500 mb-1">
-            UEN
-          </label>
-          <input
-            id="uen"
-            type="text"
-            value={uen}
-            onChange={(e) => setManualUen(e.target.value)}
-            placeholder="T11KH0001A"
-            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-3 py-2 font-mono"
-          />
-          {uen && !looksLikeUen(uen) && (
-            <p className="text-xs text-amber-600 mt-1">
-              Doesn&apos;t look like a UEN. Expected 8–10 alphanumeric chars (e.g., 202012345Z, T12LL3456A).
+      {showHero && <ScanHeroIllustration />}
+
+      <button
+        type="button"
+        onClick={() => setScanOpen(true)}
+        className="group flex w-full items-center justify-between rounded-2xl bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white font-medium py-4 px-5 transition shadow-[0_8px_30px_-8px_var(--accent-glow)]"
+      >
+        <span className="flex items-center gap-2.5">
+          <CameraIcon />
+          Open camera
+        </span>
+        <span className="text-white/70 group-hover:text-white transition">→</span>
+      </button>
+
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-2">
+        <label htmlFor="uen" className="block text-[11px] uppercase tracking-wider text-[var(--accent)]">
+          UEN code
+        </label>
+        <input
+          id="uen"
+          type="text"
+          value={uen}
+          onChange={(e) => setManualUen(e.target.value)}
+          placeholder="T11KH0001A"
+          className="w-full bg-transparent border-0 px-0 py-1 text-lg font-mono tabular-nums text-white placeholder:text-neutral-600 focus:outline-none"
+          autoCapitalize="characters"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <div className="flex items-center justify-between pt-1 border-t border-white/5">
+          {uen && !looksLikeUen(uen) ? (
+            <p className="text-[11px] text-amber-400">
+              Expected 8–10 alphanumeric (e.g., 202012345Z).
             </p>
+          ) : (
+            <p className="text-[11px] text-neutral-500">8–10 alphanumeric Singapore UEN</p>
           )}
           <button
             type="button"
             onClick={() => setManualUen(EXAMPLE_UEN)}
-            className="text-xs text-blue-600 hover:underline mt-2"
+            className="text-[11px] text-[var(--accent)] hover:underline shrink-0"
           >
-            ↳ Try the demo UEN ({EXAMPLE_UEN})
+            try demo →
           </button>
         </div>
       </section>
 
       {input.kind === "error" && (
-        <section className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 px-4 py-3">
-          <p className="text-sm text-red-800 dark:text-red-300">{input.message}</p>
+        <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
+          <p className="text-sm text-red-300">{input.message}</p>
         </section>
       )}
 
@@ -243,16 +230,16 @@ export default function ScanPage() {
           />
         )}
 
-      <footer className="text-xs text-gray-500 space-y-1">
+      <footer className="text-[11px] text-neutral-500 pt-4 border-t border-white/5">
         <p>
           On-chain registry:{" "}
           <a
             href={objectUrl(QUAY.registryId)}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-600 hover:underline font-mono"
+            className="text-[var(--accent)] hover:underline font-mono"
           >
-            {QUAY.registryId.slice(0, 10)}…{QUAY.registryId.slice(-6)}
+            {QUAY.registryId.slice(0, 8)}…{QUAY.registryId.slice(-6)}
           </a>{" "}
           on {QUAY.network}
         </p>
@@ -268,6 +255,85 @@ export default function ScanPage() {
   );
 }
 
+function WalletCard({ account }: { account: ReturnType<typeof useCurrentAccount> }) {
+  if (!account) {
+    return (
+      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-wider text-neutral-500">Wallet</p>
+          <p className="text-sm text-neutral-300">Not connected</p>
+        </div>
+        <ConnectButton />
+      </section>
+    );
+  }
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex items-center gap-3">
+          <div className="h-9 w-9 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/40 flex items-center justify-center shrink-0">
+            <WalletIcon />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] uppercase tracking-wider text-neutral-500">Wallet</p>
+            <p className="text-sm font-mono text-white truncate">
+              {account.address.slice(0, 6)}…{account.address.slice(-4)}
+            </p>
+          </div>
+        </div>
+        <Link href="/history" className="text-xs text-[var(--accent)] hover:underline shrink-0">
+          history →
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function ScanHeroIllustration() {
+  return (
+    <div className="relative mx-auto h-[220px] w-full max-w-xs">
+      <div className="absolute inset-x-12 inset-y-2 rounded-[34px] border border-white/15 bg-gradient-to-b from-white/[0.03] to-transparent overflow-hidden shadow-[0_30px_80px_-30px_var(--accent-glow)]">
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-24 w-24 rounded-xl bg-white p-2 shadow-[0_0_60px_-10px_var(--accent-glow)]">
+          <svg viewBox="0 0 21 21" className="h-full w-full text-black" aria-hidden>
+            <rect x="0" y="0" width="7" height="7" fill="currentColor" />
+            <rect x="1" y="1" width="5" height="5" fill="white" />
+            <rect x="2" y="2" width="3" height="3" fill="currentColor" />
+            <rect x="14" y="0" width="7" height="7" fill="currentColor" />
+            <rect x="15" y="1" width="5" height="5" fill="white" />
+            <rect x="16" y="2" width="3" height="3" fill="currentColor" />
+            <rect x="0" y="14" width="7" height="7" fill="currentColor" />
+            <rect x="1" y="15" width="5" height="5" fill="white" />
+            <rect x="2" y="16" width="3" height="3" fill="currentColor" />
+            <rect x="9" y="3" width="1" height="1" fill="currentColor" />
+            <rect x="11" y="3" width="1" height="1" fill="currentColor" />
+            <rect x="10" y="5" width="1" height="1" fill="currentColor" />
+            <rect x="9" y="9" width="1" height="1" fill="currentColor" />
+            <rect x="11" y="9" width="1" height="1" fill="currentColor" />
+            <rect x="13" y="9" width="1" height="1" fill="currentColor" />
+            <rect x="15" y="9" width="1" height="1" fill="currentColor" />
+            <rect x="17" y="9" width="1" height="1" fill="currentColor" />
+            <rect x="9" y="11" width="1" height="1" fill="currentColor" />
+            <rect x="11" y="11" width="1" height="1" fill="currentColor" />
+            <rect x="13" y="11" width="1" height="1" fill="currentColor" />
+            <rect x="15" y="11" width="1" height="1" fill="currentColor" />
+            <rect x="9" y="13" width="1" height="1" fill="currentColor" />
+            <rect x="11" y="13" width="1" height="1" fill="currentColor" />
+            <rect x="13" y="13" width="1" height="1" fill="currentColor" />
+            <rect x="9" y="15" width="1" height="1" fill="currentColor" />
+            <rect x="11" y="15" width="1" height="1" fill="currentColor" />
+            <rect x="13" y="15" width="1" height="1" fill="currentColor" />
+            <rect x="15" y="15" width="1" height="1" fill="currentColor" />
+            <rect x="17" y="15" width="1" height="1" fill="currentColor" />
+            <rect x="9" y="17" width="1" height="1" fill="currentColor" />
+            <rect x="13" y="17" width="1" height="1" fill="currentColor" />
+          </svg>
+        </div>
+        <div className="absolute left-6 right-6 top-1/2 h-px bg-gradient-to-r from-transparent via-[var(--accent)] to-transparent shadow-[0_0_18px_4px_var(--accent)] scan-sweep" />
+      </div>
+    </div>
+  );
+}
+
 function ResultPane({
   input,
   lookup,
@@ -280,43 +346,37 @@ function ResultPane({
   const city = sanitizeMerchantCity(payload?.merchantCity);
 
   return (
-    <section className="space-y-3 rounded-md border border-gray-200 dark:border-gray-700 px-4 py-4">
+    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="font-medium text-sm">UEN {input.uen}</h2>
-        <span className="text-xs text-gray-500">
+        <p className="text-[11px] uppercase tracking-wider text-neutral-500">
+          UEN <span className="font-mono text-white normal-case">{input.uen}</span>
+        </p>
+        <span className="text-[11px] text-neutral-500">
           {input.source === "scan" ? "captured by camera" : "typed manually"}
         </span>
       </div>
 
-      {payload && (
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+      {payload && (name || city || payload.transactionAmount) && (
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-sm">
           {name && (
             <>
-              <dt className="text-gray-500">Merchant</dt>
-              <dd className="font-medium">{name}</dd>
+              <dt className="text-neutral-500 text-xs">Merchant</dt>
+              <dd className="text-white font-medium">{name}</dd>
             </>
           )}
           {city && (
             <>
-              <dt className="text-gray-500">City</dt>
-              <dd>{city}</dd>
+              <dt className="text-neutral-500 text-xs">City</dt>
+              <dd className="text-neutral-300">{city}</dd>
             </>
           )}
-          <dt className="text-gray-500">Type</dt>
-          <dd>{payload.pointOfInitiationMethod}</dd>
           {payload.transactionAmount && (
             <>
-              <dt className="text-gray-500">Suggested</dt>
-              <dd>
+              <dt className="text-neutral-500 text-xs">Suggested</dt>
+              <dd className="text-neutral-300">
                 {payload.transactionAmount}{" "}
                 {payload.transactionCurrency === "702" ? "SGD" : payload.transactionCurrency}
               </dd>
-            </>
-          )}
-          {payload.additionalData?.billNumber && (
-            <>
-              <dt className="text-gray-500">Bill</dt>
-              <dd>{payload.additionalData.billNumber}</dd>
             </>
           )}
         </dl>
@@ -329,12 +389,18 @@ function ResultPane({
 
 function RegistryStatus({ lookup, typed }: { lookup: Lookup; typed: boolean }) {
   if (lookup.kind === "idle" || lookup.kind === "loading") {
-    return <p className="text-xs text-gray-500">Looking up on-chain…</p>;
+    return (
+      <p className="text-xs text-neutral-500 inline-flex items-center gap-2">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-500 animate-pulse" />
+        Looking up on chain…
+      </p>
+    );
   }
   if (lookup.kind === "registered") {
     return (
-      <p className="text-xs text-emerald-700 dark:text-emerald-300">
-        ✓ Registered — pays to{" "}
+      <p className="text-xs text-[var(--success)] inline-flex items-center gap-2">
+        <CheckIcon />
+        Registered · pays to{" "}
         <code className="font-mono">
           {lookup.address.slice(0, 6)}…{lookup.address.slice(-4)}
         </code>
@@ -343,23 +409,40 @@ function RegistryStatus({ lookup, typed }: { lookup: Lookup; typed: boolean }) {
   }
   if (lookup.kind === "not_registered") {
     return (
-      <p className="text-xs text-gray-600 dark:text-gray-400">
+      <p className="text-xs text-neutral-400">
         {typed
           ? "This UEN isn't on the quay registry yet."
-          : "This merchant isn't on the quay registry yet — their SGQR will keep working for regular PayNow, just not on chain."}
+          : "Merchant isn't on the quay registry — their SGQR still works for regular PayNow."}
       </p>
     );
   }
   return (
-    <p className="text-xs text-red-600">Lookup failed: {lookup.message}</p>
+    <p className="text-xs text-red-400">Lookup failed: {lookup.message}</p>
   );
 }
 
 function CameraIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
       <circle cx="12" cy="13" r="3" />
+    </svg>
+  );
+}
+
+function WalletIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--accent)]">
+      <path d="M20 12V8a2 2 0 0 0-2-2H4a2 2 0 0 0 0 4h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6" />
+      <path d="M18 12h.01" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
     </svg>
   );
 }

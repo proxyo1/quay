@@ -33,18 +33,14 @@ interface NormalizedReceipt {
   receiptBlobId: string | null;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Payer-side payment history.
+ * Payer-side payment history (Midnight Quay).
  *
- * Mirrors /merchant/terminal from the payer's perspective. Sui's RPC only
- * accepts a single EventFilter at a time (the `All`/`Any` combinators are
- * no longer supported), so we query by MoveEventType globally and filter
- * `payer === account.address` on the client. limit:100 is a V0 ceiling —
- * if a wallet's payments don't appear in the most-recent global window
- * they won't show here; we'd need a backend indexer to scroll further.
- *
- * When quote_metadata is a v2 BCS payload, we surface the Walrus blob_id
- * as a "Verify receipt →" link to /verify/[blobId].
+ * Sui RPC accepts a single EventFilter at a time, so we query
+ * PaymentReceipt globally then filter `payer === account.address` on the
+ * client. Limit 100 receipts in the most recent global window.
  */
 export default function HistoryPage() {
   const account = useCurrentAccount();
@@ -70,195 +66,308 @@ export default function HistoryPage() {
       .filter((r): r is NormalizedReceipt => r !== null && r.payer === account.address);
   }, [data, account]);
 
-  const todayTotalSgd = useMemo(() => {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const startMs = startOfDay.getTime();
-    let total = 0;
-    for (const r of receipts) {
-      if (r.timestampMs >= startMs) total += r.sgdMinorUnits;
-    }
-    return total / 100;
-  }, [receipts]);
-
-  const recentTotalSgd = useMemo(() => {
-    let total = 0;
-    for (const r of receipts) total += r.sgdMinorUnits;
-    return total / 100;
-  }, [receipts]);
+  const stats = useMemo(() => computeStats(receipts), [receipts]);
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10 space-y-8">
-      <Link href="/" className="text-xs text-blue-600 hover:underline">
-        ← home
-      </Link>
-      <header className="space-y-1">
-        <h1 className="text-3xl font-semibold">Payment history</h1>
-        <p className="text-sm text-gray-500">
-          Outgoing PaymentReceipt events from your connected wallet. Live —
-          refreshes every 5s. Filters the most recent 100 quay payments
-          network-wide; reach out if you need a longer window.
-        </p>
+    <main className="relative z-10 mx-auto w-full max-w-md px-5 py-6 space-y-6">
+      <header className="flex items-center justify-between">
+        <Link href="/" className="text-[var(--accent)] hover:underline text-sm inline-flex items-center gap-1">
+          <span aria-hidden>←</span> home
+        </Link>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] uppercase tracking-wider text-neutral-400">
+          <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot align-middle" />
+          live
+        </span>
       </header>
 
+      <section className="space-y-1">
+        <h1 className="text-3xl font-semibold tracking-tight">Payment history</h1>
+        <p className="text-sm text-neutral-400">
+          Outgoing receipts from your connected wallet. Refreshes every 5s.
+        </p>
+      </section>
+
       {!account ? (
-        <section className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-2">
-          <p className="text-sm">Connect a Sui wallet to view your payment history.</p>
+        <section className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent)]/[0.05] p-5 space-y-3">
+          <p className="text-sm text-white">Connect a Sui wallet to view your payment history.</p>
           <ConnectButton />
         </section>
       ) : (
         <>
-          <section className="grid grid-cols-2 gap-3">
-            <SummaryCard label="Today" amount={todayTotalSgd} highlight />
-            <SummaryCard
-              label={`Recent (${receipts.length})`}
-              amount={recentTotalSgd}
-            />
-          </section>
+          <WeekHero stats={stats} />
+
+          <div className="grid grid-cols-3 gap-2">
+            <KPI label="Today" amount={stats.todaySgd} />
+            <KPI label="7 days" amount={stats.weekSgd} />
+            <KPI label="All time" amount={stats.allTimeSgd} />
+          </div>
 
           {error ? (
-            <section className="rounded-md border border-red-200 bg-red-50 dark:bg-red-900/20 p-3 text-sm">
-              <p className="font-medium text-red-700 dark:text-red-300">Event query failed</p>
-              <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+            <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
+              <p className="text-sm font-medium text-red-300">Event query failed</p>
+              <p className="text-xs text-red-300/80 break-words">
                 {error instanceof Error ? error.message : String(error)}
               </p>
             </section>
           ) : isLoading && receipts.length === 0 ? (
-            <p className="text-sm text-gray-500">Looking up your payments…</p>
+            <p className="text-sm text-neutral-500 text-center py-6">Loading…</p>
           ) : receipts.length === 0 ? (
-            <section className="rounded-md border border-gray-200 dark:border-gray-700 p-6 text-center space-y-2">
-              <p className="text-base font-medium">No payments yet</p>
-              <p className="text-xs text-gray-500">
-                Scan any SGQR sticker and pay a registered merchant. Your
-                payment will appear here once it&apos;s finalized on chain.
-              </p>
-              <div className="pt-2">
-                <Link href="/scan" className="text-xs text-blue-600 hover:underline">
-                  Go to scan →
-                </Link>
-              </div>
-            </section>
+            <EmptyState />
           ) : (
-            <section className="space-y-2">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Recent</p>
-              <ul className="space-y-2">
-                {receipts.map((r) => (
-                  <ReceiptCard key={r.receiptId} r={r} />
-                ))}
-              </ul>
-            </section>
+            <ReceiptList receipts={receipts} />
           )}
         </>
       )}
 
-      <footer className="text-xs text-gray-500 pt-6 border-t border-gray-100 dark:border-gray-800">
-        <p>
-          Connected wallet:{" "}
-          {account ? (
-            <a
-              href={objectUrl(account.address)}
-              target="_blank"
-              rel="noreferrer"
-              className="font-mono text-blue-600 hover:underline"
-            >
-              {account.address.slice(0, 10)}…{account.address.slice(-6)}
-            </a>
-          ) : (
-            <span className="text-gray-400">none</span>
-          )}
-        </p>
+      <footer className="text-[11px] text-neutral-500 pt-4 border-t border-white/5">
+        Connected wallet:{" "}
+        {account ? (
+          <a
+            href={objectUrl(account.address)}
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono text-[var(--accent)] hover:underline"
+          >
+            {account.address.slice(0, 8)}…{account.address.slice(-6)}
+          </a>
+        ) : (
+          <span className="text-neutral-500">none</span>
+        )}
       </footer>
     </main>
   );
 }
 
-function SummaryCard({
-  label,
-  amount,
-  highlight,
+function WeekHero({
+  stats,
 }: {
-  label: string;
-  amount: number;
-  highlight?: boolean;
+  stats: ReturnType<typeof computeStats>;
 }) {
   return (
-    <div
-      className={
-        highlight
-          ? "rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/10 p-4"
-          : "rounded-lg border border-gray-200 dark:border-gray-700 p-4"
-      }
-    >
-      <p
-        className={
-          highlight
-            ? "text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300"
-            : "text-xs uppercase tracking-wide text-gray-500"
-        }
-      >
-        {label}
+    <section className="relative rounded-3xl border border-[var(--accent)]/25 bg-gradient-to-b from-[var(--accent)]/[0.08] to-transparent p-5 overflow-hidden">
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(400px_200px_at_50%_-50px,var(--accent-glow),transparent_60%)]" />
+      <p className="text-[11px] uppercase tracking-wider text-neutral-400">
+        Spent this week
       </p>
-      <p className="text-3xl font-semibold tabular-nums mt-1">
-        ${amount.toFixed(2)}{" "}
-        <span className="text-base text-gray-500 font-normal">SGD</span>
+      <p className="mt-1 text-4xl font-semibold tabular-nums text-white">
+        ${stats.weekSgd.toFixed(2)}
+        <span className="ml-1.5 text-base text-neutral-500 font-normal">SGD</span>
+      </p>
+      <div className="mt-3 h-12">
+        <Sparkline points={stats.weeklyDaily} />
+      </div>
+      <div className="mt-2 flex justify-between text-[10px] uppercase tracking-wider text-neutral-500">
+        {stats.weekLabels.map((d, i) => (
+          <span key={i} className={i === stats.weekLabels.length - 1 ? "text-[var(--accent)]" : ""}>
+            {d}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Sparkline({ points }: { points: number[] }) {
+  if (points.length === 0) return null;
+  const max = Math.max(...points, 1);
+  const w = 100;
+  const h = 30;
+  const step = points.length > 1 ? w / (points.length - 1) : 0;
+  const coords = points.map((v, i) => {
+    const x = i * step;
+    const y = h - (v / max) * h;
+    return [x, y] as const;
+  });
+  const path = coords.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+  const areaPath = `${path} L${w},${h} L0,${h} Z`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full" preserveAspectRatio="none" aria-hidden>
+      <defs>
+        <linearGradient id="spark-area" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="var(--accent)" stopOpacity="0.4" />
+          <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill="url(#spark-area)" />
+      <path d={path} fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      {coords.length > 0 && (
+        <circle cx={coords[coords.length - 1][0]} cy={coords[coords.length - 1][1]} r="2" fill="var(--accent)" />
+      )}
+    </svg>
+  );
+}
+
+function KPI({ label, amount }: { label: string; amount: number }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+      <p className="text-[10px] uppercase tracking-wider text-neutral-500">{label}</p>
+      <p className="mt-0.5 text-base font-semibold tabular-nums text-white">
+        ${amount.toFixed(2)}
+        <span className="text-[10px] text-neutral-500 ml-0.5 font-normal">SGD</span>
       </p>
     </div>
   );
 }
 
-function ReceiptCard({ r }: { r: NormalizedReceipt }) {
-  const tokenLabel = shortTokenLabel(r.tokenType);
+function EmptyState() {
   return (
-    <li className="rounded-md border border-gray-200 dark:border-gray-700 p-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="text-2xl font-semibold tabular-nums">
-          ${(r.sgdMinorUnits / 100).toFixed(2)}{" "}
-          <span className="text-sm text-gray-500 font-normal">SGD</span>
-        </p>
-        <p className="text-xs text-gray-500 tabular-nums">
-          {formatRelativeTime(r.timestampMs)}
-        </p>
+    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 text-center space-y-2">
+      <div className="mx-auto h-12 w-12 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/30 flex items-center justify-center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
       </div>
-      <div className="flex items-baseline justify-between gap-3 mt-1">
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          <span className="tabular-nums">{formatTokenAmount(r.amount, tokenLabel)}</span>
-          {" → "}
-          <a
-            href={objectUrl(r.merchant)}
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono text-xs text-blue-600 hover:underline"
-          >
-            {r.merchant.slice(0, 6)}…{r.merchant.slice(-4)}
-          </a>
-        </p>
-        <a
-          href={txUrl(r.txDigest)}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-blue-600 hover:underline font-mono"
-        >
-          tx ↗
-        </a>
+      <p className="text-base font-medium text-white">No payments yet</p>
+      <p className="text-xs text-neutral-500">
+        Scan an SGQR sticker. Once it&apos;s on chain, it shows up here.
+      </p>
+      <div className="pt-1">
+        <Link href="/scan" className="text-xs text-[var(--accent)] hover:underline">
+          Go to scan →
+        </Link>
       </div>
-      {r.memo && (
-        <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 italic">“{r.memo}”</p>
-      )}
-      {r.receiptBlobId && (
-        <p className="text-xs mt-2">
-          <Link
-            href={`/verify/${encodeURIComponent(r.receiptBlobId)}`}
-            className="text-emerald-700 dark:text-emerald-300 hover:underline"
-          >
-            Verify receipt →
-          </Link>{" "}
-          <span className="text-gray-500 font-mono">
-            ({r.receiptBlobId.slice(0, 8)}…{r.receiptBlobId.slice(-6)} on Walrus)
-          </span>
-        </p>
-      )}
+    </section>
+  );
+}
+
+function ReceiptList({ receipts }: { receipts: NormalizedReceipt[] }) {
+  const groups = useMemo(() => groupByDay(receipts), [receipts]);
+  return (
+    <section className="space-y-4">
+      {groups.map((group) => (
+        <div key={group.label} className="space-y-2">
+          <h3 className="text-[10px] uppercase tracking-wider text-neutral-500 px-1">{group.label}</h3>
+          <ul className="space-y-2">
+            {group.items.map((r, i) => (
+              <ReceiptCard key={r.receiptId} r={r} highlight={group.label === "Today" && i === 0} />
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolean }) {
+  const tokenLabel = shortTokenLabel(r.tokenType);
+  const merchantInitial = r.merchant.slice(2, 3).toUpperCase();
+  return (
+    <li
+      className={`rounded-2xl border bg-white/[0.02] p-4 ${
+        highlight ? "border-[var(--accent)]/40 shadow-[0_0_30px_-12px_var(--accent-glow)]" : "border-white/10"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <div className="h-9 w-9 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/30 flex items-center justify-center text-[var(--accent)] text-xs font-semibold shrink-0">
+          {merchantInitial}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-lg font-semibold tabular-nums text-white">
+              ${(r.sgdMinorUnits / 100).toFixed(2)}{" "}
+              <span className="text-xs text-neutral-500 font-normal">SGD</span>
+            </p>
+            <span className="text-[11px] text-neutral-500 tabular-nums shrink-0">
+              {formatRelativeTime(r.timestampMs)}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-neutral-400 font-mono truncate">
+            {formatTokenAmount(r.amount, tokenLabel)} → {r.merchant.slice(0, 6)}…{r.merchant.slice(-4)}
+          </p>
+          {r.memo && (
+            <p className="mt-1.5 text-xs text-neutral-300 italic">&ldquo;{r.memo}&rdquo;</p>
+          )}
+          <div className="mt-2 flex items-center gap-3 text-[11px]">
+            <a
+              href={txUrl(r.txDigest)}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[var(--accent)] hover:underline font-mono"
+            >
+              tx ↗
+            </a>
+            {r.receiptBlobId && (
+              <Link
+                href={`/verify/${encodeURIComponent(r.receiptBlobId)}`}
+                className="text-[var(--accent)] hover:underline inline-flex items-center gap-1"
+              >
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
+                verified
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
     </li>
   );
+}
+
+function computeStats(receipts: NormalizedReceipt[]) {
+  const now = Date.now();
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startToday = startOfToday.getTime();
+  const startWeek = now - 7 * DAY_MS;
+
+  let todayMinor = 0;
+  let weekMinor = 0;
+  let allMinor = 0;
+  for (const r of receipts) {
+    allMinor += r.sgdMinorUnits;
+    if (r.timestampMs >= startToday) todayMinor += r.sgdMinorUnits;
+    if (r.timestampMs >= startWeek) weekMinor += r.sgdMinorUnits;
+  }
+
+  // Bucket the last 7 days (including today) into daily totals
+  const weeklyDaily: number[] = [];
+  const weekLabels: string[] = [];
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  for (let i = 6; i >= 0; i--) {
+    const dayStart = startToday - i * DAY_MS;
+    const dayEnd = dayStart + DAY_MS;
+    let dayMinor = 0;
+    for (const r of receipts) {
+      if (r.timestampMs >= dayStart && r.timestampMs < dayEnd) dayMinor += r.sgdMinorUnits;
+    }
+    weeklyDaily.push(dayMinor / 100);
+    weekLabels.push(dayNames[new Date(dayStart).getDay()]);
+  }
+
+  return {
+    todaySgd: todayMinor / 100,
+    weekSgd: weekMinor / 100,
+    allTimeSgd: allMinor / 100,
+    weeklyDaily,
+    weekLabels,
+  };
+}
+
+function groupByDay(receipts: NormalizedReceipt[]): { label: string; items: NormalizedReceipt[] }[] {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startToday = startOfToday.getTime();
+  const startYesterday = startToday - DAY_MS;
+  const startWeek = startToday - 7 * DAY_MS;
+
+  const today: NormalizedReceipt[] = [];
+  const yesterday: NormalizedReceipt[] = [];
+  const thisWeek: NormalizedReceipt[] = [];
+  const older: NormalizedReceipt[] = [];
+
+  for (const r of receipts) {
+    if (r.timestampMs >= startToday) today.push(r);
+    else if (r.timestampMs >= startYesterday) yesterday.push(r);
+    else if (r.timestampMs >= startWeek) thisWeek.push(r);
+    else older.push(r);
+  }
+
+  const groups: { label: string; items: NormalizedReceipt[] }[] = [];
+  if (today.length) groups.push({ label: "Today", items: today });
+  if (yesterday.length) groups.push({ label: "Yesterday", items: yesterday });
+  if (thisWeek.length) groups.push({ label: "This week", items: thisWeek });
+  if (older.length) groups.push({ label: "Earlier", items: older });
+  return groups;
 }
 
 function normalizeEvent(ev: {
@@ -275,7 +384,7 @@ function normalizeEvent(ev: {
         const decoded = decodeQuoteMetadata(Uint8Array.from(p.quote_metadata));
         receiptBlobId = decoded.receiptBlobId;
       } catch {
-        // v1 payload or unknown discriminator — leave blob link off.
+        // v1 / unknown discriminator — leave link off.
       }
     }
     return {
@@ -316,6 +425,6 @@ function formatRelativeTime(ms: number): string {
   if (ageMin < 60) return `${ageMin}m ago`;
   const ageHour = Math.floor(ageMin / 60);
   if (ageHour < 24) return `${ageHour}h ago`;
-  const ageDay = Math.floor(ageHour / 60 / 24);
+  const ageDay = Math.floor(ageHour / 24);
   return `${ageDay}d ago`;
 }

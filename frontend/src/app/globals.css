@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #000000;
+  --surface: #0a0a0a;
+  --surface-2: #141414;
+  --foreground: #ffffff;
+  --muted: #a3a3a3;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --accent: #4DA2FF;
+  --accent-strong: #6BB4FF;
+  --accent-glow: rgba(77, 162, 255, 0.28);
+  --success: #34d399;
+  --danger: #f87171;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-hairline: var(--hairline);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle radial backdrop on the whole app — pulls the eye toward the top of every screen */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 500px at 50% -200px, rgba(77, 162, 255, 0.14), transparent 60%),
+    radial-gradient(600px 400px at 90% 110%, rgba(77, 162, 255, 0.05), transparent 60%);
+  z-index: 0;
+}
+
+/* Animated scanning line for SGQR hero illustrations */
+@keyframes scan-sweep {
+  0% { transform: translateY(-50%); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(50%); opacity: 0; }
+}
+.scan-sweep {
+  animation: scan-sweep 2.4s ease-in-out infinite;
+}
+
+/* Pulsing live indicator */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 6px transparent; }
+}
+.live-dot {
+  animation: live-pulse 1.6s ease-in-out infinite;
 }

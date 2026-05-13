@@ -14,7 +14,6 @@ import {
   PYTH_FEED_LABELS,
   formatSgd,
   formatSui,
-  priceAgeSeconds,
   quoteSgdToSui,
   STALE_THRESHOLD_SECONDS,
   usePythPrices,
@@ -33,16 +32,6 @@ type PayState =
   | { kind: "success"; digest: string; blobId?: string }
   | { kind: "error"; message: string };
 
-/**
- * Pay panel — shown once a registered merchant is resolved on /scan.
- *
- * Day 4 added the live Pyth quote. Day 5 wires the Pay button: it now
- * splits MIST off the connected wallet's gas coin, calls
- * `payments::pay<SUI>`, waits for finality, and surfaces the resulting
- * PaymentReceipt digest with a Sui explorer link.
- *
- * Day 5.5+ adds Cetus-routed swap-and-pay for non-SUI source tokens.
- */
 export function PayPanel({
   merchantAddress,
   merchantName,
@@ -89,8 +78,6 @@ export function PayPanel({
       const usdSgd = pricesQ.data.get(PYTH_FEEDS.USD_SGD)!;
       const suiUsd = pricesQ.data.get(PYTH_FEEDS.SUI_USD)!;
 
-      // v1 quote inputs — same shape as before so any existing decoders
-      // (and the verifier dApp's v1 inner-payload parser) keep working.
       const v1Quote = {
         v: 1,
         src: "pyth-hermes",
@@ -107,10 +94,6 @@ export function PayPanel({
       };
       const v1Bytes = encodeQuoteMetadata(v1Quote);
 
-      // Phase 3 (D3, D10): receipt upload BEFORE wallet popup. The signed
-      // tx must include the blob_id in quote_metadata, so the upload has
-      // to land before signAndExecute fires. Sub-status text keeps the
-      // ~1-3s latency visible. On hard-fail (D7), pay tx never submits.
       const predictedTimestampMs = Date.now();
       const receiptIdHex = predictReceiptIdHex({
         uen,
@@ -145,12 +128,10 @@ export function PayPanel({
         const err = await upRes
           .json()
           .catch(() => ({ error: `HTTP ${upRes.status}` }));
-        // D7 hard-fail: pay tx does not submit if Walrus upload fails.
         throw new Error(`receipt prep failed: ${err.error ?? `HTTP ${upRes.status}`}`);
       }
       const { blob_id: blobId } = (await upRes.json()) as { blob_id: string };
 
-      // Wrap v1 inputs + blob_id in v2 BCS payload for the on-chain field.
       const v2Bytes = encodeV2(v1Bytes, blobId);
 
       setPay({ kind: "submitting", phase: "awaiting-signature" });
@@ -164,7 +145,6 @@ export function PayPanel({
       const result = await signAndExecute({
         transaction: tx,
       });
-      // Wait for tx to be visible across the network before claiming success
       await sui.waitForTransaction({ digest: result.digest });
       setPay({ kind: "success", digest: result.digest, blobId });
     } catch (e) {
@@ -176,23 +156,25 @@ export function PayPanel({
   }
 
   return (
-    <section className="rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50/60 dark:bg-emerald-900/10 p-5 space-y-5">
-      <header>
-        <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+    <section className="relative rounded-3xl border border-[var(--accent)]/30 bg-gradient-to-b from-[var(--accent)]/[0.07] to-transparent p-5 space-y-4 overflow-hidden">
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(400px_200px_at_50%_-50px,var(--accent-glow),transparent_60%)]" />
+      <header className="space-y-1">
+        <p className="text-[11px] uppercase tracking-wider text-[var(--accent)] inline-flex items-center gap-1.5">
+          <CheckBadge />
           Registered merchant
         </p>
-        <h2 className="text-2xl font-semibold mt-1">Pay {safeName}</h2>
-        <p className="text-xs text-gray-500 font-mono mt-1">
+        <h2 className="text-2xl font-semibold tracking-tight">Pay {safeName}</h2>
+        <p className="text-[11px] font-mono text-neutral-500">
           UEN {uen} → {merchantAddress.slice(0, 6)}…{merchantAddress.slice(-4)}
         </p>
       </header>
 
-      <div className="space-y-2">
-        <label htmlFor="sgd-amount" className="block text-sm font-medium">
-          Amount (SGD)
+      <div className="rounded-2xl border border-white/10 bg-black/30 p-4 space-y-2">
+        <label htmlFor="sgd-amount" className="block text-[11px] uppercase tracking-wider text-neutral-500">
+          Amount
         </label>
-        <div className="flex items-center gap-2">
-          <span className="text-2xl text-gray-500">$</span>
+        <div className="flex items-baseline gap-2">
+          <span className="text-3xl text-neutral-500 font-light">$</span>
           <input
             id="sgd-amount"
             type="text"
@@ -202,17 +184,17 @@ export function PayPanel({
               setSgdInput(sanitizeAmountInput(e.target.value));
               if (pay.kind !== "idle" && pay.kind !== "submitting") setPay({ kind: "idle" });
             }}
-            className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-3 py-2 text-2xl tabular-nums"
+            className="flex-1 bg-transparent border-0 px-0 text-3xl tabular-nums text-white placeholder:text-neutral-700 focus:outline-none"
             placeholder="0.00"
             disabled={pay.kind === "submitting"}
           />
-          <span className="text-sm text-gray-500">SGD</span>
+          <span className="text-sm text-neutral-500">SGD</span>
         </div>
       </div>
 
-      <div className="space-y-2">
-        <label htmlFor="memo" className="block text-sm font-medium">
-          Memo <span className="text-xs text-gray-500">(optional, on-chain)</span>
+      <div className="space-y-1.5">
+        <label htmlFor="memo" className="block text-[11px] uppercase tracking-wider text-neutral-500">
+          Memo <span className="normal-case text-neutral-600">(optional, on-chain)</span>
         </label>
         <input
           id="memo"
@@ -221,7 +203,7 @@ export function PayPanel({
           onChange={(e) => setMemo(e.target.value)}
           maxLength={64}
           placeholder="chicken rice"
-          className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-3 py-2 text-sm"
+          className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-neutral-600 focus:border-[var(--accent)]/50 focus:outline-none transition"
           disabled={pay.kind === "submitting"}
         />
       </div>
@@ -234,8 +216,8 @@ export function PayPanel({
       />
 
       {!account ? (
-        <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 space-y-2">
-          <p className="text-sm">Connect a Sui wallet to pay.</p>
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+          <p className="text-sm text-amber-100">Connect a Sui wallet to pay.</p>
           <ConnectButton />
         </div>
       ) : (
@@ -270,19 +252,24 @@ function PayButton({
       type="button"
       onClick={onClick}
       disabled={!canPay}
-      className="w-full rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium py-3 transition"
+      className="group flex w-full items-center justify-between rounded-2xl bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-white/5 disabled:text-neutral-500 disabled:cursor-not-allowed text-white font-medium py-4 px-5 transition shadow-[0_8px_30px_-8px_var(--accent-glow)] disabled:shadow-none"
     >
       {submitting ? (
-        phaseLabel
+        <span className="flex items-center gap-2">
+          <Spinner /> {phaseLabel}
+        </span>
       ) : quote ? (
         <>
-          Pay {formatSui(quote.sui)} for {formatSgd(quote.sgd)}
-          <span className="block text-xs font-normal opacity-80 mt-0.5">
-            payments::pay&lt;SUI&gt; · split from gas · Walrus receipt
+          <span className="flex flex-col items-start text-left">
+            <span>Pay {formatSgd(quote.sgd)}</span>
+            <span className="text-[11px] font-normal text-white/70 group-hover:text-white transition">
+              ≈ {formatSui(quote.sui)} · Walrus receipt
+            </span>
           </span>
+          <span className="text-white/70 group-hover:text-white transition">→</span>
         </>
       ) : (
-        "Enter an SGD amount"
+        <span>Enter an SGD amount</span>
       )}
     </button>
   );
@@ -292,29 +279,34 @@ function PayResult({ state }: { state: PayState }) {
   if (state.kind === "idle" || state.kind === "submitting") return null;
   if (state.kind === "success") {
     return (
-      <div className="rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-100 dark:bg-emerald-900/30 p-3 text-sm space-y-1">
-        <p className="font-medium">✓ Paid on testnet.</p>
-        <p className="text-xs">
+      <div className="rounded-2xl border border-[var(--success)]/30 bg-[var(--success)]/[0.08] p-4 space-y-2">
+        <p className="text-sm font-medium text-white inline-flex items-center gap-2">
+          <span className="text-[var(--success)]">
+            <CheckIcon />
+          </span>
+          Paid on testnet
+        </p>
+        <p className="text-xs text-neutral-400">
           <a
             href={txUrl(state.digest)}
             target="_blank"
             rel="noreferrer"
-            className="font-mono text-emerald-700 dark:text-emerald-300 hover:underline"
+            className="font-mono text-[var(--accent)] hover:underline"
           >
             {state.digest.slice(0, 10)}…{state.digest.slice(-6)} ↗
-          </a>{" "}
-          — `payments::pay&lt;SUI&gt;` emitted a PaymentReceipt event.
+          </a>
         </p>
         {state.blobId && (
           <p className="text-xs">
             <a
               href={`/verify/${encodeURIComponent(state.blobId)}`}
-              className="font-mono text-emerald-700 dark:text-emerald-300 hover:underline"
+              className="text-[var(--accent)] hover:underline inline-flex items-center gap-1.5"
             >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
               Verify receipt →
             </a>{" "}
-            <span className="text-gray-500">
-              ({state.blobId.slice(0, 8)}…{state.blobId.slice(-6)} on Walrus)
+            <span className="text-neutral-500 font-mono">
+              ({state.blobId.slice(0, 8)}…{state.blobId.slice(-6)})
             </span>
           </p>
         )}
@@ -322,11 +314,9 @@ function PayResult({ state }: { state: PayState }) {
     );
   }
   return (
-    <div className="rounded-md border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 p-3 text-sm">
-      <p className="font-medium text-red-700 dark:text-red-300">Pay failed.</p>
-      <p className="mt-1 text-xs text-red-700 dark:text-red-300 break-words">
-        {state.message}
-      </p>
+    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
+      <p className="text-sm font-medium text-red-300">Pay failed</p>
+      <p className="text-xs text-red-300/80 break-words">{state.message}</p>
     </div>
   );
 }
@@ -343,11 +333,11 @@ function QuoteDisplay({
   stale: boolean;
 }) {
   if (loading && !quote) {
-    return <p className="text-sm text-gray-500">Fetching live Pyth prices…</p>;
+    return <p className="text-xs text-neutral-500">Fetching live Pyth prices…</p>;
   }
   if (error) {
     return (
-      <p className="text-sm text-amber-700 dark:text-amber-300">
+      <p className="text-xs text-amber-400">
         Pyth Hermes unreachable: {error instanceof Error ? error.message : String(error)}.
       </p>
     );
@@ -355,42 +345,68 @@ function QuoteDisplay({
   if (!quote) return null;
 
   return (
-    <div className="rounded-md border border-emerald-200 dark:border-emerald-800 bg-white/60 dark:bg-black/30 p-3 text-sm space-y-1">
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3 space-y-1.5 text-xs">
       <div className="flex items-center justify-between">
-        <span className="text-gray-600 dark:text-gray-400">≈ via Pyth</span>
-        <span className="font-medium tabular-nums">
+        <span className="text-neutral-500">≈ via Pyth oracle</span>
+        <span className="font-medium tabular-nums text-white">
           {formatSui(quote.sui)}{" "}
-          <span className="text-xs text-gray-500">
-            ({quote.suiMist.toString()} MIST)
-          </span>
+          <span className="text-neutral-500">({quote.suiMist.toString()} MIST)</span>
         </span>
       </div>
-      <div className="flex items-center justify-between text-xs text-gray-500">
+      <div className="flex items-center justify-between text-neutral-500">
         <span>= ${quote.usd.toFixed(4)} USD</span>
         <span>
-          1 USD = {quote.rates.sgdPerUsd.toFixed(4)} SGD · 1 SUI = $
-          {quote.rates.usdPerSui.toFixed(4)}
+          1 USD = {quote.rates.sgdPerUsd.toFixed(4)} SGD · 1 SUI = ${quote.rates.usdPerSui.toFixed(4)}
         </span>
       </div>
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-gray-500">
-          Feeds: {PYTH_FEED_LABELS[PYTH_FEEDS.USD_SGD]} ·{" "}
-          {PYTH_FEED_LABELS[PYTH_FEEDS.SUI_USD]}
+      <div className="flex items-center justify-between pt-1.5 border-t border-white/5">
+        <span className="text-neutral-500">
+          {PYTH_FEED_LABELS[PYTH_FEEDS.USD_SGD]} · {PYTH_FEED_LABELS[PYTH_FEEDS.SUI_USD]}
         </span>
-        <span className={stale ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>
-          {stale
-            ? `⚠ stale (${quote.maxAgeSeconds}s) — refresh blocks pay`
-            : `live (${quote.maxAgeSeconds}s ago)`}
+        <span
+          className={
+            stale ? "text-amber-400 inline-flex items-center gap-1.5" : "text-[var(--success)] inline-flex items-center gap-1.5"
+          }
+        >
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full ${
+              stale ? "bg-amber-400" : "bg-[var(--success)] live-dot"
+            }`}
+          />
+          {stale ? `stale (${quote.maxAgeSeconds}s)` : `live (${quote.maxAgeSeconds}s ago)`}
         </span>
       </div>
-      <p className="text-[11px] text-gray-500 pt-1 border-t border-gray-200 dark:border-gray-800">
-        SUI direct path on testnet. Day 5.5+ wires Cetus swap for USDC settlement.
-      </p>
     </div>
   );
 }
 
-/** Strip non-numeric chars except '.'; keep at most one decimal point. */
+function CheckBadge() {
+  return (
+    <span className="inline-flex h-3 w-3 items-center justify-center rounded-full bg-[var(--accent)]/30 border border-[var(--accent)]/50">
+      <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    </span>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="animate-spin">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function sanitizeAmountInput(s: string): string {
   let out = "";
   let sawDot = false;
@@ -404,7 +420,6 @@ function sanitizeAmountInput(s: string): string {
   return out;
 }
 
-/** Convert a user-typed SGD string to minor units (cents). */
 function parseSgdInput(s: string): number {
   if (!s) return 0;
   const n = parseFloat(s);
@@ -412,20 +427,6 @@ function parseSgdInput(s: string): number {
   return Math.round(n * 100);
 }
 
-/**
- * Mirror of `payments::pay`'s on-chain receipt_id derivation:
- *   blake2b256(uen_hash || bcs(payer) || bcs(timestamp_ms) || bcs(amount))
- *
- * BCS layout for primitives:
- *   address: 32 raw bytes
- *   u64:     8 bytes little-endian
- *
- * The on-chain receipt_id will differ slightly because Move uses
- * `Clock::timestamp_ms` at execution time, not the predicted value
- * we use here. The verifier matches by (payer, merchant, amount,
- * timestamp ±60s) rather than exact receipt_id, so this approximation
- * is fine for V0.
- */
 function predictReceiptIdHex(input: {
   uen: string;
   payer: string;
