@@ -65,3 +65,36 @@ export function buildRegisterTx(input: BuildRegisterTxInputs): Transaction {
 export function isAllowedBlobId(s: string): boolean {
   return /^[A-Za-z0-9_-]{40,48}$/.test(s);
 }
+
+export interface BuildUpdateMetadataTxInputs {
+  uen: string;
+  /**
+   * New Walrus blob ID for the v1 profile JSON. Undefined / null clears the
+   * on-chain pointer (`metadata_uri = None`). Most callers will pass a fresh
+   * blob ID produced by re-uploading `buildMerchantProfileBytes(...)`.
+   */
+  newMetadataBlobId: string | null;
+}
+
+/**
+ * Build a `payments::update_merchant_metadata` PTB. The tx sender must be
+ * the registered owner of the UEN (the Move side enforces it via
+ * `E_NOT_MERCHANT_OWNER`). Used by `/merchant/wallet` to let merchants change
+ * their preferred receive token (or rotate their logo) after onboarding
+ * without re-claiming the UEN.
+ */
+export function buildUpdateMetadataTx(input: BuildUpdateMetadataTxInputs): Transaction {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${QUAY.packageId}::payments::update_merchant_metadata`,
+    arguments: [
+      tx.object(QUAY.registryId),
+      tx.pure.vector("u8", Array.from(new TextEncoder().encode(input.uen))),
+      input.newMetadataBlobId
+        ? tx.pure.option("string", input.newMetadataBlobId)
+        : tx.pure.option("string", null),
+      tx.object(QUAY.clockId),
+    ],
+  });
+  return tx;
+}

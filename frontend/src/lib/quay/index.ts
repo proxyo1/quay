@@ -10,7 +10,13 @@ export {
   type BuildPayAnyTokenInputs,
   type BuildPayAnyTokenResult,
 } from "./pay";
-export { buildRegisterTx, isAllowedBlobId, type BuildRegisterTxInputs } from "./register";
+export {
+  buildRegisterTx,
+  buildUpdateMetadataTx,
+  isAllowedBlobId,
+  type BuildRegisterTxInputs,
+  type BuildUpdateMetadataTxInputs,
+} from "./register";
 export {
   lookupUen,
   deriveUenHash,

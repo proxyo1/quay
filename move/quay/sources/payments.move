@@ -160,6 +160,12 @@ public struct MerchantAddressUpdated has copy, drop {
     timestamp_ms: u64,
 }
 
+public struct MerchantMetadataUpdated has copy, drop {
+    uen_hash: vector<u8>,
+    new_metadata_uri: Option<String>,
+    timestamp_ms: u64,
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────
 
 /// Called once at module publish.
@@ -383,6 +389,33 @@ public fun update_merchant_address(
         uen_hash,
         old_address: old,
         new_address,
+        timestamp_ms: clock::timestamp_ms(clock),
+    });
+}
+
+/// Update the merchant's metadata blob pointer. Caller must be the
+/// current owner of the UEN. Used by `/merchant/wallet` to let merchants
+/// change their preferred receive token (or rotate their logo) after
+/// onboarding without re-claiming the UEN. The new blob is a v1 Walrus
+/// profile JSON the frontend builds; this call just swaps the pointer.
+public fun update_merchant_metadata(
+    registry: &mut MerchantRegistry,
+    uen_bytes: vector<u8>,
+    new_metadata_uri: Option<String>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let uen_hash = derive_uen_hash(&uen_bytes);
+    assert!(table::contains(&registry.entries, uen_hash), E_UEN_NOT_REGISTERED);
+
+    let entry = table::borrow_mut(&mut registry.entries, uen_hash);
+    assert!(entry.sui_address == ctx.sender(), E_NOT_MERCHANT_OWNER);
+
+    entry.metadata_uri = new_metadata_uri;
+
+    event::emit(MerchantMetadataUpdated {
+        uen_hash,
+        new_metadata_uri: entry.metadata_uri,
         timestamp_ms: clock::timestamp_ms(clock),
     });
 }

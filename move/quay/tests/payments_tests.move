@@ -476,6 +476,79 @@ fun update_merchant_address_by_non_owner_fails() {
     ts::end(scenario);
 }
 
+// ─── Test: update_merchant_metadata — owner only ───────────────────────
+
+#[test]
+fun update_merchant_metadata_by_owner_succeeds() {
+    let mut scenario = ts::begin(ADMIN);
+    setup_registry(&mut scenario);
+
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut registry = ts::take_shared<MerchantRegistry>(&mut scenario);
+        let clock = new_clock_at(1000, ts::ctx(&mut scenario));
+        payments::register_for_testing(&mut registry, TEST_UEN, MERCHANT, &clock, ts::ctx(&mut scenario));
+        clock::destroy_for_testing(clock);
+        ts::return_shared(registry);
+    };
+
+    ts::next_tx(&mut scenario, MERCHANT);
+    let mut registry = ts::take_shared<MerchantRegistry>(&mut scenario);
+    let clock = new_clock_at(2000, ts::ctx(&mut scenario));
+
+    let new_uri = option::some(string::utf8(b"newblob123"));
+    payments::update_merchant_metadata(&mut registry, TEST_UEN, new_uri, &clock, ts::ctx(&mut scenario));
+
+    clock::destroy_for_testing(clock);
+    ts::return_shared(registry);
+    ts::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = 3, location = quay::payments)] // E_NOT_MERCHANT_OWNER
+fun update_merchant_metadata_by_non_owner_fails() {
+    let mut scenario = ts::begin(ADMIN);
+    setup_registry(&mut scenario);
+
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut registry = ts::take_shared<MerchantRegistry>(&mut scenario);
+        let clock = new_clock_at(1000, ts::ctx(&mut scenario));
+        payments::register_for_testing(&mut registry, TEST_UEN, MERCHANT, &clock, ts::ctx(&mut scenario));
+        clock::destroy_for_testing(clock);
+        ts::return_shared(registry);
+    };
+
+    ts::next_tx(&mut scenario, PAYER); // not the merchant
+    let mut registry = ts::take_shared<MerchantRegistry>(&mut scenario);
+    let clock = new_clock_at(2000, ts::ctx(&mut scenario));
+
+    let new_uri = option::some(string::utf8(b"hacker-blob"));
+    payments::update_merchant_metadata(&mut registry, TEST_UEN, new_uri, &clock, ts::ctx(&mut scenario));
+
+    clock::destroy_for_testing(clock);
+    ts::return_shared(registry);
+    ts::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = 2, location = quay::payments)] // E_UEN_NOT_REGISTERED
+fun update_merchant_metadata_unregistered_uen_fails() {
+    let mut scenario = ts::begin(ADMIN);
+    setup_registry(&mut scenario);
+
+    ts::next_tx(&mut scenario, MERCHANT);
+    let mut registry = ts::take_shared<MerchantRegistry>(&mut scenario);
+    let clock = new_clock_at(1000, ts::ctx(&mut scenario));
+
+    let new_uri = option::some(string::utf8(b"blob"));
+    payments::update_merchant_metadata(&mut registry, TEST_UEN, new_uri, &clock, ts::ctx(&mut scenario));
+
+    clock::destroy_for_testing(clock);
+    ts::return_shared(registry);
+    ts::end(scenario);
+}
+
 // ─── Test: issuer pubkey rotation via AdminCap ─────────────────────────
 
 #[test]
