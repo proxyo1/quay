@@ -46,7 +46,7 @@ register.
 | Cetus Aggregator swap-and-pay (any token → merchant's preferred) | ✅ shipped (mainnet); ⚠️ no testnet routes | [`frontend/src/lib/dex/aggregator.ts`](frontend/src/lib/dex/aggregator.ts) + [`buildPayAnyTokenPtb`](frontend/src/lib/quay/pay.ts). Testnet caveat below. |
 | Merchant settlement-token choice (SUI / USDC) | ✅ shipped | New picker at `/merchant/onboard` Step 4. Stored in versioned v1 Walrus profile blob. Default USDC. |
 | Cetus Aggregator referral fee-share | ✅ shipped | Quay's treasury address passed on every routed swap. Cetus splits ~10-20% of the swap fee back. |
-| DeepBook rate-lock via limit orders | 📋 V0.5 — scaffolded | [`frontend/src/lib/dex/deepbookLimits.ts`](frontend/src/lib/dex/deepbookLimits.ts) has the SDK wrapping. Not wired into UI: requires a one-time BalanceManager + deposit step, and the testnet SUI/USDC pool uses DBUSDC ≠ Quay's USDC type. Production-ready on mainnet once CCTP USDC lands. |
+| DeepBook rate-lock via limit orders | ⛔ intentionally dropped | Cetus Aggregator's `minOut` already protects the volatile-leg slippage at the swap layer. Adding a separate post-only limit order would require BalanceManager bootstrap + two-tx UX for sub-$10 retail payments — net-negative UX. Revisit if Quay ever serves B2B / high-value SGD payments where the SGD-equivalent precision matters. |
 | LP-mode inventory market-making | 📋 V0.5+ | Aggregator referral covers V0 revenue ($0 capital). Inventory mode adds spread capture once volume justifies $10k–$50k seed. |
 | Gasless stablecoin retail path (USDsui / USDC) | 📋 V0.5 | Protocol-level gasless via [`0x2::balance::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers); dual-path with `payments::pay<T>` retained for the receipted path |
 | Mobile-number PayNow (~70% of SG hawkers) | 📋 V1 | Domain-tag namespacing (`PAYNOW_UEN_V1` vs future `PAYNOW_MOBILE_V1`) is already on chain |
@@ -72,28 +72,32 @@ swap-and-pay flow works without the type mismatch.
 
 ## Architecture
 
-### DEX integration — hybrid: DeepBook + Cetus Aggregator
+### DEX integration — Cetus Aggregator
 
-Quay routes payments through two Sui-native venues, picking each where it
-genuinely wins:
+Quay routes cross-token payments through **Cetus Aggregator**
+([`frontend/src/lib/dex/aggregator.ts`](frontend/src/lib/dex/aggregator.ts)).
+The aggregator falls through DeepBook v3 + Cetus CLMM + every other Sui
+DEX automatically, picks the best route, returns a `Coin<T>` that flows
+straight into `payments::pay<T>`. Quay's treasury passes as the `partner`
+parameter on every routed swap, so Cetus's referral fee-share accrues
+with zero on-chain bookkeeping.
 
-- **Cetus Aggregator** ([`frontend/src/lib/dex/aggregator.ts`](frontend/src/lib/dex/aggregator.ts))
-  for **swap-and-pay**. The aggregator falls through DeepBook v3 + Cetus
-  CLMM + every other Sui DEX automatically, picks the best route, returns a
-  `Coin<T>` that flows straight into `payments::pay<T>`. Quay's treasury
-  passes as the `partner` parameter on every routed swap, so Cetus's
-  referral fee-share accrues with zero on-chain bookkeeping.
-
-- **DeepBook v3** ([`frontend/src/lib/dex/deepbookLimits.ts`](frontend/src/lib/dex/deepbookLimits.ts))
-  for **rate-lock** (scaffolded, V0.5). It's the only Sui venue with native
-  orderbook semantics, so a post-only limit order can freeze the
-  SGD-equivalent for the user's wallet-fumble window without an off-chain
-  keeper bot. Not in V0 UI — see the "What's live" table for blockers.
+Same-token payments (payer's chosen token matches the merchant's receive
+token) bypass the aggregator entirely via direct transfer — no routing
+fee, no slippage exposure.
 
 `Coin<T>`-generic `payments::pay<T>` means the Move contract doesn't care
 which path the PTB took, only that a coin of the merchant's preferred
-type lands on the call. No on-chain change between V0 and the
-fully-routed V0.5.
+type lands on the call. No on-chain change between V0 and any future
+routing change.
+
+**Why not a separate rate-lock primitive?** The original plan included a
+DeepBook native limit order for SGD-quote stability during the user's
+wallet-fumble window. Two things deprecated it: (1) Cetus Aggregator's
+`minOut` parameter already protects the volatile-leg conversion at the
+swap layer; (2) the BalanceManager bootstrap + two-tx UX is hostile for
+sub-$10 retail payments. The pre-sign trust receipt + clean revert on
+slippage cover the same job without the friction.
 
 ### Move module — `quay::payments` (~290 LOC)
 

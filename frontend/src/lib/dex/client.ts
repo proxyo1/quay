@@ -1,19 +1,24 @@
 /**
- * DEX client foundation — shared init for DeepBook + Cetus Aggregator SDKs.
+ * DEX client foundation — shared init for the Cetus Aggregator SDK.
  *
- * Both SDKs wrap the same dapp-kit `SuiClient` so the Quay frontend has one
- * RPC pool, one retry policy, and one network config.
+ * The SDK wraps the dapp-kit `SuiClient` so the Quay frontend has one RPC
+ * pool, one retry policy, and one network config.
  *
  * Feature usage:
- *   - Feature 1 (rate-lock) → DeepBook v3 (native orderbook semantics)
- *   - Feature 2 (pay-any, settle-any) → Cetus Aggregator (best-of routing
- *     across DeepBook + Cetus CLMM + other Sui DEXs)
- *   - Feature 3 (revenue) → Cetus Aggregator `partner` parameter set to
- *     `QUAY_TREASURY_ADDRESS` on every routed swap
+ *   - Feature 2 (pay-any, settle-any) → Cetus Aggregator routes across
+ *     DeepBook v3 + Cetus CLMM + every other Sui DEX automatically.
+ *   - Feature 3 (revenue) → `partner: QUAY_TREASURY_ADDRESS` on every
+ *     routed swap; Cetus splits its swap fee back to that address.
+ *
+ * Feature 1 (DeepBook rate-lock via post-only limit orders) is intentionally
+ * NOT here. The Cetus Aggregator's `minOut` slippage check already covers
+ * the volatile-leg protection rate-lock was supposed to provide, without
+ * the one-time BalanceManager bootstrap + two-tx UX. If we revisit, the
+ * @mysten/deepbook-v3 SDK can be re-added; nothing else in the codebase
+ * depends on it.
  */
 
 import { AggregatorClient, Env as CetusEnv } from "@cetusprotocol/aggregator-sdk";
-import { DeepBookClient } from "@mysten/deepbook-v3";
 import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
 
 import { QUAY } from "@/lib/sui-config";
@@ -38,11 +43,6 @@ export interface DexClients {
   network: DexNetwork;
   /** Cetus Aggregator SDK. Used by Feature 2 (swap) and Feature 3 (referral). */
   cetusAggregator: AggregatorClient;
-  /**
-   * DeepBook v3 SDK. Used by Feature 1 (limit orders). Lazy — only instantiated
-   * when a caller asks for it because it pulls testnet pool config from chain.
-   */
-  getDeepBook: () => DeepBookClient;
 }
 
 // ─── Factory ────────────────────────────────────────────────────────────
@@ -67,22 +67,10 @@ export function getDexClients(suiClient: SuiClient, network: DexNetwork = "testn
     partner: QUAY_TREASURY_ADDRESS,
   });
 
-  let deepbookInstance: DeepBookClient | null = null;
-  const getDeepBook = (): DeepBookClient => {
-    if (deepbookInstance) return deepbookInstance;
-    deepbookInstance = new DeepBookClient({
-      client: suiClient,
-      network,
-      address: QUAY_TREASURY_ADDRESS,
-    });
-    return deepbookInstance;
-  };
-
   const bundle: DexClients = {
     suiClient,
     network,
     cetusAggregator,
-    getDeepBook,
   };
   perNetwork.set(network, bundle);
   return bundle;

@@ -14,9 +14,6 @@ importers:
       '@mysten/dapp-kit':
         specifier: ^1.0.6
         version: 1.0.6(@mysten/sui@2.16.2(typescript@5.9.3))(@tanstack/react-query@5.100.9(react@19.2.4))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
-      '@mysten/deepbook-v3':
-        specifier: ^1.3.6
-        version: 1.3.6(@mysten/sui@2.16.2(typescript@5.9.3))
       '@mysten/sui':
         specifier: ^2.16.2
         version: 2.16.2(typescript@5.9.3)
@@ -463,12 +460,6 @@ packages:
       '@mysten/sui': ^2.16.2
       '@tanstack/react-query': ^5.0.0
       react: '*'
-
-  '@mysten/deepbook-v3@1.3.6':
-    resolution: {integrity: sha512-SIUlL31AyZmidoo9OMaY7hUfolNeVFbs6Ylv8gq2jCidb+3Jriq9Peu9xFJmnYaMAgTnA4WnDUJBnCwqgdRCTw==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      '@mysten/sui': ^2.16.2
 
   '@mysten/slush-wallet@1.0.5':
     resolution: {integrity: sha512-soP0eZW4uP2S2z5YH7eg0dZQZ7hZyY6F7D2H0Wv93wjFz9DSHlOf1b9mY+2kzH1oO7nSnpdRdL15v8+X3X7f6w==}
@@ -1350,11 +1341,6 @@ packages:
     resolution: {integrity: sha512-KunSNx+TVpkAw/6ULfhnx+HWRecjqZGTOyquAoWHYLRSdK1tB5Ihce1ZW+UY3fj33bYAFWPu7W/GRSmmrCGuxA==}
     engines: {node: '>=4'}
 
-  axios-retry@4.5.0:
-    resolution: {integrity: sha512-aR99oXhpEDGo0UuAlYcn2iGRds30k366Zfa05XWScR9QaQD4JYiP3/1Qt1u7YlefUOK+cn0CcwoL1oefavQUlQ==}
-    peerDependencies:
-      axios: 0.x || 1.x
-
   axios@1.16.0:
     resolution: {integrity: sha512-6hp5CwvTPlN2A31g5dxnwAX0orzM7pmCRDLnZSX772mv8WDqICwFjowHuPs04Mc8deIld1+ejhtaMn5vp6b+1w==}
 
@@ -1998,10 +1984,6 @@ packages:
   is-regex@1.2.1:
     resolution: {integrity: sha512-MjYsKHO5O7mCsmRGxWcLWheFqN9DJ/2TmngvjKXihe6efViPqc274+Fx/4fYj/r03+ESvBdTXK0V6tA3rgez1g==}
     engines: {node: '>= 0.4'}
-
-  is-retry-allowed@2.2.0:
-    resolution: {integrity: sha512-XVm7LOeLpTW4jV19QSH38vkswxoLud8sQ57YwJVTPWdiaI9I8keEhGFpBlslyVsgdQy4Opg8QOLb8YRgsyZiQg==}
-    engines: {node: '>=10'}
 
   is-set@2.0.3:
     resolution: {integrity: sha512-iPAjerrse27/ygGLxw+EBR9agv9Y6uLeYVJMu+QNCoouJ1/1ri0mGrcWpfCqFZuzzx3WjtwxG098X+n4OuRkPg==}
@@ -3162,16 +3144,6 @@ snapshots:
       - typescript
       - use-sync-external-store
 
-  '@mysten/deepbook-v3@1.3.6(@mysten/sui@2.16.2(typescript@5.9.3))':
-    dependencies:
-      '@mysten/bcs': 2.0.5
-      '@mysten/sui': 2.16.2(typescript@5.9.3)
-      '@noble/hashes': 2.2.0
-      axios: 1.16.0
-      axios-retry: 4.5.0(axios@1.16.0)
-    transitivePeerDependencies:
-      - debug
-
   '@mysten/slush-wallet@1.0.5(@mysten/sui@2.16.2(typescript@5.9.3))(typescript@5.9.3)':
     dependencies:
       '@mysten/sui': 2.16.2(typescript@5.9.3)
@@ -4055,11 +4027,6 @@ snapshots:
 
   axe-core@4.11.4: {}
 
-  axios-retry@4.5.0(axios@1.16.0):
-    dependencies:
-      axios: 1.16.0
-      is-retry-allowed: 2.2.0
-
   axios@1.16.0:
     dependencies:
       follow-redirects: 1.16.0
@@ -4829,8 +4796,6 @@ snapshots:
       gopd: 1.2.0
       has-tostringtag: 1.0.2
       hasown: 2.0.3
-
-  is-retry-allowed@2.2.0: {}
 
   is-set@2.0.3: {}
 
