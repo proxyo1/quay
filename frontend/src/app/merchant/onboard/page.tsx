@@ -11,6 +11,12 @@ import { extractPayNow, looksLikeUen, parseSgqr } from "@/lib/sgqr";
 import { lookupUen } from "@/lib/quay";
 import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
 import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
+import {
+  buildMerchantProfileBytes,
+  DEFAULT_RECEIVE_TOKEN,
+  RECEIVE_TOKEN_OPTIONS,
+  type SupportedReceiveToken,
+} from "@/lib/walrus/profileSchema";
 import { useZkLoginSession, zkLoginSign } from "@/lib/zklogin";
 
 const LOGO_MAX_BYTES = 200 * 1024;
@@ -45,6 +51,7 @@ export default function OnboardPage() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [logoNotice, setLogoNotice] = useState<string | null>(null);
+  const [receiveToken, setReceiveToken] = useState<SupportedReceiveToken>(DEFAULT_RECEIVE_TOKEN);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
@@ -121,15 +128,44 @@ export default function OnboardPage() {
         return;
       }
 
-      let metadataBlobId: string | undefined;
+      // Upload the logo first so the v1 profile JSON can reference its blob ID.
+      let logoBlobId: string | null = null;
       if (logoFile) {
         try {
           const buf = new Uint8Array(await logoFile.arrayBuffer());
           const { blobId } = await uploadBlob(buf);
-          metadataBlobId = blobId;
+          logoBlobId = blobId;
         } catch (err) {
           const why = err instanceof WalrusUploadError ? err.message : String(err);
-          setLogoNotice(`Logo upload failed (${why}). Registering without a logo.`);
+          setLogoNotice(`Logo upload failed (${why}). Continuing without a logo.`);
+        }
+      }
+
+      // Build + upload the v1 merchant profile blob. This is what the on-chain
+      // `metadata_uri` points at — readers parse it via parseMerchantProfile.
+      // If the profile upload fails but the logo upload succeeded, fall back to
+      // the legacy "metadata_uri = logo blob ID" layout so the merchant still
+      // has SOMETHING on chain. Readers handle the legacy shape transparently.
+      let metadataBlobId: string | undefined;
+      try {
+        const profileBytes = buildMerchantProfileBytes({
+          logoBlobId,
+          preferredReceiveToken: receiveToken,
+          merchantName: merchantName.trim() || undefined,
+        });
+        const { blobId } = await uploadBlob(profileBytes);
+        metadataBlobId = blobId;
+      } catch (err) {
+        const why = err instanceof WalrusUploadError ? err.message : String(err);
+        if (logoBlobId) {
+          metadataBlobId = logoBlobId;
+          setLogoNotice(
+            `Profile metadata upload failed (${why}). Falling back to logo-only.`,
+          );
+        } else {
+          setLogoNotice(
+            `Profile metadata upload failed (${why}). Registering without metadata — defaults to SUI receive.`,
+          );
         }
       }
 
@@ -293,6 +329,44 @@ export default function OnboardPage() {
           />
           <p className="text-[11px] text-neutral-500">
             Hashed into the on-chain attestation alongside your UEN.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="block text-[11px] uppercase tracking-wider text-[var(--accent)]">
+            Receive payments in
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {RECEIVE_TOKEN_OPTIONS.map((opt) => {
+              const selected = receiveToken === opt.type;
+              return (
+                <button
+                  key={opt.type}
+                  type="button"
+                  onClick={() => setReceiveToken(opt.type)}
+                  disabled={state.kind === "submitting"}
+                  className={`rounded-xl border px-3 py-2.5 text-left transition disabled:opacity-50 ${
+                    selected
+                      ? "border-[var(--accent)] bg-[var(--accent)]/[0.08] text-white"
+                      : "border-white/10 bg-black/20 text-neutral-300 hover:border-white/25"
+                  }`}
+                  aria-pressed={selected}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{opt.label}</span>
+                    {selected && (
+                      <span className="text-[var(--accent)]">
+                        <CheckIcon />
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-neutral-500 mt-0.5">{opt.description}</p>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-neutral-500">
+            Payers can pay in any token — Quay routes via Cetus Aggregator so you receive this one.
           </p>
         </div>
 
