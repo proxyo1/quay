@@ -65,7 +65,7 @@ export default function OnboardPage() {
   if (hydrated && !session) {
     return (
       <main className="relative z-10 mx-auto w-full max-w-md px-5 py-16">
-        <p className="text-sm text-neutral-500">Redirecting to sign-in…</p>
+        <p className="text-sm text-[var(--muted-soft)]">Redirecting to sign-in…</p>
       </main>
     );
   }
@@ -245,7 +245,7 @@ export default function OnboardPage() {
         <button
           type="button"
           onClick={signOut}
-          className="text-xs px-3 py-1.5 rounded-full border border-white/15 text-neutral-300 hover:bg-white/5"
+          className="glass-chip rounded-full"
         >
           Sign out
         </button>
@@ -253,7 +253,7 @@ export default function OnboardPage() {
 
       <section className="space-y-1">
         <h1 className="text-3xl font-semibold tracking-tight">Claim your UEN</h1>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-[var(--muted)]">
           Two minutes. No gas fees. Verified on Sui.
         </p>
       </section>
@@ -262,7 +262,7 @@ export default function OnboardPage() {
 
       <SessionPill email={session.email} address={session.address} />
 
-      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-4">
+      <section className="glass-card rounded-2xl p-4 space-y-4">
         <button
           type="button"
           onClick={() => {
@@ -270,17 +270,17 @@ export default function OnboardPage() {
             setScanOpen(true);
           }}
           disabled={state.kind === "submitting"}
-          className="group flex w-full items-center justify-between rounded-2xl bg-[var(--accent)]/10 border border-[var(--accent)]/30 hover:bg-[var(--accent)]/15 text-white font-medium py-3.5 px-4 transition disabled:opacity-50"
+          className="group relative z-10 flex w-full items-center justify-between rounded-2xl bg-[var(--accent)]/12 border border-[var(--accent)]/35 hover:bg-[var(--accent)]/18 text-white font-medium py-3.5 px-4 transition disabled:opacity-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_0_24px_-12px_var(--accent-glow)]"
         >
           <span className="flex items-center gap-2.5">
             <CameraIcon />
             Scan SGQR sticker
           </span>
-          <span className="text-[var(--accent)]">→</span>
+          <span className="text-[var(--accent-strong)]">→</span>
         </button>
 
-        <div className="space-y-1.5">
-          <label htmlFor="uen" className="block text-[11px] uppercase tracking-wider text-[var(--accent)]">
+        <div className="relative z-10 space-y-1.5">
+          <label htmlFor="uen" className="block text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
             UEN
           </label>
           <input
@@ -293,14 +293,14 @@ export default function OnboardPage() {
               if (state.kind !== "idle" && state.kind !== "submitting") setState({ kind: "idle" });
             }}
             placeholder="202412345Z"
-            className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 font-mono text-white placeholder:text-neutral-600 focus:border-[var(--accent)]/50 focus:outline-none transition"
+            className="glass-input w-full px-3 py-2.5 font-mono disabled:opacity-50"
             disabled={state.kind === "submitting"}
             autoCapitalize="characters"
             autoComplete="off"
             spellCheck={false}
           />
           {uen && !uenValid && (
-            <p className="text-[11px] text-amber-400">
+            <p className="text-[11px] text-amber-300">
               Expected 8–10 alphanumeric (e.g., 202012345Z, T12LL3456A).
             </p>
           )}
@@ -314,9 +314,9 @@ export default function OnboardPage() {
           )}
         </div>
 
-        <div className="space-y-1.5">
-          <label htmlFor="merchant-name" className="block text-[11px] uppercase tracking-wider text-neutral-500">
-            Business name <span className="normal-case text-neutral-600">(optional)</span>
+        <div className="relative z-10 space-y-1.5">
+          <label htmlFor="merchant-name" className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
+            Business name <span className="normal-case text-[var(--muted-soft)]">(optional)</span>
           </label>
           <input
             id="merchant-name"
@@ -324,16 +324,16 @@ export default function OnboardPage() {
             value={merchantName}
             onChange={(e) => setMerchantName(e.target.value)}
             placeholder="Curry Times Pte Ltd"
-            className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-white placeholder:text-neutral-600 focus:border-[var(--accent)]/50 focus:outline-none transition"
+            className="glass-input w-full px-3 py-2.5 disabled:opacity-50"
             disabled={state.kind === "submitting"}
           />
-          <p className="text-[11px] text-neutral-500">
+          <p className="text-[11px] text-[var(--muted-soft)]">
             Hashed into the on-chain attestation alongside your UEN.
           </p>
         </div>
 
-        <div className="space-y-1.5">
-          <label className="block text-[11px] uppercase tracking-wider text-[var(--accent)]">
+        <div className="relative z-10 space-y-1.5">
+          <label className="block text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
             Receive payments in
           </label>
           <div className="grid grid-cols-2 gap-2">
@@ -345,50 +345,50 @@ export default function OnboardPage() {
                   type="button"
                   onClick={() => setReceiveToken(opt.type)}
                   disabled={state.kind === "submitting"}
-                  className={`rounded-xl border px-3 py-2.5 text-left transition disabled:opacity-50 ${
+                  className={`rounded-xl border px-3 py-2.5 text-left transition disabled:opacity-50 backdrop-blur-md ${
                     selected
-                      ? "border-[var(--accent)] bg-[var(--accent)]/[0.08] text-white"
-                      : "border-white/10 bg-black/20 text-neutral-300 hover:border-white/25"
+                      ? "border-[var(--accent)] bg-[var(--accent)]/12 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_0_20px_-10px_var(--accent-glow)]"
+                      : "border-white/10 bg-white/[0.03] text-[var(--muted)] hover:border-white/25 hover:bg-white/[0.06]"
                   }`}
                   aria-pressed={selected}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{opt.label}</span>
                     {selected && (
-                      <span className="text-[var(--accent)]">
+                      <span className="text-[var(--accent-strong)]">
                         <CheckIcon />
                       </span>
                     )}
                   </div>
-                  <p className="text-[10px] text-neutral-500 mt-0.5">{opt.description}</p>
+                  <p className="text-[10px] text-[var(--muted-soft)] mt-0.5">{opt.description}</p>
                 </button>
               );
             })}
           </div>
-          <p className="text-[11px] text-neutral-500">
+          <p className="text-[11px] text-[var(--muted-soft)]">
             Payers can pay in any token — Quay routes via Cetus Aggregator so you receive this one.
           </p>
         </div>
 
-        <div className="space-y-1.5">
-          <label htmlFor="logo" className="block text-[11px] uppercase tracking-wider text-neutral-500">
-            Logo <span className="normal-case text-neutral-600">(optional, ≤200KB)</span>
+        <div className="relative z-10 space-y-1.5">
+          <label htmlFor="logo" className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
+            Logo <span className="normal-case text-[var(--muted-soft)]">(optional, ≤200KB)</span>
           </label>
           <label
             htmlFor="logo"
-            className={`block rounded-xl border-2 border-dashed px-4 py-5 text-center cursor-pointer transition ${
+            className={`block rounded-xl border-2 border-dashed px-4 py-5 text-center cursor-pointer transition backdrop-blur-md ${
               logoFile
-                ? "border-[var(--accent)]/40 bg-[var(--accent)]/[0.04]"
-                : "border-white/15 hover:border-white/25 hover:bg-white/[0.02]"
+                ? "border-[var(--accent)]/45 bg-[var(--accent)]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]"
+                : "border-white/15 hover:border-white/30 hover:bg-white/[0.03]"
             }`}
           >
             <UploadIcon />
-            <p className="mt-1 text-xs text-neutral-300">
+            <p className="mt-1 text-xs text-[var(--muted)]">
               {logoFile
                 ? `${logoFile.name} (${Math.round(logoFile.size / 1024)}KB)`
                 : "Tap to upload an image"}
             </p>
-            <p className="text-[10px] text-neutral-500 mt-0.5">
+            <p className="text-[10px] text-[var(--muted-soft)] mt-0.5">
               {logoFile ? "Will upload to Walrus on submit" : "JPEG, PNG, WebP"}
             </p>
           </label>
@@ -400,19 +400,19 @@ export default function OnboardPage() {
             className="sr-only"
             disabled={state.kind === "submitting"}
           />
-          {logoError && <p className="text-[11px] text-amber-400">{logoError}</p>}
-          {logoNotice && <p className="text-[11px] text-amber-400">{logoNotice}</p>}
+          {logoError && <p className="text-[11px] text-amber-300">{logoError}</p>}
+          {logoNotice && <p className="text-[11px] text-amber-300">{logoNotice}</p>}
         </div>
       </section>
 
-      <section className="rounded-2xl border border-[var(--accent)]/25 bg-[var(--accent)]/[0.05] p-4">
+      <section className="glass-card-accent rounded-2xl p-4">
         <div className="flex items-start gap-3">
-          <div className="h-9 w-9 rounded-xl bg-[var(--accent)]/15 border border-[var(--accent)]/40 flex items-center justify-center shrink-0">
+          <div className="h-9 w-9 rounded-xl bg-[var(--accent)]/20 border border-[var(--accent)]/40 flex items-center justify-center shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
             <SuiIcon />
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium text-white">Sponsored gas</p>
-            <p className="text-xs text-neutral-400 leading-relaxed mt-0.5">
+            <p className="text-xs text-[var(--muted)] leading-relaxed mt-0.5">
               Quay pays the testnet gas while you onboard. ~10s to confirm via zkLogin.
             </p>
           </div>
@@ -421,7 +421,7 @@ export default function OnboardPage() {
 
       <SubmitFlow state={state} ready={ready} onSubmit={handleSubmit} />
 
-      <footer className="text-[11px] text-neutral-500 pt-4 border-t border-white/5 space-y-1.5">
+      <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5 space-y-1.5">
         <p>
           Registry:{" "}
           <a
@@ -457,25 +457,25 @@ function Stepper({ current }: { current: 1 | 2 | 3 }) {
       {steps.map((s, i) => (
         <div key={s.n} className="flex items-center gap-2 flex-1">
           <div
-            className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-semibold border ${
+            className={`h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-semibold border backdrop-blur-md ${
               current === s.n
-                ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                ? "bg-[var(--accent)] border-[var(--accent)] text-white shadow-[0_0_16px_-2px_var(--accent-glow),inset_0_1px_0_rgba(255,255,255,0.32)]"
                 : current > s.n
-                ? "bg-[var(--accent)]/20 border-[var(--accent)]/40 text-[var(--accent)]"
-                : "border-white/15 text-neutral-500"
+                ? "bg-[var(--accent)]/20 border-[var(--accent)]/45 text-[var(--accent-strong)]"
+                : "border-white/15 bg-white/[0.03] text-[var(--muted-soft)]"
             }`}
           >
             {current > s.n ? <CheckIcon /> : s.n}
           </div>
           <span
-            className={`text-[11px] uppercase tracking-wider ${
-              current >= s.n ? "text-white" : "text-neutral-600"
+            className={`text-[11px] uppercase tracking-[0.12em] ${
+              current >= s.n ? "text-white" : "text-[var(--muted-soft)]"
             }`}
           >
             {s.label}
           </span>
           {i < steps.length - 1 && (
-            <span className={`h-px flex-1 ${current > s.n ? "bg-[var(--accent)]/40" : "bg-white/10"}`} />
+            <span className={`h-px flex-1 ${current > s.n ? "bg-[var(--accent)]/45" : "bg-white/10"}`} />
           )}
         </div>
       ))}
@@ -485,18 +485,18 @@ function Stepper({ current }: { current: 1 | 2 | 3 }) {
 
 function SessionPill({ email, address }: { email: string; address: string }) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-      <div className="flex items-center gap-2.5">
-        <div className="h-7 w-7 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/40 flex items-center justify-center text-[var(--accent)] text-xs font-semibold shrink-0">
+    <section className="glass-card rounded-2xl p-3">
+      <div className="relative z-10 flex items-center gap-2.5">
+        <div className="h-7 w-7 rounded-full bg-[var(--accent)]/20 border border-[var(--accent)]/40 flex items-center justify-center text-[var(--accent-strong)] text-xs font-semibold shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
           {email?.charAt(0).toUpperCase() ?? "M"}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs text-white truncate">{email}</p>
-          <p className="text-[10px] font-mono text-neutral-500 truncate">
+          <p className="text-[10px] font-mono text-[var(--muted-soft)] truncate">
             {address.slice(0, 10)}…{address.slice(-6)}
           </p>
         </div>
-        <span className="text-[10px] text-[var(--success)] uppercase tracking-wider">zkLogin</span>
+        <span className="text-[10px] text-[var(--success)] uppercase tracking-[0.12em]">zkLogin</span>
       </div>
     </section>
   );
@@ -513,9 +513,9 @@ function SubmitFlow({
 }) {
   if (state.kind === "error") {
     return (
-      <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 space-y-2">
-        <p className="text-sm font-medium text-red-300">Error</p>
-        <p className="text-xs text-red-300/80 break-words">{state.message}</p>
+      <section className="glass-card-danger rounded-2xl p-4 space-y-2">
+        <p className="text-sm font-medium text-red-200">Error</p>
+        <p className="text-xs text-red-200/80 break-words">{state.message}</p>
         <button
           type="button"
           onClick={onSubmit}
@@ -528,14 +528,14 @@ function SubmitFlow({
   }
   if (state.kind === "already-yours") {
     return (
-      <section className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent)]/[0.05] p-4 space-y-2">
-        <p className="text-sm font-medium text-white">You already own this UEN</p>
-        <p className="text-xs text-neutral-400">
+      <section className="glass-card-accent rounded-2xl p-4 space-y-2">
+        <p className="relative z-10 text-sm font-medium text-white">You already own this UEN</p>
+        <p className="relative z-10 text-xs text-[var(--muted)]">
           Open the terminal to see incoming payments.
         </p>
         <Link
           href="/merchant/terminal"
-          className="inline-block mt-1 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-medium px-4 py-2 transition"
+          className="relative z-10 inline-block mt-1 glass-btn-primary text-sm py-2.5 px-4"
         >
           Open terminal →
         </Link>
@@ -545,14 +545,14 @@ function SubmitFlow({
   if (state.kind === "registered") {
     return (
       <section className="space-y-3">
-        <div className="rounded-2xl border border-[var(--success)]/30 bg-[var(--success)]/[0.08] p-4 space-y-1">
+        <div className="glass-card-success rounded-2xl p-4 space-y-1">
           <p className="text-sm font-medium text-white inline-flex items-center gap-2">
             <span className="text-[var(--success)]">
               <CheckIcon />
             </span>
             Registered on testnet
           </p>
-          <p className="text-xs text-neutral-400">
+          <p className="text-xs text-[var(--muted)]">
             Sponsor paid gas ·{" "}
             <a
               href={txUrl(state.digest)}
@@ -567,13 +567,13 @@ function SubmitFlow({
         <div className="grid grid-cols-2 gap-2">
           <Link
             href="/merchant/terminal"
-            className="text-center rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-strong)] text-white text-sm font-medium py-2.5 transition"
+            className="glass-btn-primary text-sm py-2.5 justify-center"
           >
             Open terminal →
           </Link>
           <Link
             href="/scan"
-            className="text-center rounded-xl border border-white/15 hover:bg-white/5 text-white text-sm font-medium py-2.5 transition"
+            className="glass-btn-ghost text-sm py-2.5 justify-center"
           >
             Test on /scan →
           </Link>
@@ -586,7 +586,7 @@ function SubmitFlow({
       <button
         type="button"
         disabled
-        className="w-full rounded-2xl bg-[var(--accent)]/40 text-white font-medium py-4 px-5 cursor-wait flex items-center justify-center gap-2"
+        className="w-full rounded-2xl bg-[var(--accent)]/30 border border-[var(--accent)]/40 backdrop-blur-md text-white font-medium py-4 px-5 cursor-wait flex items-center justify-center gap-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)]"
       >
         <Spinner />
         Sponsor signing on testnet…
@@ -598,10 +598,10 @@ function SubmitFlow({
       type="button"
       onClick={onSubmit}
       disabled={!ready}
-      className="group flex w-full items-center justify-between rounded-2xl bg-[var(--accent)] hover:bg-[var(--accent-strong)] disabled:bg-white/5 disabled:text-neutral-500 disabled:cursor-not-allowed text-white font-medium py-4 px-5 transition shadow-[0_8px_30px_-8px_var(--accent-glow)] disabled:shadow-none"
+      className="glass-btn-primary group w-full"
     >
       <span>Claim UEN</span>
-      <span className={ready ? "text-white/70 group-hover:text-white transition" : "text-neutral-600"}>
+      <span className={ready ? "text-white/80 group-hover:text-white transition" : "text-[var(--muted-soft)]"}>
         →
       </span>
     </button>

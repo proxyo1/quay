@@ -74,23 +74,25 @@ export default function HistoryPage() {
         <Link href="/" className="text-[var(--accent)] hover:underline text-sm inline-flex items-center gap-1">
           <span aria-hidden>←</span> home
         </Link>
-        <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] uppercase tracking-wider text-neutral-400">
-          <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot align-middle" />
+        <span className="glass-pill">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
           live
         </span>
       </header>
 
       <section className="space-y-1">
         <h1 className="text-3xl font-semibold tracking-tight">Payment history</h1>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-[var(--muted)]">
           Outgoing receipts from your connected wallet. Refreshes every 5s.
         </p>
       </section>
 
       {!account ? (
-        <section className="rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent)]/[0.05] p-5 space-y-3">
-          <p className="text-sm text-white">Connect a Sui wallet to view your payment history.</p>
-          <ConnectButton />
+        <section className="glass-card-accent rounded-2xl p-5 space-y-3">
+          <p className="relative z-10 text-sm text-white">Connect a Sui wallet to view your payment history.</p>
+          <div className="relative z-10">
+            <ConnectButton />
+          </div>
         </section>
       ) : (
         <>
@@ -103,14 +105,14 @@ export default function HistoryPage() {
           </div>
 
           {error ? (
-            <section className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
-              <p className="text-sm font-medium text-red-300">Event query failed</p>
-              <p className="text-xs text-red-300/80 break-words">
+            <section className="glass-card-danger rounded-2xl p-4 space-y-1">
+              <p className="text-sm font-medium text-red-200">Event query failed</p>
+              <p className="text-xs text-red-200/80 break-words">
                 {error instanceof Error ? error.message : String(error)}
               </p>
             </section>
           ) : isLoading && receipts.length === 0 ? (
-            <p className="text-sm text-neutral-500 text-center py-6">Loading…</p>
+            <p className="text-sm text-[var(--muted-soft)] text-center py-6">Loading…</p>
           ) : receipts.length === 0 ? (
             <EmptyState />
           ) : (
@@ -119,7 +121,7 @@ export default function HistoryPage() {
         </>
       )}
 
-      <footer className="text-[11px] text-neutral-500 pt-4 border-t border-white/5">
+      <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5">
         Connected wallet:{" "}
         {account ? (
           <a
@@ -131,7 +133,7 @@ export default function HistoryPage() {
             {account.address.slice(0, 8)}…{account.address.slice(-6)}
           </a>
         ) : (
-          <span className="text-neutral-500">none</span>
+          <span className="text-[var(--muted-soft)]">none</span>
         )}
       </footer>
     </main>
@@ -144,21 +146,20 @@ function WeekHero({
   stats: ReturnType<typeof computeStats>;
 }) {
   return (
-    <section className="relative rounded-3xl border border-[var(--accent)]/25 bg-gradient-to-b from-[var(--accent)]/[0.08] to-transparent p-5 overflow-hidden">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(400px_200px_at_50%_-50px,var(--accent-glow),transparent_60%)]" />
-      <p className="text-[11px] uppercase tracking-wider text-neutral-400">
+    <section className="glass-card-accent rounded-3xl p-5 overflow-hidden">
+      <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">
         Spent this week
       </p>
-      <p className="mt-1 text-4xl font-semibold tabular-nums text-white">
-        ${stats.weekSgd.toFixed(2)}
-        <span className="ml-1.5 text-base text-neutral-500 font-normal">SGD</span>
+      <p className="relative z-10 mt-1 text-4xl font-semibold tabular-nums">
+        <span className="glass-shimmer">${stats.weekSgd.toFixed(2)}</span>
+        <span className="ml-1.5 text-base text-[var(--muted-soft)] font-normal">SGD</span>
       </p>
-      <div className="mt-3 h-12">
+      <div className="relative z-10 mt-3 h-12">
         <Sparkline points={stats.weeklyDaily} />
       </div>
-      <div className="mt-2 flex justify-between text-[10px] uppercase tracking-wider text-neutral-500">
+      <div className="relative z-10 mt-2 flex justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
         {stats.weekLabels.map((d, i) => (
-          <span key={i} className={i === stats.weekLabels.length - 1 ? "text-[var(--accent)]" : ""}>
+          <span key={i} className={i === stats.weekLabels.length - 1 ? "text-[var(--accent-strong)]" : ""}>
             {d}
           </span>
         ))}
@@ -199,11 +200,11 @@ function Sparkline({ points }: { points: number[] }) {
 
 function KPI({ label, amount }: { label: string; amount: number }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
-      <p className="text-[10px] uppercase tracking-wider text-neutral-500">{label}</p>
-      <p className="mt-0.5 text-base font-semibold tabular-nums text-white">
+    <div className="glass-card rounded-2xl p-3">
+      <p className="relative z-10 text-[10px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">{label}</p>
+      <p className="relative z-10 mt-0.5 text-base font-semibold tabular-nums text-white">
         ${amount.toFixed(2)}
-        <span className="text-[10px] text-neutral-500 ml-0.5 font-normal">SGD</span>
+        <span className="text-[10px] text-[var(--muted-soft)] ml-0.5 font-normal">SGD</span>
       </p>
     </div>
   );
@@ -211,18 +212,18 @@ function KPI({ label, amount }: { label: string; amount: number }) {
 
 function EmptyState() {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6 text-center space-y-2">
-      <div className="mx-auto h-12 w-12 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/30 flex items-center justify-center">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <section className="glass-card rounded-2xl p-6 text-center space-y-2">
+      <div className="relative z-10 mx-auto h-12 w-12 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/35 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_24px_-8px_var(--accent-glow)]">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-strong)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5l3 2" />
         </svg>
       </div>
-      <p className="text-base font-medium text-white">No payments yet</p>
-      <p className="text-xs text-neutral-500">
+      <p className="relative z-10 text-base font-medium text-white">No payments yet</p>
+      <p className="relative z-10 text-xs text-[var(--muted-soft)]">
         Scan an SGQR sticker. Once it&apos;s on chain, it shows up here.
       </p>
-      <div className="pt-1">
+      <div className="relative z-10 pt-1">
         <Link href="/scan" className="text-xs text-[var(--accent)] hover:underline">
           Go to scan →
         </Link>
@@ -237,7 +238,7 @@ function ReceiptList({ receipts }: { receipts: NormalizedReceipt[] }) {
     <section className="space-y-4">
       {groups.map((group) => (
         <div key={group.label} className="space-y-2">
-          <h3 className="text-[10px] uppercase tracking-wider text-neutral-500 px-1">{group.label}</h3>
+          <h3 className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-soft)] px-1">{group.label}</h3>
           <ul className="space-y-2">
             {group.items.map((r, i) => (
               <ReceiptCard key={r.receiptId} r={r} highlight={group.label === "Today" && i === 0} />
@@ -254,29 +255,29 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
   const merchantInitial = r.merchant.slice(2, 3).toUpperCase();
   return (
     <li
-      className={`rounded-2xl border bg-white/[0.02] p-4 ${
-        highlight ? "border-[var(--accent)]/40 shadow-[0_0_30px_-12px_var(--accent-glow)]" : "border-white/10"
+      className={`rounded-2xl p-4 ${
+        highlight ? "glass-card-accent" : "glass-card"
       }`}
     >
-      <div className="flex items-start gap-3">
-        <div className="h-9 w-9 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/30 flex items-center justify-center text-[var(--accent)] text-xs font-semibold shrink-0">
+      <div className="relative z-10 flex items-start gap-3">
+        <div className="h-9 w-9 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/35 flex items-center justify-center text-[var(--accent-strong)] text-xs font-semibold shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
           {merchantInitial}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline justify-between gap-2">
             <p className="text-lg font-semibold tabular-nums text-white">
               ${(r.sgdMinorUnits / 100).toFixed(2)}{" "}
-              <span className="text-xs text-neutral-500 font-normal">SGD</span>
+              <span className="text-xs text-[var(--muted-soft)] font-normal">SGD</span>
             </p>
-            <span className="text-[11px] text-neutral-500 tabular-nums shrink-0">
+            <span className="text-[11px] text-[var(--muted-soft)] tabular-nums shrink-0">
               {formatRelativeTime(r.timestampMs)}
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-neutral-400 font-mono truncate">
+          <p className="mt-0.5 text-xs text-[var(--muted)] font-mono truncate">
             {formatTokenAmount(r.amount, tokenLabel)} → {r.merchant.slice(0, 6)}…{r.merchant.slice(-4)}
           </p>
           {r.memo && (
-            <p className="mt-1.5 text-xs text-neutral-300 italic">&ldquo;{r.memo}&rdquo;</p>
+            <p className="mt-1.5 text-xs text-[var(--muted)] italic">&ldquo;{r.memo}&rdquo;</p>
           )}
           <div className="mt-2 flex items-center gap-3 text-[11px]">
             <a

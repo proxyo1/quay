@@ -125,15 +125,15 @@ export default function VerifyPage({
   });
 
   return (
-    <main className="mx-auto max-w-md px-4 py-8 space-y-6">
+    <main className="relative z-10 mx-auto max-w-md px-5 py-8 space-y-6">
       <header className="space-y-1">
-        <p className="text-xs uppercase tracking-wide text-gray-500">quay verifier</p>
-        <p className="text-xs text-gray-500 font-mono break-all">blob {blobId}</p>
+        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">quay verifier</p>
+        <p className="text-xs text-[var(--muted-soft)] font-mono break-all">blob {blobId}</p>
       </header>
 
       {query.isLoading && (
-        <section className="rounded-md border border-gray-200 dark:border-gray-700 p-5">
-          <p className="text-sm text-gray-500">Verifying receipt…</p>
+        <section className="glass-card rounded-2xl p-5">
+          <p className="relative z-10 text-sm text-[var(--muted-soft)]">Verifying receipt…</p>
         </section>
       )}
 
@@ -148,10 +148,10 @@ export default function VerifyPage({
 
       {query.data && <VerdictView v={query.data} blobId={blobId} />}
 
-      <footer className="text-xs text-gray-500 border-t border-gray-100 dark:border-gray-800 pt-4">
+      <footer className="text-[11px] text-[var(--muted-soft)] border-t border-white/5 pt-4">
         <p>
           Verifier fetches the receipt JSON from Walrus, validates its shape, and
-          checks for a matching on-chain <code className="font-mono">PaymentReceipt</code> event
+          checks for a matching on-chain <code className="font-mono text-[var(--muted)]">PaymentReceipt</code> event
           within ±60s of the stated timestamp.
         </p>
       </footer>
@@ -171,7 +171,7 @@ function VerdictView({ v, blobId }: { v: Verdict; blobId: string }) {
             body={
               <>
                 <span className="font-medium">{v.receipt.uen_raw}</span>
-                <span className="text-gray-500"> · </span>
+                <span className="text-[var(--muted-soft)]"> · </span>
                 S${(v.receipt.sgd_minor_units / 100).toFixed(2)}
               </>
             }
@@ -180,7 +180,7 @@ function VerdictView({ v, blobId }: { v: Verdict; blobId: string }) {
           <OnChainProof digest={v.tx.digest} receiptIdHex={v.receipt.receipt_id} />
           <a
             href={`/m/${encodeURIComponent(v.receipt.uen_raw)}`}
-            className="block text-sm text-blue-600 hover:underline"
+            className="block text-sm text-[var(--accent)] hover:underline"
           >
             View merchant →
           </a>
@@ -199,7 +199,7 @@ function VerdictView({ v, blobId }: { v: Verdict; blobId: string }) {
           <div className="opacity-60">
             <ReceiptDetails receipt={v.receipt} />
           </div>
-          <Link href="/" className="block text-sm text-blue-600 hover:underline">
+          <Link href="/" className="block text-sm text-[var(--accent)] hover:underline">
             Browse verified merchants →
           </Link>
         </>
@@ -263,19 +263,15 @@ function VerdictBlock({
   body: React.ReactNode;
 }) {
   const toneClass = {
-    green:
-      "border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-900/20 text-emerald-900 dark:text-emerald-100",
-    amber:
-      "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20 text-amber-900 dark:text-amber-100",
-    red:
-      "border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20 text-red-900 dark:text-red-100",
-    gray:
-      "border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40 text-gray-700 dark:text-gray-300",
+    green: "glass-card-success text-emerald-100",
+    amber: "glass-card-warning text-amber-100",
+    red: "glass-card-danger text-red-100",
+    gray: "glass-card text-[var(--muted)]",
   }[tone];
 
   return (
-    <section className={`rounded-lg border p-5 space-y-2 ${toneClass}`}>
-      <p className="text-2xl font-semibold flex items-baseline gap-2">
+    <section className={`rounded-2xl p-5 space-y-2 ${toneClass}`}>
+      <p className="text-2xl font-semibold flex items-baseline gap-2 tracking-tight">
         <span>{icon}</span>
         <span>{header}</span>
       </p>
@@ -286,45 +282,47 @@ function VerdictBlock({
 
 function ReceiptDetails({ receipt }: { receipt: Receipt }) {
   return (
-    <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-1.5">
-      <p className="text-xs uppercase tracking-wide text-gray-500">Receipt details</p>
-      <KV label="Merchant" value={shortAddr(receipt.merchant)} />
-      <KV
-        label="Amount"
-        value={`${formatAmount(receipt.amount, receipt.token_type)} (S$${(receipt.sgd_minor_units / 100).toFixed(2)})`}
-      />
-      <KV label="Payer" value={shortAddr(receipt.payer)} />
-      <KV
-        label="Time"
-        value={new Date(receipt.timestamp_ms).toLocaleString(undefined, {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          timeZoneName: "short",
-        })}
-      />
-      {receipt.memo && <KV label="Memo" value={receipt.memo} />}
+    <section className="glass-card rounded-2xl p-4 space-y-1.5">
+      <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Receipt details</p>
+      <div className="relative z-10 space-y-1.5">
+        <KV label="Merchant" value={shortAddr(receipt.merchant)} />
+        <KV
+          label="Amount"
+          value={`${formatAmount(receipt.amount, receipt.token_type)} (S$${(receipt.sgd_minor_units / 100).toFixed(2)})`}
+        />
+        <KV label="Payer" value={shortAddr(receipt.payer)} />
+        <KV
+          label="Time"
+          value={new Date(receipt.timestamp_ms).toLocaleString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZoneName: "short",
+          })}
+        />
+        {receipt.memo && <KV label="Memo" value={receipt.memo} />}
+      </div>
     </section>
   );
 }
 
 function OnChainProof({ digest, receiptIdHex }: { digest: string; receiptIdHex: string }) {
   return (
-    <section className="rounded-md border border-gray-200 dark:border-gray-700 p-4 space-y-1.5">
-      <p className="text-xs uppercase tracking-wide text-gray-500">On-chain proof</p>
-      <p className="text-sm">
+    <section className="glass-card rounded-2xl p-4 space-y-1.5">
+      <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">On-chain proof</p>
+      <p className="relative z-10 text-sm">
         <a
           href={txUrl(digest)}
           target="_blank"
           rel="noreferrer"
-          className="text-blue-600 hover:underline font-mono text-xs break-all"
+          className="text-[var(--accent)] hover:underline font-mono text-xs break-all"
         >
           tx {digest.slice(0, 12)}… ↗
         </a>
       </p>
-      <p className="text-xs text-gray-500 font-mono break-all">
+      <p className="relative z-10 text-xs text-[var(--muted-soft)] font-mono break-all">
         receipt_id {receiptIdHex.slice(0, 16)}…
       </p>
     </section>
@@ -334,8 +332,8 @@ function OnChainProof({ digest, receiptIdHex }: { digest: string; receiptIdHex: 
 function KV({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 text-sm">
-      <span className="text-xs text-gray-500 shrink-0">{label}</span>
-      <span className="font-mono text-xs text-right break-all">{value}</span>
+      <span className="text-[11px] text-[var(--muted-soft)] shrink-0">{label}</span>
+      <span className="font-mono text-xs text-right break-all text-white">{value}</span>
     </div>
   );
 }
