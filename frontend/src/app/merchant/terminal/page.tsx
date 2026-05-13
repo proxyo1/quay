@@ -496,12 +496,29 @@ function shortTokenLabel(typeName: string): string {
   return parts.at(-1) ?? typeName;
 }
 
+/**
+ * Format a `Coin<T>` amount for display. Falls back to the raw integer
+ * with the symbol appended when the token's decimals aren't known.
+ *
+ * Decimals table is centralized here because the terminal renders any
+ * token the merchant configured at onboard (SUI, USDC, future USDsui/USDT).
+ */
+const TERMINAL_DECIMALS: Record<string, number> = {
+  SUI: 9,
+  USDC: 6,
+  USDsui: 6,
+  USDT: 6,
+};
+
 function formatTokenAmount(amount: bigint, symbol: string): string {
-  if (symbol === "SUI") {
-    const sui = Number(amount) / 1_000_000_000;
-    return `${sui < 1 ? sui.toFixed(4) : sui.toFixed(2)} SUI`;
-  }
-  return `${amount.toString()} ${symbol}`;
+  const decimals = TERMINAL_DECIMALS[symbol];
+  if (decimals === undefined) return `${amount.toString()} ${symbol}`;
+  const divisor = 10n ** BigInt(decimals);
+  const whole = amount / divisor;
+  const fraction = amount % divisor;
+  const fracStr = fraction.toString().padStart(decimals, "0").replace(/0+$/, "");
+  const formatted = fracStr ? `${whole}.${fracStr}` : `${whole}`;
+  return `${formatted} ${symbol}`;
 }
 
 function formatRelativeTime(ms: number): string {
