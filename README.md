@@ -324,7 +324,7 @@ Full step-by-step demo flow: [`docs/DRESS_REHEARSAL.md`](docs/DRESS_REHEARSAL.md
 import { SuiJsonRpcClient as SuiClient, getJsonRpcFullnodeUrl as getFullnodeUrl } from "@mysten/sui/jsonRpc";
 
 const sui = new SuiClient({ network: "testnet", url: getJsonRpcFullnodeUrl("testnet") });
-const PKG = "0x70631c59a94e74594af10eabcd20e6cf88564ccca985610c8c1c9b100462a87c";
+const PKG = "0x69297daea3fb456381cc60684d5b9055fff58c7e13f9848943590e62a4ff55eb";
 const merchant = "0x..."; // your address
 
 // Poll every 2s for recent PaymentReceipt events targeting you
@@ -397,26 +397,31 @@ is essentially country-agnostic.
 ## Testnet deployment
 
 V3 redeploy (2026-05-13) — module renamed to `quay::payments`, canonical
-attestation domain tag bumped to `QUAY_CLAIM_V1`. V1 (pre-Walrus) and V2
-(Walrus, still `suiqr::payments`) artifacts preserved as
-[`scripts/deploy-testnet.v1.json`](scripts/deploy-testnet.v1.json) and
-[`scripts/deploy-testnet.v2.json`](scripts/deploy-testnet.v2.json).
+attestation domain tag bumped to `QUAY_CLAIM_V1`.
+
+V4 redeploy (2026-05-13) — adds `update_merchant_metadata` so merchants
+can change their preferred receive token after onboarding via
+`/merchant/wallet`. V1 (pre-Walrus), V2 (Walrus, still `suiqr::payments`),
+and V3 (rename) artifacts preserved as
+[`scripts/deploy-testnet.v1.json`](scripts/deploy-testnet.v1.json),
+[`scripts/deploy-testnet.v2.json`](scripts/deploy-testnet.v2.json), and
+[`scripts/deploy-testnet.v3.json`](scripts/deploy-testnet.v3.json).
 
 ```
 Network:          testnet (chain_id = 4c78adac)
-Package:          0x70631c59a94e74594af10eabcd20e6cf88564ccca985610c8c1c9b100462a87c
-MerchantRegistry: 0xa572e59aa755af7a93c2a0b0216639b3debe6b5ecdb4074c763d3484e879645b
+Package:          0x69297daea3fb456381cc60684d5b9055fff58c7e13f9848943590e62a4ff55eb
+MerchantRegistry: 0xefd4116acd7a73881bab888fd96f2ed068a602bc8fda19ef2acc16cd63f1741c
 AdminCap owner:   0xa91644aa47914b16b73258c1de984e3296ef15e40a838ffd3b8fa533b27def2f
 Issuer pubkey:    0x5d44735e96af7d30d245936458efc03f5fdc4ba042046848afc4ad9dd8d115c8
 Sponsor wallet:   0xbe085e2a3fedcf5da35c1602ea6278da41e565fbd2edb35971aa4a2da5ebb4ce
 ```
 
-Demo flow on chain (V3):
+Demo flow on chain (V4):
 
-- Publish: [`EQAFEAw…X9pZ`](https://suiscan.xyz/testnet/tx/EQAFEAwZcPCUhXnoVfSKU2KzU8YAbkNivpeTsQVvX9pZ)
-- Set initial issuer pubkey: [`EynoQ2e…x7sM`](https://suiscan.xyz/testnet/tx/EynoQ2eN1cYJBD5qHZGnxaJVYsh81PyLTgbZ3JEox7sM)
-- Register merchant1 (UEN `202412345Z`): [`7NdB95w…g8gY`](https://suiscan.xyz/testnet/tx/7NdB95wjHva8yCuhAnrpEfhjbkELGiEc78Zouv8zg8gY)
-- Pay merchant1 $1.50 SGD (1.5M MIST): [`HTK15pc…R385s`](https://suiscan.xyz/testnet/tx/HTK15pcvesY3uiXZZ2yuk8nuR7Lcy83on6jytn8R385s)
+- Publish: [`FkErpjr…Jbep1`](https://suiscan.xyz/testnet/tx/FkErpjrzotQy4Q7hnuWDbMy4jWRXwxmm5NXpLTeJbep1)
+- Set initial issuer pubkey: [`CLQUZBu…ixDT`](https://suiscan.xyz/testnet/tx/CLQUZBuxLK3HAqBJ7RL5TmDkkZXywMgQbXug1ySUixDT)
+- Register merchant1 (UEN `202412345Z`): [`Byi3rwi…KERS8`](https://suiscan.xyz/testnet/tx/Byi3rwiN94f6TrLfDvEVfWd3Cf8EdSeT49AmpHEKERS8)
+- Pay merchant1 $1.50 SGD (1.5M MIST): [`EkWjSVx…BBL6`](https://suiscan.xyz/testnet/tx/EkWjSVx7RWwqZ35RsMK3LrpBNxBcvxy33FPf1bMsBBL6)
 
 ---
 

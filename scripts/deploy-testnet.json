@@ -1,22 +1,22 @@
 {
   "network": "testnet",
   "chain_id": 0,
-  "package_id": "0x70631c59a94e74594af10eabcd20e6cf88564ccca985610c8c1c9b100462a87c",
-  "merchant_registry_id": "0xa572e59aa755af7a93c2a0b0216639b3debe6b5ecdb4074c763d3484e879645b",
-  "admin_cap_id": "0xfb7a3d740324ff2e158d71f1abffdc81b1495a4de6535fc1461fef850f366c40",
+  "package_id": "0x69297daea3fb456381cc60684d5b9055fff58c7e13f9848943590e62a4ff55eb",
+  "merchant_registry_id": "0xefd4116acd7a73881bab888fd96f2ed068a602bc8fda19ef2acc16cd63f1741c",
+  "admin_cap_id": "0x681972e3413716b8bf168f1dd4203cc0952081621aa0ac1ced3d1b8a9ef6dc2b",
   "admin_address": "0xa91644aa47914b16b73258c1de984e3296ef15e40a838ffd3b8fa533b27def2f",
   "issuer_pubkey_hex": "5d44735e96af7d30d245936458efc03f5fdc4ba042046848afc4ad9dd8d115c8",
   "digests": {
-    "publish": "EQAFEAwZcPCUhXnoVfSKU2KzU8YAbkNivpeTsQVvX9pZ",
-    "set_initial_issuer_pubkey": "EynoQ2eN1cYJBD5qHZGnxaJVYsh81PyLTgbZ3JEox7sM",
-    "fund_merchant1": "91351YsuKMZALF5tPcbHTPWeyKirUzPMYjFcTV3XWB7C",
-    "register_merchant1": "7NdB95wjHva8yCuhAnrpEfhjbkELGiEc78Zouv8zg8gY",
-    "pay_demo": "HTK15pcvesY3uiXZZ2yuk8nuR7Lcy83on6jytn8R385s"
+    "publish": "FkErpjrzotQy4Q7hnuWDbMy4jWRXwxmm5NXpLTeJbep1",
+    "set_initial_issuer_pubkey": "CLQUZBuxLK3HAqBJ7RL5TmDkkZXywMgQbXug1ySUixDT",
+    "fund_merchant1": "4XTpV2AA3iN6cv6aXaoqevQgBeJgR2aMsMiUKUVEwr5u",
+    "register_merchant1": "Byi3rwiN94f6TrLfDvEVfWd3Cf8EdSeT49AmpHEKERS8",
+    "pay_demo": "EkWjSVx7RWwqZ35RsMK3LrpBNxBcvxy33FPf1bMsBBL6"
   },
   "demo_merchant1": {
-    "sui_address": "0xf2e175ccd45db38a7fb3ffb73be679dfac3c3975f4c245ba06cb2adbea3a8a39",
+    "sui_address": "0x185701ae9aa7f4a966630abe38c0860973f752b7d77a44c51870e3f40304075b",
     "uen": "202412345Z"
   },
   "status": "complete",
-  "deployed_at": "2026-05-13T04:42:12.657Z"
+  "deployed_at": "2026-05-13T07:25:25.258Z"
 }
