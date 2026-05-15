@@ -6,7 +6,7 @@ import { useState } from "react";
 import { isZkLoginConfigured, startGoogleZkLogin, useZkLoginSession } from "@/lib/zklogin";
 
 export default function MerchantHome() {
-  const { session, hydrated } = useZkLoginSession();
+  const { session, hydrated, signOut } = useZkLoginSession();
   const signedIn = hydrated && !!session;
   const [signInError, setSignInError] = useState<string | null>(null);
   const [signInPending, setSignInPending] = useState(false);
@@ -17,8 +17,10 @@ export default function MerchantHome() {
     try {
       // Skip the intermediate /merchant/login page entirely — kick straight
       // into Google's OAuth flow. On success the callback lands the user at
-      // /merchant/onboard with a fresh session.
-      await startGoogleZkLogin("/merchant/onboard");
+      // /merchant/post-signin, which checks their UEN registrations and
+      // forwards them to /merchant/onboard (new merchant) or
+      // /merchant/terminal (returning merchant).
+      await startGoogleZkLogin("/merchant/post-signin");
       // startGoogleZkLogin redirects; the line below only runs if it didn't.
     } catch (e) {
       setSignInError(e instanceof Error ? e.message : String(e));
@@ -40,8 +42,8 @@ export default function MerchantHome() {
           {signedIn ? `Welcome back` : `For merchants`}
         </h1>
         <p className="text-sm text-[var(--muted)]">
-          Sign in once. Your quay wallet is derived from your identity. Quay
-          pays the gas while you onboard.
+          Sign in once with Google. Setup is free — Quay covers the network
+          fees so you can start accepting payments right away.
         </p>
       </section>
 
@@ -51,13 +53,18 @@ export default function MerchantHome() {
             <div className="h-10 w-10 rounded-full bg-[var(--accent)]/20 border border-[var(--accent)]/40 flex items-center justify-center text-[var(--accent-strong)] text-sm font-semibold shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]">
               {session.email?.charAt(0).toUpperCase() ?? "M"}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Signed in</p>
               <p className="text-sm text-white truncate">{session.email}</p>
-              <p className="text-[11px] font-mono text-[var(--muted-soft)] truncate">
-                {session.address.slice(0, 10)}…{session.address.slice(-6)}
-              </p>
             </div>
+            <button
+              type="button"
+              onClick={signOut}
+              className="glass-chip shrink-0"
+              aria-label="Sign out"
+            >
+              Sign out
+            </button>
           </div>
         </section>
       )}
@@ -97,25 +104,25 @@ export default function MerchantHome() {
         <section className="grid grid-cols-2 gap-3">
           <ActionCard
             href="/merchant/onboard"
-            title="Onboard UEN"
-            sub="Claim your UEN"
+            title="Add business"
+            sub="Register your UEN"
             icon={<QrIcon />}
             accent
           />
           <ActionCard
             href="/merchant/terminal"
             title="Terminal"
-            sub="Live payment feed"
+            sub="See live payments"
             icon={<TerminalIcon />}
           />
           <ActionCard
             href="/merchant/wallet"
-            title="Wallet"
-            sub="Sui address · zkLogin"
+            title="Account"
+            sub="Payouts & settings"
             icon={<WalletIcon />}
           />
           <ActionCard
-            href="/history"
+            href="/merchant/history"
             title="History"
             sub="Past receipts"
             icon={<ClockIcon />}
@@ -125,20 +132,20 @@ export default function MerchantHome() {
 
       <section className="glass-card rounded-2xl p-4 space-y-2">
         <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
-          What V0 does not do yet
+          Coming soon
         </p>
         <ul className="text-xs text-[var(--muted)] space-y-1.5 leading-relaxed">
           <li className="flex gap-2">
             <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            Mobile-number PayNow (~70% of SG hawkers) — UEN-based only.
+            PayNow with mobile numbers (UEN-only for now).
           </li>
           <li className="flex gap-2">
             <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            Manual SGQR-photo + BizFile+ review before attestation.
+            Manual SGQR photo review before approval.
           </li>
           <li className="flex gap-2">
             <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            Production zkLogin (V0 uses Enoki proof on testnet).
+            Mainnet launch (currently in beta).
           </li>
         </ul>
       </section>

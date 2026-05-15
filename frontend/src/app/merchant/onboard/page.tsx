@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
 import { extractMerchant, looksLikeUen, parseSgqr } from "@/lib/sgqr";
 import { lookupUen } from "@/lib/quay";
-import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
+import { QUAY, txUrl } from "@/lib/sui-config";
 import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
 import {
   buildMerchantProfileBytes,
@@ -97,7 +97,7 @@ export default function OnboardPage() {
         return;
       }
       if (merchant.proxyType === "mobile") {
-        setScanFeedback("Mobile-number PayNow isn't supported in V0. Use a UEN SGQR.");
+        setScanFeedback("Mobile-number PayNow isn't supported yet — please scan a UEN SGQR.");
         return;
       }
       if (merchant.proxyType !== "uen") {
@@ -257,9 +257,9 @@ export default function OnboardPage() {
       </header>
 
       <section className="space-y-1">
-        <h1 className="text-3xl font-semibold tracking-tight">Claim your UEN</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Add your business</h1>
         <p className="text-sm text-[var(--muted)]">
-          Two minutes. No gas fees. Verified on Sui.
+          Two minutes. No fees. Verified and yours.
         </p>
       </section>
 
@@ -333,13 +333,13 @@ export default function OnboardPage() {
             disabled={state.kind === "submitting"}
           />
           <p className="text-[11px] text-[var(--muted-soft)]">
-            Hashed into the on-chain attestation alongside your UEN.
+            Shown to customers on the payment screen.
           </p>
         </div>
 
         <div className="relative z-10 space-y-1.5">
           <label className="block text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
-            Receive payments in
+            Get paid in
           </label>
           <div className="grid grid-cols-2 gap-2">
             {RECEIVE_TOKEN_OPTIONS.map((opt) => {
@@ -371,7 +371,7 @@ export default function OnboardPage() {
             })}
           </div>
           <p className="text-[11px] text-[var(--muted-soft)]">
-            Payers can pay in any token — Quay routes via Cetus Aggregator so you receive this one.
+            Customers can pay with any currency — we auto-convert so you always receive this one.
           </p>
         </div>
 
@@ -394,7 +394,7 @@ export default function OnboardPage() {
                 : "Tap to upload an image"}
             </p>
             <p className="text-[10px] text-[var(--muted-soft)] mt-0.5">
-              {logoFile ? "Will upload to Walrus on submit" : "JPEG, PNG, WebP"}
+              {logoFile ? "Will upload when you save" : "JPEG, PNG, WebP"}
             </p>
           </label>
           <input
@@ -416,9 +416,9 @@ export default function OnboardPage() {
             <SuiIcon />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-white">Sponsored gas</p>
+            <p className="text-sm font-medium text-white">Free to set up</p>
             <p className="text-xs text-[var(--muted)] leading-relaxed mt-0.5">
-              Quay pays the testnet gas while you onboard. ~10s to confirm via zkLogin.
+              Quay covers all the network fees. About 10 seconds to confirm.
             </p>
           </div>
         </div>
@@ -427,18 +427,8 @@ export default function OnboardPage() {
       <SubmitFlow state={state} ready={ready} onSubmit={handleSubmit} />
 
       <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5 space-y-1.5">
-        <p>
-          Registry:{" "}
-          <a
-            href={objectUrl(QUAY.registryId)}
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono text-[var(--accent)] hover:underline"
-          >
-            {QUAY.registryId.slice(0, 8)}…{QUAY.registryId.slice(-6)}
-          </a>
-        </p>
-        <p>V0 auto-issues attestations. Production gates this behind manual review.</p>
+        <p>Currently in beta — manual business review coming soon.</p>
+        <p>Powered by Sui · Walrus · Pyth</p>
       </footer>
 
       {scanOpen && (
@@ -454,8 +444,8 @@ export default function OnboardPage() {
 function Stepper({ current }: { current: 1 | 2 | 3 }) {
   const steps = [
     { n: 1, label: "Scan" },
-    { n: 2, label: "Confirm" },
-    { n: 3, label: "Sign" },
+    { n: 2, label: "Details" },
+    { n: 3, label: "Confirm" },
   ] as const;
   return (
     <div className="flex items-center gap-2">
@@ -488,7 +478,7 @@ function Stepper({ current }: { current: 1 | 2 | 3 }) {
   );
 }
 
-function SessionPill({ email, address }: { email: string; address: string }) {
+function SessionPill({ email, address: _address }: { email: string; address: string }) {
   return (
     <section className="glass-card rounded-2xl p-3">
       <div className="relative z-10 flex items-center gap-2.5">
@@ -497,11 +487,9 @@ function SessionPill({ email, address }: { email: string; address: string }) {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs text-white truncate">{email}</p>
-          <p className="text-[10px] font-mono text-[var(--muted-soft)] truncate">
-            {address.slice(0, 10)}…{address.slice(-6)}
-          </p>
+          <p className="text-[10px] text-[var(--muted-soft)]">Signed in with Google</p>
         </div>
-        <span className="text-[10px] text-[var(--success)] uppercase tracking-[0.12em]">zkLogin</span>
+        <span className="text-[10px] text-[var(--success)] uppercase tracking-[0.12em]">Verified</span>
       </div>
     </section>
   );
@@ -534,7 +522,7 @@ function SubmitFlow({
   if (state.kind === "already-yours") {
     return (
       <section className="glass-card-accent rounded-2xl p-4 space-y-2">
-        <p className="relative z-10 text-sm font-medium text-white">You already own this UEN</p>
+        <p className="relative z-10 text-sm font-medium text-white">You&apos;ve already added this business</p>
         <p className="relative z-10 text-xs text-[var(--muted)]">
           Open the terminal to see incoming payments.
         </p>
@@ -555,10 +543,10 @@ function SubmitFlow({
             <span className="text-[var(--success)]">
               <CheckIcon />
             </span>
-            Registered on testnet
+            Business added
           </p>
           <p className="text-xs text-[var(--muted)]">
-            Sponsor paid gas ·{" "}
+            Receipt ·{" "}
             <a
               href={txUrl(state.digest)}
               target="_blank"
@@ -580,7 +568,7 @@ function SubmitFlow({
             href="/scan"
             className="glass-btn-ghost text-sm py-2.5 justify-center"
           >
-            Test on /scan →
+            Try a test payment →
           </Link>
         </div>
       </section>
@@ -594,7 +582,7 @@ function SubmitFlow({
         className="w-full rounded-2xl bg-[var(--accent)]/30 border border-[var(--accent)]/40 backdrop-blur-md text-white font-medium py-4 px-5 cursor-wait flex items-center justify-center gap-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)]"
       >
         <Spinner />
-        Sponsor signing on testnet…
+        Setting up your business…
       </button>
     );
   }
@@ -605,7 +593,7 @@ function SubmitFlow({
       disabled={!ready}
       className="glass-btn-primary group w-full"
     >
-      <span>Claim UEN</span>
+      <span>Add business</span>
       <span className={ready ? "text-white/80 group-hover:text-white transition" : "text-[var(--muted-soft)]"}>
         →
       </span>
@@ -660,13 +648,13 @@ function Spinner() {
 function mapRegisterAbort(raw: string, uen: string): string {
   if (raw.includes("MoveAbort") && raw.includes("register_merchant")) {
     if (/,\s*1\)/.test(raw)) {
-      return `UEN ${uen} was claimed between pre-flight and submit.`;
+      return `Someone just registered ${uen} a moment ago. Try a different UEN.`;
     }
-    if (/,\s*5\)/.test(raw)) return "Attestation invalid (issuer key mismatch).";
-    if (/,\s*9\)/.test(raw)) return "Attestation expired — retry the claim.";
-    if (/,\s*6\)/.test(raw)) return "Attestation nonce replayed — retry the claim.";
+    if (/,\s*5\)/.test(raw)) return "We couldn't verify your registration. Please try again.";
+    if (/,\s*9\)/.test(raw)) return "Verification expired — please try again.";
+    if (/,\s*6\)/.test(raw)) return "Something went wrong with verification. Please try again.";
   }
-  return `tx failed: ${raw}`;
+  return "Couldn't add your business right now. Please try again — contact support if it keeps failing.";
 }
 
 function base64ToBytes(b64: string): Uint8Array {

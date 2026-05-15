@@ -8,7 +8,7 @@ import { useEffect, useMemo } from "react";
 
 import { useZkLoginSession } from "@/lib/zklogin";
 import { getEntriesTableId } from "@/lib/quay";
-import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
+import { QUAY, txUrl } from "@/lib/sui-config";
 import { getBlobUrl } from "@/lib/walrus/client";
 
 interface PaymentReceiptEvent {
@@ -217,8 +217,8 @@ function TerminalView({
           </span>
         </div>
         {session && (
-          <p className="text-[11px] text-[var(--muted-soft)] font-mono">
-            {session.email} · {session.address.slice(0, 8)}…{session.address.slice(-6)}
+          <p className="text-[11px] text-[var(--muted-soft)]">
+            {session.email}
           </p>
         )}
       </section>
@@ -248,11 +248,7 @@ function TerminalView({
               <span className="font-semibold tabular-nums">
                 ${(latest.sgdMinorUnits / 100).toFixed(2)} SGD
               </span>
-              <span className="text-[var(--muted)]"> from </span>
-              <span className="font-mono">
-                {latest.payer.slice(0, 6)}…{latest.payer.slice(-4)}
-              </span>
-              <span className="text-[var(--muted)]"> · {formatRelativeTime(latest.timestampMs)}</span>
+              <span className="text-[var(--muted)]"> from a customer · {formatRelativeTime(latest.timestampMs)}</span>
             </div>
           </div>
         </section>
@@ -262,13 +258,13 @@ function TerminalView({
 
       {error ? (
         <section className="glass-card-danger rounded-2xl p-4 space-y-1">
-          <p className="text-sm font-medium text-red-200">Event query failed</p>
+          <p className="text-sm font-medium text-red-200">Couldn&apos;t load payments</p>
           <p className="text-xs text-red-200/80 break-words">
             {error instanceof Error ? error.message : String(error)}
           </p>
         </section>
       ) : isLoading && receipts.length === 0 ? (
-        <p className="text-sm text-[var(--muted-soft)] text-center py-6">Listening for payments…</p>
+        <p className="text-sm text-[var(--muted-soft)] text-center py-6">Waiting for payments…</p>
       ) : receipts.length === 0 ? (
         <EmptyState />
       ) : (
@@ -283,15 +279,7 @@ function TerminalView({
       )}
 
       <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5">
-        Registry:{" "}
-        <a
-          href={objectUrl(QUAY.registryId)}
-          target="_blank"
-          rel="noreferrer"
-          className="font-mono text-[var(--accent)] hover:underline"
-        >
-          {QUAY.registryId.slice(0, 8)}…{QUAY.registryId.slice(-6)}
-        </a>
+        Powered by Sui · Walrus · Pyth
       </footer>
     </main>
   );
@@ -307,15 +295,15 @@ function EmptyState() {
       </div>
       <p className="relative z-10 text-base font-medium text-white">No payments yet</p>
       <p className="relative z-10 text-xs text-[var(--muted-soft)]">
-        Once a payer scans your SGQR, the payment appears here ~2s after finality.
+        Once a customer scans your SGQR, the payment shows up here in seconds.
       </p>
       <div className="relative z-10 pt-1 flex justify-center gap-3">
         <Link href="/merchant/onboard" className="text-xs text-[var(--accent)] hover:underline">
-          Onboard UEN →
+          Add a business →
         </Link>
         <span className="text-[var(--muted-soft)]">·</span>
         <Link href="/scan" className="text-xs text-[var(--accent)] hover:underline">
-          Test from scan →
+          Try a test payment →
         </Link>
       </div>
     </section>
@@ -326,15 +314,15 @@ function UenList({ state }: { state: ReturnType<typeof useMerchantUens> }) {
   if (state.isLoading) {
     return (
       <section className="glass-card rounded-2xl p-4">
-        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Your UENs</p>
-        <p className="relative z-10 mt-2 text-sm text-[var(--muted-soft)]">Loading from chain…</p>
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Your businesses</p>
+        <p className="relative z-10 mt-2 text-sm text-[var(--muted-soft)]">Loading…</p>
       </section>
     );
   }
   if (state.error) {
     return (
       <section className="glass-card-danger rounded-2xl p-4">
-        <p className="text-[11px] uppercase tracking-[0.12em] text-red-200">Your UENs</p>
+        <p className="text-[11px] uppercase tracking-[0.12em] text-red-200">Your businesses</p>
         <p className="mt-1 text-xs text-red-200/80">
           {state.error instanceof Error ? state.error.message : String(state.error)}
         </p>
@@ -345,11 +333,11 @@ function UenList({ state }: { state: ReturnType<typeof useMerchantUens> }) {
   if (uens.length === 0) {
     return (
       <section className="glass-card rounded-2xl p-4">
-        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Your UENs</p>
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Your businesses</p>
         <p className="relative z-10 mt-2 text-sm text-[var(--muted)]">
-          No UENs claimed yet.{" "}
+          No businesses added yet.{" "}
           <Link href="/merchant/onboard" className="text-[var(--accent)] hover:underline">
-            Onboard one →
+            Add one →
           </Link>
         </p>
       </section>
@@ -358,7 +346,7 @@ function UenList({ state }: { state: ReturnType<typeof useMerchantUens> }) {
   return (
     <section className="glass-card rounded-2xl p-4 space-y-2">
       <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
-        Your UEN{uens.length > 1 ? "s" : ""}
+        Your business{uens.length > 1 ? "es" : ""}
       </p>
       <ul className="relative z-10 space-y-2">
         {uens.map((u) => (
@@ -371,10 +359,10 @@ function UenList({ state }: { state: ReturnType<typeof useMerchantUens> }) {
               href={txUrl(u.digest)}
               target="_blank"
               rel="noreferrer"
-              className="text-[11px] text-[var(--accent)] hover:underline font-mono shrink-0"
-              title={`Registered ${new Date(u.timestamp).toLocaleString()}`}
+              className="text-[11px] text-[var(--accent)] hover:underline shrink-0"
+              title={`Added ${new Date(u.timestamp).toLocaleString()}`}
             >
-              registration ↗
+              Receipt ↗
             </a>
           </li>
         ))}
@@ -440,7 +428,7 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
               {yieldRouted && (
                 <span
                   className="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-[var(--accent)] align-middle"
-                  title="Yield-routed: deposited to Scallop in the same tx the payer signed"
+                  title="This payment is earning interest"
                 >
                   <span aria-hidden>↑</span> earning
                 </span>
@@ -450,8 +438,8 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
               {formatRelativeTime(r.timestampMs)}
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-[var(--muted)] font-mono truncate">
-            {formatTokenAmount(r.amount, tokenLabel)} from {r.payer.slice(0, 6)}…{r.payer.slice(-4)}
+          <p className="mt-0.5 text-xs text-[var(--muted)] truncate">
+            Paid with <span className="font-mono">{formatTokenAmount(r.amount, tokenLabel)}</span>
           </p>
           {r.memo && (
             <p className="mt-1.5 text-xs text-[var(--muted)] italic">&ldquo;{r.memo}&rdquo;</p>
@@ -460,9 +448,9 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
             href={txUrl(r.txDigest)}
             target="_blank"
             rel="noreferrer"
-            className="mt-2 inline-block text-[11px] text-[var(--accent)] hover:underline font-mono"
+            className="mt-2 inline-block text-[11px] text-[var(--accent)] hover:underline"
           >
-            tx ↗
+            Receipt ↗
           </a>
         </div>
       </div>
@@ -511,6 +499,9 @@ function shortTokenLabel(typeName: string): string {
     const underlying = tail.slice("SCALLOP_".length).toLowerCase();
     return `s${underlying === "usdsui" ? "USDsui" : underlying.toUpperCase()}`;
   }
+  // Move struct names ship ALL_CAPS — normalize the ones whose decimals
+  // table key uses mixed case so `formatTokenAmount` finds them.
+  if (tail === "USDSUI") return "USDsui";
   return tail;
 }
 

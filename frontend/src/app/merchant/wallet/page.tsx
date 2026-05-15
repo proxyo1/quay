@@ -1,7 +1,6 @@
 "use client";
 
 import { useSuiClient } from "@mysten/dapp-kit";
-import { decodeJwt } from "@mysten/sui/zklogin";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -45,14 +44,6 @@ export default function WalletPage() {
   }
   if (!session) return null;
 
-  const claims = (() => {
-    try {
-      return decodeJwt(session.jwt) as { iss?: string; email?: string; sub?: string; aud?: string | string[] };
-    } catch {
-      return null;
-    }
-  })();
-
   async function copy(s: string) {
     try {
       await navigator.clipboard.writeText(s);
@@ -67,33 +58,25 @@ export default function WalletPage() {
         <span aria-hidden>←</span> merchant
       </Link>
       <header className="space-y-1">
-        <h1 className="text-3xl font-semibold tracking-tight">Wallet</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Account</h1>
         <p className="text-sm text-[var(--muted)] leading-relaxed">
-          Your quay merchant wallet — bound to your Google identity via Sui
-          zkLogin. There&apos;s no private key to lose, no recovery phrase to
-          back up. Sign back in with the same Google account from any device
-          and your wallet is there.
+          Your business account, signed in with Google. No passwords to
+          remember, no recovery codes to back up. Sign back in from any
+          device and everything&apos;s right where you left it.
         </p>
       </header>
 
       <SettlementPreferenceSection session={session} />
 
       <section className="glass-card rounded-2xl p-5 space-y-2">
-        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Identity</p>
+        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Signed in as</p>
         <p className="relative z-10 text-sm text-white">{session.email}</p>
-        {claims && (
-          <ul className="relative z-10 text-[11px] text-[var(--muted-soft)] font-mono pt-1 space-y-0.5">
-            <li>iss: {claims.iss}</li>
-            <li>sub: {claims.sub?.slice(0, 24)}…</li>
-            <li>aud: {Array.isArray(claims.aud) ? claims.aud[0] : claims.aud}</li>
-          </ul>
-        )}
       </section>
 
       <section className="glass-card rounded-2xl p-5 space-y-3">
         <div className="relative z-10 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Sui address</p>
+            <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Account ID</p>
             <p className="font-mono text-sm text-white break-all mt-1">{session.address}</p>
           </div>
           <button
@@ -105,31 +88,14 @@ export default function WalletPage() {
           </button>
         </div>
         <p className="relative z-10 text-xs text-[var(--muted-soft)]">
-          View on Sui:{" "}
           <a
             href={objectUrl(session.address)}
             target="_blank"
             rel="noreferrer"
             className="text-[var(--accent)] hover:underline"
           >
-            suiscan ↗
+            View on Sui ↗
           </a>
-        </p>
-      </section>
-
-      <section className="glass-card rounded-2xl p-5 space-y-3">
-        <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">zkLogin session</p>
-        <ul className="relative z-10 text-[11px] text-[var(--muted-soft)] font-mono space-y-1">
-          <li>maxEpoch: {session.maxEpoch}</li>
-          <li>addressSeed: {session.proof.addressSeed.slice(0, 24)}…</li>
-          <li>ephemeral: bech32 stored in localStorage (rotated per session)</li>
-        </ul>
-        <p className="relative z-10 text-[11px] text-[var(--muted)] leading-relaxed">
-          The ephemeral keypair signs transaction bytes; Enoki&apos;s Groth16
-          proof binds those signatures to your Google identity. Once Sui
-          advances past <code className="font-mono">maxEpoch</code>, sign in
-          again to refresh the proof. No private key for you to back up — the
-          source of truth is your Google account.
         </p>
       </section>
 
@@ -146,10 +112,14 @@ export default function WalletPage() {
           Sign out
         </button>
         <p className="relative z-10 text-[11px] text-[var(--muted-soft)]">
-          Signing out clears the local session. Sign in again with the same
-          Google account to land on the same Sui address.
+          Signing out clears this device. Sign back in with the same Google
+          account to land on the same business.
         </p>
       </section>
+
+      <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5">
+        Powered by Sui · Walrus · Pyth
+      </footer>
     </main>
   );
 }
@@ -231,19 +201,19 @@ function SettlementPreferenceSection({ session }: { session: ZkLoginSession }) {
   return (
     <section className="glass-card rounded-2xl p-5 space-y-3">
       <div className="relative z-10">
-        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">Settlement preference</p>
+        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">Get paid in</p>
         <p className="text-[11px] text-[var(--muted-soft)] mt-0.5">
-          Choose the token Quay delivers when a payer scans your SGQR. Payers
-          can pay in anything — the aggregator handles the conversion.
+          Choose the currency you want to receive. Customers can pay with
+          anything — we auto-convert so you always get this one.
         </p>
       </div>
       {uensQ.isLoading ? (
-        <p className="relative z-10 text-xs text-[var(--muted-soft)]">Loading your registered UENs…</p>
+        <p className="relative z-10 text-xs text-[var(--muted-soft)]">Loading your businesses…</p>
       ) : uens.length === 0 ? (
         <p className="relative z-10 text-sm text-[var(--muted)]">
-          You haven&apos;t claimed any UENs yet.{" "}
+          You haven&apos;t added any businesses yet.{" "}
           <Link href="/merchant/onboard" className="text-[var(--accent)] hover:underline">
-            Onboard one →
+            Add one →
           </Link>
         </p>
       ) : (
@@ -301,7 +271,7 @@ function UenPreferenceRow({
         newBlobId = upload.blobId;
       } catch (e) {
         const why = e instanceof WalrusUploadError ? e.message : String(e);
-        throw new Error(`Walrus upload failed: ${why}`);
+        throw new Error(`Couldn't save your settings: ${why}`);
       }
 
       // 2. Ask the sponsor endpoint to build + co-sign the update tx.
@@ -355,7 +325,7 @@ function UenPreferenceRow({
         <div className="min-w-0">
           <p className="font-mono text-sm text-white">{row.uen}</p>
           <p className="text-[11px] text-[var(--muted-soft)]">
-            Currently receiving in <span className="text-white font-medium">{receiveLabel(current)}</span>
+            Currently getting paid in <span className="text-white font-medium">{receiveLabel(current)}</span>
           </p>
         </div>
         {!editing && (
@@ -406,13 +376,13 @@ function UenPreferenceRow({
               {save.kind === "idle" || save.kind === "error"
                 ? "Save"
                 : save.kind === "uploading"
-                ? "Uploading profile…"
+                ? "Saving…"
                 : save.kind === "sponsoring"
-                ? "Sponsor signing…"
+                ? "Saving…"
                 : save.kind === "signing"
-                ? "zkLogin signing…"
+                ? "Saving…"
                 : save.kind === "executing"
-                ? "Submitting…"
+                ? "Saving…"
                 : "Saved"}
             </button>
             <button
@@ -431,21 +401,21 @@ function UenPreferenceRow({
             <p className="text-[11px] text-red-300 break-words">Error: {save.message}</p>
           )}
           <p className="text-[10px] text-[var(--muted-soft)]">
-            Quay pays the testnet gas via the sponsor wallet — you don&apos;t need any SUI.
+            Network fees are on us — nothing to pay.
           </p>
         </div>
       )}
 
       {save.kind === "success" && !editing && (
         <p className="text-[11px] text-[var(--success)]">
-          Saved · tx{" "}
+          Saved ·{" "}
           <a
             href={txUrl(save.digest)}
             target="_blank"
             rel="noreferrer"
             className="font-mono hover:underline"
           >
-            {save.digest.slice(0, 10)}…{save.digest.slice(-6)} ↗
+            Receipt ↗
           </a>
         </p>
       )}
@@ -531,7 +501,7 @@ function YieldRoutingToggle(props: {
         newBlobId = upload.blobId;
       } catch (e) {
         const why = e instanceof WalrusUploadError ? e.message : String(e);
-        throw new Error(`Walrus upload failed: ${why}`);
+        throw new Error(`Couldn't save your settings: ${why}`);
       }
 
       // 2. Sponsor builds + signs the toggle-yield tx.
@@ -597,12 +567,12 @@ function YieldRoutingToggle(props: {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
-            Earn yield
+            Earn interest
           </p>
           <p className="text-[11px] text-[var(--muted-soft)] mt-0.5 leading-relaxed">
-            Incoming USDsui auto-deposits into Scallop in the same tx the
-            payer signs. Your balance earns the live supply rate (typically
-            3–7% APY). One tap to cash out — same wallet, same address.
+            Turn this on and your incoming balance starts earning interest
+            automatically — typically 3–7% per year. Cash out any time, same
+            account.
           </p>
         </div>
         <span
@@ -632,13 +602,7 @@ function YieldRoutingToggle(props: {
         >
           {state.kind === "idle" || state.kind === "error" || state.kind === "success"
             ? enabled ? "Turn earning off" : "Turn earning on"
-            : state.kind === "uploading"
-              ? "Uploading profile…"
-              : state.kind === "sponsoring"
-                ? "Sponsor signing…"
-                : state.kind === "signing"
-                  ? "zkLogin signing…"
-                  : "Submitting…"}
+            : "Saving…"}
         </button>
       </div>
 
@@ -648,14 +612,14 @@ function YieldRoutingToggle(props: {
       {state.kind === "success" && (
         <div className="space-y-1">
           <p className="text-[11px] text-[var(--success)]">
-            {state.summary} · tx{" "}
+            {state.summary} ·{" "}
             <a
               href={txUrl(state.digest)}
               target="_blank"
               rel="noreferrer"
               className="font-mono hover:underline"
             >
-              {state.digest.slice(0, 10)}…{state.digest.slice(-6)} ↗
+              Receipt ↗
             </a>
           </p>
         </div>
@@ -670,28 +634,25 @@ function summarizeMigration(
 ): string {
   if (migration.kind === "none") {
     return newEnabled
-      ? "Earning on. Future payments will route through Scallop."
-      : "Earning off. Future payments settle as liquid USDsui.";
+      ? "Earning on. Future payments will start earning interest."
+      : "Earning off. Future payments will settle normally.";
   }
   if (migration.kind === "mint") {
-    const usdsui = formatUsdsuiMinor(migration.total_underlying_minor);
-    return `Earning on. Migrated ${usdsui} USDsui (${migration.coin_count ?? 0} coin${
-      migration.coin_count === 1 ? "" : "s"
-    }) into Scallop.`;
+    const amount = formatUsdsuiMinor(migration.total_underlying_minor);
+    return `Earning on. Moved $${amount} into your earning balance.`;
   }
   // redeem
   const feeStr = migration.fee_underlying_minor
     ? formatUsdsuiMinor(migration.fee_underlying_minor)
     : null;
   const feeSuffix =
-    feeStr && feeStr !== "0.00" ? ` (net of ${feeStr} USDsui Quay fee)` : "";
+    feeStr && feeStr !== "0.00" ? ` (small fee of $${feeStr} deducted)` : "";
   if (migration.partial) {
     const redeemed = formatShareToUsdsui(migration.redeemable_share_minor);
-    const leftover = formatShareToUsdsui(migration.leftover_share_minor);
-    return `Earning off. Cashed out ${redeemed} USDsui${feeSuffix}; ${leftover} sUSDsui stays earning (pool low — try again later).`;
+    return `Earning off. Cashed out $${redeemed}${feeSuffix}. The rest stays earning — try again in a bit.`;
   }
-  const shares = formatShareToUsdsui(migration.total_share_minor);
-  return `Earning off. Cashed out ${shares} USDsui${feeSuffix}.`;
+  const total = formatShareToUsdsui(migration.total_share_minor);
+  return `Earning off. Cashed out $${total}${feeSuffix}.`;
 }
 
 function formatUsdsuiMinor(minor: string | undefined): string {
