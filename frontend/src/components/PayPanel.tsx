@@ -70,7 +70,7 @@ export function PayPanel({
   merchantReceiveType: SupportedReceiveToken;
   uen: string;
 }) {
-  const [sgdInput, setSgdInput] = useState("3.50");
+  const [sgdInput, setSgdInput] = useState("");
   const [memo, setMemo] = useState("");
   /**
    * Payer-side token type. Any Sui Move type the wallet holds, not constrained
@@ -113,7 +113,14 @@ export function PayPanel({
   }, [balancesQ.data, merchantReceiveType]);
 
   const payerBalance = balances.find((b) => b.coinType === payerCoinType);
-  const payerLabel = payerBalance?.symbol ?? RECEIVE_LABEL[payerCoinType as SupportedReceiveToken] ?? shortType(payerCoinType);
+  // Prefer our curated `RECEIVE_LABEL` over the raw on-chain `CoinMetadata.symbol`.
+  // Bridge publishes USDsui's symbol as "USDSUI" all-caps but the brand reads
+  // "USDsui" — so for any token in our settlement set, force the nice label.
+  // For tokens we don't curate (HAEDAL, WAL, …), fall through to the chain symbol.
+  const payerLabel =
+    RECEIVE_LABEL[payerCoinType as SupportedReceiveToken] ??
+    payerBalance?.symbol ??
+    shortType(payerCoinType);
 
   const feeds = useMemo(() => [PYTH_FEEDS.USD_SGD, PYTH_FEEDS.SUI_USD], []);
   const pricesQ = usePythPrices(feeds);
@@ -563,7 +570,9 @@ function SourceTokenPicker({
                 }`}
               >
                 <span className="flex items-center gap-2 min-w-0">
-                  <span className="text-sm font-medium">{b.symbol}</span>
+                  <span className="text-sm font-medium">
+                    {RECEIVE_LABEL[b.coinType as SupportedReceiveToken] ?? b.symbol}
+                  </span>
                   {direct && (
                     <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--success)]">
                       direct
