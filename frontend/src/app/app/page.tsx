@@ -1,17 +1,28 @@
+import { headers } from "next/headers";
 import Link from "next/link";
 
 import { QUAY, objectUrl } from "@/lib/sui-config";
 
-export default function Home() {
+async function marketingUrl(): Promise<string> {
+  const h = await headers();
+  const host = h.get("host");
+  if (!host) return "https://quay.cash";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") || host.includes(":") ? "http" : "https");
+  const hostname = host.replace(/^app\./, "");
+  return `${proto}://${hostname}`;
+}
+
+export default async function Home() {
+  const home = await marketingUrl();
   return (
     <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-md flex-col px-5 py-8">
       <header className="flex items-center justify-between glass-rise">
-        <span className="text-base font-semibold tracking-tight" aria-label="quay">
+        <a href={home} className="text-base font-semibold tracking-tight" aria-label="quay">
           quay<span className="text-[var(--accent)]">.</span>
-        </span>
+        </a>
         <span className="glass-pill">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
-          testnet
+          mainnet
         </span>
       </header>
 

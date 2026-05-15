@@ -49,8 +49,6 @@ type Lookup =
   | { kind: "not_registered" }
   | { kind: "error"; message: string };
 
-const EXAMPLE_UEN = "202412345Z";
-
 export default function ScanPage() {
   const account = useCurrentAccount();
   const sui = useSuiClient();
@@ -168,7 +166,7 @@ export default function ScanPage() {
         </Link>
         <span className="glass-pill">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
-          testnet
+          mainnet
         </span>
       </header>
 
@@ -210,7 +208,7 @@ export default function ScanPage() {
           autoComplete="off"
           spellCheck={false}
         />
-        <div className="flex items-center justify-between pt-1 border-t border-white/5">
+        <div className="pt-1 border-t border-white/5">
           {uen && !looksLikeUen(uen) ? (
             <p className="text-[11px] text-amber-300">
               Expected 8–10 alphanumeric (e.g., 202012345Z).
@@ -218,13 +216,6 @@ export default function ScanPage() {
           ) : (
             <p className="text-[11px] text-[var(--muted-soft)]">8–10 alphanumeric Singapore UEN</p>
           )}
-          <button
-            type="button"
-            onClick={() => setManualUen(EXAMPLE_UEN)}
-            className="text-[11px] text-[var(--accent)] hover:underline shrink-0"
-          >
-            try demo →
-          </button>
         </div>
       </section>
 

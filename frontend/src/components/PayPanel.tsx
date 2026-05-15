@@ -730,7 +730,7 @@ function PayResult({ state }: { state: PayState }) {
           <span className="text-[var(--success)]">
             <CheckIcon />
           </span>
-          Paid on testnet · {state.routedVia === "direct" ? "direct transfer" : "via Cetus Aggregator"}
+          Paid on mainnet · {state.routedVia === "direct" ? "direct transfer" : "via Cetus Aggregator"}
         </p>
         <p className="text-xs text-[var(--muted)]">
           <a
