@@ -364,6 +364,7 @@ export function PayPanel({
         <SourceTokenPicker
           balances={balances}
           balancesLoading={balancesQ.isLoading}
+          outputAmount={outputAmount}
           merchantReceiveType={merchantReceiveType}
           value={payerCoinType}
           onChange={setPayerCoinType}
@@ -427,6 +428,7 @@ function SourceTokenPicker({
   balances,
   balancesLoading,
   merchantReceiveType,
+  outputAmount,
   value,
   onChange,
   disabled,
@@ -434,6 +436,10 @@ function SourceTokenPicker({
   balances: UserBalance[];
   balancesLoading: boolean;
   merchantReceiveType: SupportedReceiveToken;
+  /** Exact amount the merchant will receive in `merchantReceiveType` units.
+   *  Surfaced as the cost-to-pay on the direct-routed row so the user
+   *  doesn't have to mentally convert "$0.10 SGD" into the token amount. */
+  outputAmount: bigint | null;
   value: string;
   onChange: (next: string) => void;
   disabled: boolean;
@@ -469,6 +475,22 @@ function SourceTokenPicker({
         {balances.map((b) => {
           const selected = value === b.coinType;
           const direct = b.coinType === merchantReceiveType;
+          // On the direct-routed row, the user pays exactly the merchant's
+          // outputAmount (no swap). Show "pay X" prominently so the user
+          // sees the actual token cost — not just their balance.
+          // Non-direct rows go through Cetus; the amount-in varies with
+          // route depth + slippage, so we can't pre-quote without an RPC
+          // roundtrip per token. They see just the balance + the hint
+          // below the list.
+          const directCost =
+            direct && outputAmount != null
+              ? formatBalance(outputAmount, b.decimals)
+              : null;
+          const balanceFmt = formatBalance(BigInt(b.balance), b.decimals);
+          const insufficient =
+            direct &&
+            outputAmount != null &&
+            BigInt(b.balance) < outputAmount;
           return (
             <li key={b.coinType}>
               <button
@@ -491,9 +513,24 @@ function SourceTokenPicker({
                     </span>
                   )}
                 </span>
-                <span className="text-xs tabular-nums text-[var(--muted)] shrink-0">
-                  {formatBalance(b.balance, b.decimals)}
-                </span>
+                {directCost != null ? (
+                  <span className="flex flex-col items-end text-xs tabular-nums shrink-0 leading-tight">
+                    <span
+                      className={`font-medium ${
+                        insufficient ? "text-amber-300" : "text-white"
+                      }`}
+                    >
+                      pay {directCost}
+                    </span>
+                    <span className="text-[10px] text-[var(--muted-soft)]">
+                      hold {balanceFmt}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-xs tabular-nums text-[var(--muted)] shrink-0">
+                    {balanceFmt}
+                  </span>
+                )}
               </button>
             </li>
           );
