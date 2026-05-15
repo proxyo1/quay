@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const APP_HOSTS = new Set(["app.localhost", "app.quay.xyz"]);
+const APP_HOSTS = new Set(["app.localhost", "app.quay.cash"]);
 
 function isAppHost(hostname: string): boolean {
   if (APP_HOSTS.has(hostname)) return true;
