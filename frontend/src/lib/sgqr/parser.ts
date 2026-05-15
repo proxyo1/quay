@@ -223,6 +223,71 @@ export function parsePayNowQr(input: string): { payload: SgqrPayload; payNow: Pa
   return { payload, payNow: extractPayNow(payload) };
 }
 
+/**
+ * Unified merchant-identity extractor across the two SG rails Quay
+ * supports: PayNow (SG.PAYNOW) and NETS (SG.COM.NETS). Returns the
+ * first match found in MAI iteration order.
+ *
+ * PayNow is preferred when present (its sub-tags are properly
+ * structured: 01 = proxy type, 02 = proxy value). NETS QRs cram the
+ * UEN into sub-tag 01 alongside proxy-type prefixes and
+ * version/expiry metadata, so we regex out the UEN substring.
+ *
+ * Many SG stickers carry BOTH rails — that's fine, PayNow wins. NETS-
+ * only stickers (smaller SMEs, e.g. DOT DESIGN) used to fall through
+ * the PayNow-only filter; now they resolve cleanly to a UEN.
+ */
+export function extractMerchant(
+  payload: SgqrPayload,
+): import("./types").MerchantQrInfo | null {
+  const payNow = extractPayNow(payload);
+  if (payNow) {
+    return {
+      tag: payNow.tag,
+      rail: "paynow",
+      proxyType: payNow.proxyType,
+      proxyValue: payNow.proxyValue,
+      editable: payNow.editable,
+      expiryDate: payNow.expiryDate,
+    };
+  }
+  for (const mai of payload.merchantAccountInfo) {
+    if (mai.guid.toUpperCase() !== "SG.COM.NETS") continue;
+    const sub01 = mai.fields["01"] ?? "";
+    const uen = extractUenSubstring(sub01);
+    if (!uen) return null;
+    return {
+      tag: mai.tag,
+      rail: "nets",
+      proxyType: "uen",
+      proxyValue: uen,
+    };
+  }
+  return null;
+}
+
+/**
+ * Pull a Singapore ACRA UEN out of an arbitrary string by regex.
+ *
+ * Patterns, in priority order (more-specific first to avoid being
+ * shadowed by shorter overlapping matches):
+ *   1. Foreign-company UEN: `T` + 2-digit year + 2 letters + 4 digits + check letter
+ *      (e.g. `T08LL1234X`)
+ *   2. Local-company UEN: 9 digits + check letter (e.g. `198500065G`)
+ *   3. Business UEN (sole prop / partnership pre-2009): 8 digits + check letter
+ *      (e.g. `12345678A`)
+ *
+ * Returns null when no recognizable UEN is found.
+ */
+export function extractUenSubstring(s: string): string | null {
+  return (
+    s.match(/T\d{2}[A-Z]{2}\d{4}[A-Z]/)?.[0] ??
+    s.match(/\d{9}[A-Z]/)?.[0] ??
+    s.match(/\d{8}[A-Z]/)?.[0] ??
+    null
+  );
+}
+
 /** Singapore UEN basic shape: 8–10 alphanumeric chars (varies by entity type). */
 export function looksLikeUen(s: string): boolean {
   return /^[A-Za-z0-9]{8,10}$/.test(s);
