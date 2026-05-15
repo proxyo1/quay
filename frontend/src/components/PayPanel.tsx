@@ -134,7 +134,7 @@ export function PayPanel({
     }
     // USDC_TESTNET and USDSUI are both USD-pegged stables with 6 decimals,
     // so the SGD → token math is identical: convert SGD to USD via Pyth
-    // USD/SGD, then express as 6-decimal micro-units. Done with raw
+    // FX.USD/SGD, then express as 6-decimal micro-units. Done with raw
     // price/expo math (no Number) to keep precision on large amounts.
     if (
       merchantReceiveType === COIN_TYPES.USDC_TESTNET ||
@@ -142,16 +142,24 @@ export function PayPanel({
     ) {
       const usdSgd = pricesQ.data.get(PYTH_FEEDS.USD_SGD);
       if (!usdSgd) return null;
-      // outputMicro = (sgdMinor / 100) * usdPerSgd * 1e6
-      //             = sgdMinor * usdPerSgd * 10_000
-      // Rearrange to integer math: multiply by 10^(4 + max(0, -expo)) then
-      // divide by 10^max(0, -expo).
-      const usdPerSgdScaled = BigInt(usdSgd.rawPrice);
+      // Pyth FX.USD/SGD publishes "1 USD priced in SGD", i.e. SGD per
+      // 1 USD (≈ 1.27 today). To convert SGD → USD we DIVIDE by this,
+      // not multiply. (`quoteSgdToSui` in lib/pyth/convert.ts uses the
+      // same direction — `usdPerSgd = 1 / sgdPerUsd` — keep the two
+      // code paths consistent.)
+      //
+      //   sgd     = sgdMinor / 100
+      //   usd     = sgd / sgdPerUsd
+      //   usdcMicro = usd * 1e6 = sgdMinor * 1e4 / sgdPerUsd
+      //
+      // With Pyth raw/expo: sgdPerUsd = rawPrice * 10^expo (expo < 0).
+      //   usdcMicro = sgdMinor * 1e4 * 10^(-expo) / rawPrice
+      //             = sgdMinor * 10^(4 + negExpo) / rawPrice
+      const sgdPerUsdScaled = BigInt(usdSgd.rawPrice);
       const expo = usdSgd.expo;
       const negExpo = expo < 0 ? -expo : 0;
-      const num = BigInt(sgdMinorUnits) * usdPerSgdScaled * 10_000n;
-      const denom = 10n ** BigInt(negExpo);
-      const out = num / denom;
+      const num = BigInt(sgdMinorUnits) * 10n ** BigInt(4 + negExpo);
+      const out = num / sgdPerUsdScaled;
       return out > 0n ? out : null;
     }
     return null;
