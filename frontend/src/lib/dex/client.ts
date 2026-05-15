@@ -21,7 +21,7 @@
 import { AggregatorClient, Env as CetusEnv } from "@cetusprotocol/aggregator-sdk";
 import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
 
-import { QUAY } from "@/lib/sui-config";
+import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
 
 // ─── Network ────────────────────────────────────────────────────────────
 
@@ -49,7 +49,7 @@ export interface DexClients {
 
 const cache = new WeakMap<SuiClient, Map<DexNetwork, DexClients>>();
 
-export function getDexClients(suiClient: SuiClient, network: DexNetwork = "testnet"): DexClients {
+export function getDexClients(suiClient: SuiClient, network: DexNetwork = SUI_NETWORK): DexClients {
   let perNetwork = cache.get(suiClient);
   if (!perNetwork) {
     perNetwork = new Map();
