@@ -30,9 +30,19 @@ export type DexNetwork = "testnet" | "mainnet";
 // ─── Treasury / referral ────────────────────────────────────────────────
 
 /**
- * The address that receives the Cetus Aggregator `partner` fee share.
+ * Quay's revenue / fee-recipient address. Receives the yield-routing
+ * performance fee on redeem (Phase 6) and would receive the Cetus partner
+ * fee share IF Quay were registered as a Cetus partner.
+ *
+ * IMPORTANT: this is NOT a valid Cetus `partner` argument — the Cetus
+ * Aggregator SDK expects a Cetus Partner OBJECT ID (created by the Cetus
+ * team when an app applies for partner status). Passing a wallet address
+ * makes the SDK throw "Invalid Sui address" when it tries to load the
+ * partner object on chain. Until Quay is a registered Cetus partner,
+ * leave the `partner` kwarg unset everywhere — the SDK falls back to
+ * Cetus's default partner object and swaps work.
+ *
  * V0 decision: same as the on-chain admin address (one fewer key to manage).
- * V0.5 will split this when inventory-mode MM ships.
  */
 export const QUAY_TREASURY_ADDRESS = QUAY.adminAddress;
 
@@ -64,7 +74,8 @@ export function getDexClients(suiClient: SuiClient, network: DexNetwork = SUI_NE
     env: cetusEnv,
     // `signer` is set per-tx by the wallet; leaving it on the constructor
     // unset is fine for read-only `findRouters` calls.
-    partner: QUAY_TREASURY_ADDRESS,
+    // `partner` intentionally unset — see QUAY_TREASURY_ADDRESS docstring.
+    // Cetus falls back to its default partner object so swaps work.
   });
 
   const bundle: DexClients = {
