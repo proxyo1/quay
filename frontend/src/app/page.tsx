@@ -1,20 +1,20 @@
 import Link from "next/link";
 
+import { PhoneDemo } from "@/components/PhoneDemo";
+
 const APP_URL = "https://app.quay.cash";
 
 export default function MarketingHome() {
   return (
-    <div className="relative z-10 flex min-h-screen flex-col">
+    <div className="relative z-10">
       <Header />
-
-      <main className="flex flex-col gap-32 pb-32">
+      <main className="relative">
         <Hero />
-        <VideoPlaceholder />
+        <PhoneDemo />
         <Steps />
         <TwoSided />
         <Outro />
       </main>
-
       <Footer />
     </div>
   );
@@ -22,35 +22,20 @@ export default function MarketingHome() {
 
 function Header() {
   return (
-    <header className="sticky top-0 z-20 w-full">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[180%] backdrop-blur-md"
-        style={{
-          WebkitMaskImage:
-            "linear-gradient(to bottom, black 20%, transparent 100%)",
-          maskImage:
-            "linear-gradient(to bottom, black 20%, transparent 100%)",
-        }}
-      />
-      <div className="relative mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
-        <Link href="/" className="text-lg font-semibold tracking-tight">
-          quay<span className="text-[var(--accent)]">.</span>
+    <header className="landing-header">
+      <div className="landing-header-blur" aria-hidden />
+      <div className="landing-header-inner">
+        <Link href="/" className="landing-brand">
+          quay<span style={{ color: "var(--accent)" }}>.</span>
         </Link>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/docs"
-            className="glass-btn-ghost rounded-full px-4 py-2 text-sm font-medium"
-          >
-            Documentation
+        <nav className="landing-nav">
+          <Link href="/docs" className="landing-nav-link">
+            Docs
           </Link>
-          <Link
-            href={APP_URL}
-            className="glass-btn-primary rounded-full px-5 py-2 text-sm font-medium"
-          >
-            Launch dApp
+          <Link href={APP_URL} className="glass-btn-primary landing-cta-sm">
+            Launch dApp <span aria-hidden>→</span>
           </Link>
-        </div>
+        </nav>
       </div>
     </header>
   );
@@ -58,109 +43,124 @@ function Header() {
 
 function Hero() {
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col items-center px-6 pt-20 text-center glass-rise">
-      <span className="glass-pill mb-8">
+    <section className="landing-hero">
+      <span className="glass-pill">
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
         Live beta · Singapore
       </span>
-      <h1 className="text-[clamp(44px,8vw,96px)] font-semibold leading-[1.02] tracking-tight">
+      <h1 className="landing-hero-h">
         Any QR. Any token.
         <br />
         <span className="glass-shimmer">One scan.</span>
       </h1>
-      <p className="mt-8 max-w-2xl text-lg leading-relaxed text-[var(--muted)] sm:text-xl">
+      <p className="landing-hero-sub">
         The QR rail, on-chain. Shoppers pay in any token they hold. Merchants
-        receive stable. Singapore's SGQR rail is live today — every other QR
-        rail is next.
+        receive stable. Singapore&apos;s SGQR rail is live today — every other
+        QR rail is next.
       </p>
-      <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-        <Link
-          href={APP_URL}
-          className="glass-btn-primary rounded-full px-6 py-3 text-sm font-medium"
-        >
-          Launch dApp →
+      <div className="landing-hero-ctas">
+        <Link href={APP_URL} className="glass-btn-primary">
+          Launch dApp <span aria-hidden>→</span>
         </Link>
-        <a
-          href="#how-it-works"
-          className="glass-btn-ghost rounded-full px-6 py-3 text-sm font-medium"
-        >
+        <a href="#how" className="glass-btn-ghost">
           How it works
         </a>
       </div>
-      <p className="mt-8 text-xs uppercase tracking-[0.18em] text-[var(--muted-soft)]">
-        Proudly participating in{" "}
-        <span className="text-[var(--accent)]">Sui Overflow 2026</span>
-      </p>
+      <div className="landing-hero-meta">
+        <span className="mono-label">Sui Overflow 2026</span>
+      </div>
+      <HeroPartners />
     </section>
   );
 }
 
-function VideoPlaceholder() {
+function HeroPartners() {
+  const items = [
+    { name: "Sui", src: "/partners/sui.svg", kind: "mark" as const },
+    { name: "Pyth", src: "/partners/pyth.svg", kind: "mark" as const },
+    { name: "Cetus", src: "/partners/cetus.png", kind: "raster" as const },
+    { name: "Walrus", src: "/partners/walrus.svg", kind: "wordmark" as const },
+  ];
   return (
-    <section className="mx-auto w-full max-w-5xl px-6">
-      <div className="glass-card relative aspect-video w-full overflow-hidden rounded-2xl">
-        {/* TODO: replace with <video> or embed when demo is ready */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] backdrop-blur-md">
-            <svg
-              aria-hidden
-              viewBox="0 0 24 24"
-              className="ml-1 h-6 w-6 fill-[var(--accent)]"
-            >
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </div>
-          <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted-soft)]">
-            Product video — coming soon
-          </p>
-        </div>
-      </div>
-    </section>
+    <div className="hero-partners" aria-label="Built on">
+      <span className="mono-label faint hero-partners-label">Built on</span>
+      <ul className="hero-partners-list">
+        {items.map((p) => (
+          <li key={p.name} className={`hero-partner hero-partner-${p.kind}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.src} alt={p.name} className="hero-partner-logo" />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
 function Steps() {
-  const steps = [
+  const items = [
     {
-      n: "01",
+      mark: "01",
       title: "Scan",
-      body: "Parse the EMVCo payload. Look up the UEN on chain. Live Pyth quote.",
+      lede: "Read any SGQR. Resolve the merchant on-chain. Quote it with Pyth.",
+      detail:
+        "Quay parses EMVCo-MPM QR data — SGQR today, with DuitNow, QRIS, UPI and PIX coming next. The merchant UEN resolves to an on-chain record. Pyth streams SUI/SGD in under 400ms.",
+      fixture: [
+        "qr        = SGQR (EMVCo-MPM)",
+        "uen       = 5012345678X",
+        "merchant  = Koufu Ang Mo Kio",
+        "amount    = S$14.20",
+        "price     = 1 SUI = 4.812 SGD  (Pyth)",
+      ].join("\n"),
     },
     {
-      n: "02",
+      mark: "02",
       title: "Route",
-      body: "Pick any token in your wallet. Cetus Aggregator finds the route across every Sui DEX.",
+      lede: "Pick any token. Cetus finds the best path across Sui liquidity.",
+      detail:
+        "Every swap routes through Cetus, which aggregates across Sui DEXs. Slippage is capped at your ceiling and the Pyth confidence interval guards the quote against stale or wide pricing.",
+      fixture: [
+        "pay with  = 2.951 SUI",
+        "via       = SUI → USDsui",
+        "routed by = Cetus",
+        "max slip  = 0.30%",
+        "guard     = Pyth conf < 0.30%",
+      ].join("\n"),
     },
     {
-      n: "03",
+      mark: "03",
       title: "Settle",
-      body: "Atomic swap and transfer in one transaction. On-chain receipt, audit-ready.",
+      lede: "One PTB. Atomic swap and transfer. On-chain receipt.",
+      detail:
+        "Both legs happen in a single Programmable Transaction Block — either the merchant gets paid in full or the whole transaction reverts. zkLogin sponsors gas; the receipt lives on Walrus, GST-ready for tax.",
+      fixture: [
+        "tx        = PTB · 0x9c2a…f01ad",
+        "sent      = 14.20 USDsui",
+        "recipient = Koufu Ang Mo Kio",
+        "gas       = sponsored (zkLogin)",
+        "finality  = 1.42s",
+      ].join("\n"),
     },
   ];
+
   return (
-    <section id="how-it-works" className="mx-auto w-full max-w-6xl px-6">
-      <div className="mb-12 text-center">
-        <p className="mb-3 text-sm uppercase tracking-[0.18em] text-[var(--accent)]">
-          How it works
-        </p>
-        <h2 className="text-[clamp(32px,5vw,56px)] font-semibold leading-tight tracking-tight">
-          Scan. Route. Settle.
-        </h2>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-3">
-        {steps.map((s) => (
-          <div
-            key={s.n}
-            className="glass-card flex flex-col gap-3 rounded-2xl p-6"
-          >
-            <span className="font-mono text-xs text-[var(--muted-soft)]">
-              {s.n}
-            </span>
-            <h3 className="text-xl font-semibold tracking-tight">{s.title}</h3>
-            <p className="text-sm leading-relaxed text-[var(--muted)]">
-              {s.body}
-            </p>
-          </div>
+    <section id="how" className="steps-section">
+      <SectionMark mark="01" label="How it works" />
+      <h2 className="section-h">
+        Scan. Route. Settle.
+        <br />
+        <span className="section-h-mute">A single on-chain transaction.</span>
+      </h2>
+      <div className="steps-grid">
+        {items.map((it) => (
+          <article key={it.mark} className="step glass-card">
+            <header className="step-head">
+              <span className="step-mark">{it.mark}</span>
+              <h3 className="step-title">{it.title}</h3>
+            </header>
+            <p className="step-lede">{it.lede}</p>
+            <p className="step-detail">{it.detail}</p>
+            <pre className="step-fixture">{it.fixture}</pre>
+          </article>
         ))}
       </div>
     </section>
@@ -169,76 +169,167 @@ function Steps() {
 
 function TwoSided() {
   return (
-    <section className="mx-auto w-full max-w-6xl px-6">
-      <div className="mb-12 text-center">
-        <h2 className="text-[clamp(32px,5vw,56px)] font-semibold leading-tight tracking-tight">
-          Crypto-native at the till.
-          <br />
-          <span className="text-[var(--muted)]">Fiat-stable in the books.</span>
-        </h2>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="glass-card flex flex-col gap-4 rounded-2xl p-7">
-          <p className="text-xs uppercase tracking-[0.18em] text-[var(--accent)]">
-            For shoppers
-          </p>
-          <h3 className="text-2xl font-semibold tracking-tight">
-            Spend what you already hold.
-          </h3>
-          <ul className="space-y-2 text-sm text-[var(--muted)]">
-            <li>— Pay in any liquid Sui token.</li>
-            <li>— No off-ramp. No KYC. No card.</li>
-            <li>— One tax event, not two.</li>
-            <li>— Non-custodial throughout.</li>
-          </ul>
-        </div>
-        <div className="glass-card flex flex-col gap-4 rounded-2xl p-7">
-          <p className="text-xs uppercase tracking-[0.18em] text-[var(--accent)]">
-            For merchants
-          </p>
-          <h3 className="text-2xl font-semibold tracking-tight">
-            Receive stable. Custody yourself.
-          </h3>
-          <ul className="space-y-2 text-sm text-[var(--muted)]">
-            <li>— Settle in USDsui. Switch any time.</li>
-            <li>— Onboard in 90 seconds with Google.</li>
-            <li>— No PCI. No chargebacks. No acquirer.</li>
-            <li>— On-chain receipts, GST-ready.</li>
-          </ul>
-        </div>
+    <section className="twosided-section">
+      <SectionMark mark="03" label="Two sides, one rail" />
+      <h2 className="section-h">
+        Pay in any token.
+        <br />
+        <span className="section-h-mute">Settle in stable.</span>
+      </h2>
+
+      <div className="twosided-grid">
+        <article className="side glass-card">
+          <header className="side-head">
+            <span className="mono-label" style={{ color: "var(--accent)" }}>
+              For shoppers
+            </span>
+            <span className="side-num">01</span>
+          </header>
+          <h3 className="side-title">Spend what you already hold.</h3>
+          <dl className="spec">
+            <Spec k="Tokens" v="Any liquid Sui asset" />
+            <Spec k="Off-ramp" v="None. Pay direct." />
+            <Spec k="Custody" v="Non-custodial throughout" />
+            <Spec k="Tax" v="One event, not two" />
+            <Spec k="KYC" v="Not required" />
+          </dl>
+        </article>
+
+        <article className="side glass-card">
+          <header className="side-head">
+            <span className="mono-label" style={{ color: "var(--accent)" }}>
+              For merchants
+            </span>
+            <span className="side-num">02</span>
+          </header>
+          <h3 className="side-title">Receive stable. Custody yourself.</h3>
+          <dl className="spec">
+            <Spec k="Settlement" v="USDsui · switchable" />
+            <Spec k="Yield" v="Idle USDsui earns automatically" />
+            <Spec k="Onboard" v="90s via Google · zkLogin" />
+            <Spec k="PCI" v="N/A — non-custodial" />
+            <Spec k="Chargebacks" v="Impossible at settlement" />
+            <Spec k="Receipts" v="On-chain · GST-ready" />
+          </dl>
+        </article>
       </div>
     </section>
   );
 }
 
+function Spec({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="spec-row">
+      <dt className="spec-k mono-label">{k}</dt>
+      <dd className="spec-v">{v}</dd>
+    </div>
+  );
+}
+
 function Outro() {
   return (
-    <section className="mx-auto w-full max-w-4xl px-6 text-center">
-      <h2 className="text-[clamp(28px,4.5vw,48px)] font-semibold leading-tight tracking-tight">
-        SGQR today.
+    <section className="outro-section">
+      <div className="outro-glow" aria-hidden />
+      <SectionMark mark="04" label="Roadmap" centered />
+      <h2 className="outro-h">
+        Live in Singapore.
         <br />
-        <span className="text-[var(--accent)]">Any QR rail tomorrow.</span>
+        <span style={{ color: "var(--accent)" }}>Always shipping.</span>
       </h2>
-      <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-[var(--muted)]">
-        DuitNow, QRIS, UPI, PIX — if a business prints a QR, Quay can wire it.
-      </p>
-      <div className="mt-10">
-        <Link
-          href={APP_URL}
-          className="glass-btn-primary rounded-full px-6 py-3 text-sm font-medium"
-        >
-          Launch dApp →
+      <Roadmap />
+      <div className="outro-cta">
+        <Link href={APP_URL} className="glass-btn-primary">
+          Launch dApp <span aria-hidden>→</span>
+        </Link>
+        <Link href="/docs" className="glass-btn-ghost">
+          Read the docs
         </Link>
       </div>
     </section>
   );
 }
 
+type MilestoneState = "live" | "now" | "planned";
+type Milestone = { num: string; name: string; state: MilestoneState };
+
+function Roadmap() {
+  const milestones: Milestone[] = [
+    { num: "01", name: "SGQR pay-in", state: "live" },
+    { num: "02", name: "Merchant yield", state: "live" },
+    { num: "03", name: "UEN verification", state: "now" },
+    { num: "04", name: "Fiat off-ramp", state: "planned" },
+    { num: "05", name: "Switchable settlement", state: "planned" },
+    { num: "06", name: "Regional expansion", state: "planned" },
+  ];
+  const total = milestones.length;
+  // The accent "completed" fill on the track extends to the last live OR now stop.
+  const activeIndex = milestones
+    .map((m) => m.state === "live" || m.state === "now")
+    .lastIndexOf(true);
+  const style = {
+    ["--roadmap-total" as string]: total,
+    ["--roadmap-live" as string]: activeIndex >= 0 ? activeIndex + 0.5 : 0,
+  } as React.CSSProperties;
+  return (
+    <div className="roadmap" aria-label="Quay product roadmap" style={style}>
+      <div className="roadmap-track" aria-hidden />
+      <div className="roadmap-track-fill" aria-hidden />
+      {milestones.map((m) => (
+        <div key={m.num} className={`roadmap-stop is-${m.state}`}>
+          <span className="roadmap-tag mono-label">
+            {m.state === "live" ? "Live" : m.state === "now" ? "Now" : "Soon"}
+          </span>
+          <span className="roadmap-dot" />
+          <span className="roadmap-name">{m.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Footer() {
   return (
-    <footer className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-8 text-xs text-[var(--muted-soft)]">
-      <span>© quay</span>
-      <span>Sui Overflow 2026</span>
+    <footer className="landing-footer">
+      <div className="landing-footer-rule" />
+      <div className="landing-footer-row">
+        <div className="landing-footer-brand">
+          <span className="landing-brand">
+            quay<span style={{ color: "var(--accent)" }}>.</span>
+          </span>
+          <span className="mono-label faint">The QR rail, on-chain</span>
+        </div>
+        <div className="landing-footer-cols">
+          <div>
+            <span className="mono-label faint">Product</span>
+            <Link href={APP_URL}>App</Link>
+            <Link href="/docs">Docs</Link>
+            <a href="#how">How it works</a>
+          </div>
+        </div>
+      </div>
+      <div className="landing-footer-bottom">
+        <span className="mono-label faint">© quay · 2026</span>
+        <span className="mono-label faint">Sui Overflow 2026</span>
+      </div>
     </footer>
   );
 }
+
+function SectionMark({
+  mark,
+  label,
+  centered,
+}: {
+  mark: string;
+  label: string;
+  centered?: boolean;
+}) {
+  return (
+    <div className={`section-mark ${centered ? "is-center" : ""}`}>
+      <span className="section-mark-num">{mark}</span>
+      <span className="section-mark-rule" />
+      <span className="section-mark-label mono-label">{label}</span>
+    </div>
+  );
+}
+

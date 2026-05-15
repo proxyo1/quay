@@ -252,7 +252,7 @@ function UnknownCard({ uen }: { uen: string }) {
         {" "}hasn&apos;t been registered.
       </p>
       <p className="relative z-10 text-xs text-[var(--muted-soft)] mt-2">
-        Anyone can claim a UEN here on testnet — verification doesn&apos;t imply
+        Anyone can claim a UEN here on mainnet — verification doesn&apos;t imply
         endorsement.
       </p>
     </section>
