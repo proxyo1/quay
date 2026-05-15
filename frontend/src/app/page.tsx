@@ -80,6 +80,7 @@ function HeroPartners() {
     { name: "Pyth", src: "/partners/pyth.svg", kind: "mark" as const },
     { name: "Cetus", src: "/partners/cetus.png", kind: "raster" as const },
     { name: "Walrus", src: "/partners/walrus.svg", kind: "wordmark" as const },
+    { name: "Scallop", src: "/partners/scallop.png", kind: "raster" as const },
   ];
   return (
     <div className="hero-partners" aria-label="Built on">
