@@ -37,14 +37,15 @@ interface NormalizedReceipt {
 }
 
 export default function TerminalPage() {
-  const { session, hydrated, signOut } = useZkLoginSession();
+  const { session, hydrated, expired, signOut } = useZkLoginSession();
   const router = useRouter();
 
   useEffect(() => {
     if (hydrated && !session) {
-      router.replace("/merchant/login?next=/merchant/terminal");
+      const expiredParam = expired ? "&expired=1" : "";
+      router.replace(`/merchant/login?next=/merchant/terminal${expiredParam}`);
     }
-  }, [hydrated, session, router]);
+  }, [hydrated, session, expired, router]);
 
   if (hydrated && !session) {
     return (

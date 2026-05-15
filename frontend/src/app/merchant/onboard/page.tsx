@@ -42,7 +42,7 @@ type State =
   | { kind: "error"; message: string };
 
 export default function OnboardPage() {
-  const { session, hydrated, signOut } = useZkLoginSession();
+  const { session, hydrated, expired, signOut } = useZkLoginSession();
   const router = useRouter();
   const sui = useSuiClient();
 
@@ -58,9 +58,10 @@ export default function OnboardPage() {
 
   useEffect(() => {
     if (hydrated && !session) {
-      router.replace("/merchant/login?next=/merchant/onboard");
+      const expiredParam = expired ? "&expired=1" : "";
+      router.replace(`/merchant/login?next=/merchant/onboard${expiredParam}`);
     }
-  }, [hydrated, session, router]);
+  }, [hydrated, session, expired, router]);
 
   if (hydrated && !session) {
     return (

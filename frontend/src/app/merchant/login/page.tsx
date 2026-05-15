@@ -18,6 +18,7 @@ function LoginInner() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") ?? "/merchant/onboard";
+  const wasExpired = search.get("expired") === "1";
 
   const { session } = useZkLoginSession();
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +57,19 @@ function LoginInner() {
           Enoki binds it to your Sui wallet with a Groth16 zk proof.
         </p>
       </header>
+
+      {wasExpired && (
+        <section className="glass-card-warning rounded-2xl p-4 space-y-1">
+          <p className="text-sm font-medium text-amber-100">
+            Your session expired
+          </p>
+          <p className="text-xs text-amber-200/80 leading-relaxed">
+            zkLogin proofs are valid for a fixed window of Sui epochs to keep
+            your wallet safe. Sign in with Google again to mint a fresh one —
+            same address, no key to back up.
+          </p>
+        </section>
+      )}
 
       <section className="glass-card rounded-2xl p-6 space-y-4">
         {!configured ? (

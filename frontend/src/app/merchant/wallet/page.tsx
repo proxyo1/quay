@@ -26,14 +26,15 @@ function receiveLabel(token: SupportedReceiveToken): string {
 }
 
 export default function WalletPage() {
-  const { session, hydrated, signOut } = useZkLoginSession();
+  const { session, hydrated, expired, signOut } = useZkLoginSession();
   const router = useRouter();
 
   useEffect(() => {
     if (hydrated && !session) {
-      router.replace("/merchant/login?next=/merchant/wallet");
+      const expiredParam = expired ? "&expired=1" : "";
+      router.replace(`/merchant/login?next=/merchant/wallet${expiredParam}`);
     }
-  }, [hydrated, session, router]);
+  }, [hydrated, session, expired, router]);
 
   if (hydrated && !session) {
     return (
