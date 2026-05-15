@@ -83,7 +83,13 @@ export function PayPanel({
   const sui = useSuiClient();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
-  const dexClients = useMemo(() => getDexClients(sui), [sui]);
+  // Pass the connected wallet address as the Cetus signer. Without it the
+  // SDK builds swap PTBs with recipient = "" and BCS throws "Invalid Sui
+  // address" at sign time. Re-memoized when the user reconnects.
+  const dexClients = useMemo(
+    () => getDexClients(sui, undefined, account?.address),
+    [sui, account?.address],
+  );
   const balancesQ = useUserBalances(account?.address);
   const balances = balancesQ.data ?? [];
 

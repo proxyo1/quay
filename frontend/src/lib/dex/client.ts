@@ -57,23 +57,41 @@ export interface DexClients {
 
 // ─── Factory ────────────────────────────────────────────────────────────
 
-const cache = new WeakMap<SuiClient, Map<DexNetwork, DexClients>>();
+// Cache keyed by `${network}:${signer ?? ""}` so re-renders with the same
+// connected wallet reuse the same AggregatorClient, but switching wallets
+// or disconnecting produces a fresh client with the right signer.
+const cache = new WeakMap<SuiClient, Map<string, DexClients>>();
 
-export function getDexClients(suiClient: SuiClient, network: DexNetwork = SUI_NETWORK): DexClients {
-  let perNetwork = cache.get(suiClient);
-  if (!perNetwork) {
-    perNetwork = new Map();
-    cache.set(suiClient, perNetwork);
+/**
+ * `signer` is the connected wallet's address. The Cetus aggregator SDK uses
+ * it INTERNALLY at swap-build time as the recipient for any leftover input
+ * coin balance (e.g. positive slippage) and as the tx sender hint. If
+ * omitted, the SDK defaults it to `""` (empty string) and the BCS Address
+ * validator throws "Invalid Sui address" when the swap PTB is built. So
+ * any call site that constructs a swap MUST pass `signer` here.
+ *
+ * For read-only `findRouters` (quote-only) calls, `signer` can be undefined.
+ */
+export function getDexClients(
+  suiClient: SuiClient,
+  network: DexNetwork = SUI_NETWORK,
+  signer?: string,
+): DexClients {
+  let perKey = cache.get(suiClient);
+  if (!perKey) {
+    perKey = new Map();
+    cache.set(suiClient, perKey);
   }
-  const cached = perNetwork.get(network);
+  const key = `${network}:${signer ?? ""}`;
+  const cached = perKey.get(key);
   if (cached) return cached;
 
   const cetusEnv = network === "mainnet" ? CetusEnv.Mainnet : CetusEnv.Testnet;
   const cetusAggregator = new AggregatorClient({
     client: suiClient,
     env: cetusEnv,
-    // `signer` is set per-tx by the wallet; leaving it on the constructor
-    // unset is fine for read-only `findRouters` calls.
+    // Without this the SDK uses "" and swap PTBs blow up on BCS address validation.
+    signer,
     // `partner` intentionally unset — see QUAY_TREASURY_ADDRESS docstring.
     // Cetus falls back to its default partner object so swaps work.
   });
@@ -83,6 +101,6 @@ export function getDexClients(suiClient: SuiClient, network: DexNetwork = SUI_NE
     network,
     cetusAggregator,
   };
-  perNetwork.set(network, bundle);
+  perKey.set(key, bundle);
   return bundle;
 }
