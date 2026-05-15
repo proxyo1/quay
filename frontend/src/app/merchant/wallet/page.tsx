@@ -547,8 +547,16 @@ function YieldRoutingToggle(props: {
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(err.error ?? `sponsor HTTP ${res.status}`);
+        const err = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          cause?: string;
+        };
+        // Surface both the top-line error AND the operator-actionable
+        // `cause` (e.g. "Supabase not configured on the server") so the
+        // user/dev can tell why a 503 fired instead of staring at an
+        // opaque "feature disabled" string.
+        const base = err.error ?? `sponsor HTTP ${res.status}`;
+        throw new Error(err.cause ? `${base} — ${err.cause}` : base);
       }
       const sp = (await res.json()) as {
         tx: { tx_bytes_b64: string; sponsor_signature: string };
