@@ -26,6 +26,7 @@ import {
   getYieldFeeConfig,
   readCostBasis,
 } from "@/lib/server/yield-cost-basis";
+import { SUI_NETWORK } from "@/lib/sui-config";
 
 export const runtime = "nodejs";
 
@@ -53,7 +54,7 @@ const LOW_BALANCE_FLOOR_MIST = 40_000_000n;
 const MAX_COINS_PER_PTB = 50;
 const FEATURE_FLAG_NAME = "yield_routing.scallop.usdsui";
 
-const sui = new SuiClient({ network: "testnet", url: getFullnodeUrl("testnet") });
+const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
 
 type Direction = "to_cash" | "to_earning";
 

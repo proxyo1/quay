@@ -17,7 +17,7 @@ import {
 } from "@/lib/server/sponsor";
 import { looksLikeUen } from "@/lib/sgqr";
 import { deriveUenHash } from "@/lib/quay";
-import { QUAY } from "@/lib/sui-config";
+import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
 import {
   uploadBlob,
   WalrusRateLimitError,
@@ -59,7 +59,7 @@ const ClaimMessage = bcs.struct("ClaimMessage", {
   evidence_hash: bcs.vector(bcs.u8()),
 });
 
-const sui = new SuiClient({ network: "testnet", url: getFullnodeUrl("testnet") });
+const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
 
 interface SponsorRegisterRequest {
   uen: string;
