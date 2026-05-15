@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/scallop-monitor",
+      "schedule": "0 6 * * 1"
+    },
+    {
+      "path": "/api/cron/scallop-cost-basis-indexer",
+      "schedule": "0 5 * * *"
+    }
+  ]
+}

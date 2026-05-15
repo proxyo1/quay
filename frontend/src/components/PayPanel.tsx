@@ -48,11 +48,13 @@ type PayState =
 const RECEIVE_DECIMALS: Record<SupportedReceiveToken, number> = {
   [COIN_TYPES.SUI]: 9,
   [COIN_TYPES.USDC_TESTNET]: 6,
+  [COIN_TYPES.USDSUI]: 6,
 };
 
 const RECEIVE_LABEL: Record<SupportedReceiveToken, string> = {
   [COIN_TYPES.SUI]: "SUI",
   [COIN_TYPES.USDC_TESTNET]: "USDC",
+  [COIN_TYPES.USDSUI]: "USDsui",
 };
 
 export function PayPanel({
