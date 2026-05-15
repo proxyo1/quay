@@ -418,6 +418,7 @@ function MerchantLogo({ blobId, alt }: { blobId: string | null; alt: string }) {
 
 function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolean }) {
   const tokenLabel = shortTokenLabel(r.tokenType);
+  const yieldRouted = isYieldRouted(r.tokenType);
   return (
     <li
       className={`rounded-2xl p-4 ${
@@ -435,6 +436,14 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
             <p className="text-lg font-semibold tabular-nums text-white">
               ${(r.sgdMinorUnits / 100).toFixed(2)}{" "}
               <span className="text-xs text-[var(--muted-soft)] font-normal">SGD</span>
+              {yieldRouted && (
+                <span
+                  className="ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-[var(--accent)] align-middle"
+                  title="Yield-routed: deposited to Scallop in the same tx the payer signed"
+                >
+                  <span aria-hidden>↑</span> earning
+                </span>
+              )}
             </p>
             <span className="text-[11px] text-[var(--muted-soft)] tabular-nums shrink-0">
               {formatRelativeTime(r.timestampMs)}
@@ -494,7 +503,24 @@ function normalizeEvent(ev: {
 
 function shortTokenLabel(typeName: string): string {
   const parts = typeName.split("::");
-  return parts.at(-1) ?? typeName;
+  const tail = parts.at(-1) ?? typeName;
+  // Scallop sCoins ship as `SCALLOP_<UNDERLYING>` — display as the
+  // s-prefixed shorthand merchants are used to seeing in Sui wallets.
+  if (tail.startsWith("SCALLOP_")) {
+    const underlying = tail.slice("SCALLOP_".length).toLowerCase();
+    return `s${underlying === "usdsui" ? "USDsui" : underlying.toUpperCase()}`;
+  }
+  return tail;
+}
+
+/**
+ * True when a receipt's `token_type` is Scallop's sCoin wrapper — the
+ * canonical signal that the payment was yield-routed via the Phase 6
+ * supply-side integration. The UI surfaces a small earning indicator
+ * so merchants visually distinguish yield-routed vs liquid receipts.
+ */
+function isYieldRouted(typeName: string): boolean {
+  return typeName.includes("::scallop_usdsui::SCALLOP_USDSUI");
 }
 
 /**
@@ -509,6 +535,10 @@ const TERMINAL_DECIMALS: Record<string, number> = {
   USDC: 6,
   USDsui: 6,
   USDT: 6,
+  // Phase 6: Scallop sCoin wrapper is 1:1 with its underlying USDsui (6 decimals).
+  // The displayed amount is the SHARE balance — to recover the underlying USDsui
+  // amount the indexer joins on the same-tx MintEvent (see indexer.ts).
+  sUSDsui: 6,
 };
 
 function formatTokenAmount(amount: bigint, symbol: string): string {

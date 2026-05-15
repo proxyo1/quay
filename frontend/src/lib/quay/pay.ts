@@ -7,6 +7,11 @@ import {
   minAcceptableOut,
   quoteRoute,
 } from "@/lib/dex/aggregator";
+import {
+  USDSUI,
+  buildMintWithSCoinWrap,
+  type ScallopAsset,
+} from "@/lib/quay/scallop";
 import { QUAY } from "@/lib/sui-config";
 
 export const COIN_TYPES = {
@@ -18,6 +23,13 @@ export const COIN_TYPES = {
    * once liquidity is wired (Day 5.5+).
    */
   USDC_TESTNET: "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+  /**
+   * USDsui — Bridge/Stripe's Sui-native stablecoin. Mainnet-only; the
+   * mainnet receive token. Same address constant also lives in scallop.ts
+   * (`USDSUI.coinType`) — keep both in sync if Bridge ever republishes.
+   */
+  USDSUI:
+    "0x44f838219cf67b058f3b37907b655f226153c18e33dfcd0da559a844fea9b1c1::usdsui::USDSUI",
 } as const;
 
 export type CoinTypeKey = keyof typeof COIN_TYPES;
@@ -140,6 +152,31 @@ export function encodeQuoteMetadata(meta: Record<string, unknown>): Uint8Array {
  */
 export type PayerCoinSource = "gas" | { readonly objectId: string };
 
+/**
+ * Caller-supplied yield-routing instruction (Phase 6).
+ *
+ * `buildPayAnyTokenPtb` does not perform its own health check or profile
+ * read — it expects the caller (typically `/scan`) to have already verified:
+ *   1. Merchant's profile has `yield_routing.enabled === true`
+ *   2. `merchantReceiveType` is exactly `USDSUI.coinType`
+ *   3. `preflightScallopHealthy()` returned true within the last 30s
+ *   4. The Scallop call package was resolved (override via `callPackage`
+ *      if the cron observed an upgrade since last build)
+ *
+ * If all four hold, set `enabled: true` and the PTB will insert
+ * `mint_s_coin` after the aggregator/split step, settling to the merchant
+ * as `Coin<SCALLOP_USDSUI>` (the wrapped, wallet-friendly sCoin).
+ */
+export interface YieldRoutingHint {
+  enabled: boolean;
+  /** Override Scallop's current callable package id (rotates per upgrade). */
+  callPackage?: string;
+  /** Override the sCoin converter package id (rotates per upgrade). */
+  sCoinConverterPackage?: string;
+  /** Asset config; defaults to `USDSUI` from scallop.ts. */
+  asset?: ScallopAsset;
+}
+
 export interface BuildPayAnyTokenInputs {
   /** Aggregator client from `getDexClients(suiClient).cetusAggregator`. */
   cetus: AggregatorClient;
@@ -166,6 +203,13 @@ export interface BuildPayAnyTokenInputs {
   quoteMetadata?: Uint8Array;
   /** Slippage tolerance in basis points (default 100 = 1%). */
   slippageBps?: number;
+  /**
+   * Optional yield-routing instruction. When `enabled: true` and the
+   * `merchantReceiveType` matches the asset's underlying coin type, the
+   * PTB mints into Scallop and the merchant receives the sCoin wrapper.
+   * See `YieldRoutingHint` for the full caller contract.
+   */
+  yieldRouting?: YieldRoutingHint;
 }
 
 export interface BuildPayAnyTokenResult {
@@ -178,6 +222,14 @@ export interface BuildPayAnyTokenResult {
   minOutAcceptable: bigint;
   /** Venues the aggregator traversed (UI breadcrumb). Empty for "direct". */
   venues: string[];
+  /**
+   * True when the PTB includes the Scallop mint + sCoin wrap step.
+   * Payment lands on the merchant as `Coin<SCALLOP_USDSUI>` instead of
+   * `Coin<USDsui>`. The PaymentReceipt's `token_type` will reflect the
+   * sCoin type; the indexer joins with Scallop's `MintEvent` on tx digest
+   * to recover the underlying USDsui amount.
+   */
+  yieldRouted: boolean;
 }
 
 /**
@@ -256,6 +308,31 @@ export async function buildPayAnyTokenPtb(
     }
   }
 
+  // Yield-routing branch. The caller already vetted the four pre-conditions
+  // (see YieldRoutingHint), so we just check the type match here and apply.
+  // The merchant ends up holding `Coin<SCALLOP_USDSUI>` instead of
+  // `Coin<USDsui>`, but the `payments::pay` Move call is type-generic so
+  // both shapes go through the same code path on-chain.
+  const yieldAsset = input.yieldRouting?.asset ?? USDSUI;
+  const yieldRouted =
+    input.yieldRouting?.enabled === true &&
+    input.merchantReceiveType === yieldAsset.coinType;
+
+  let finalPayCoin = payCoin;
+  let finalReceiveType = input.merchantReceiveType;
+  if (yieldRouted) {
+    // `payCoin` is `Coin<USDsui>` at this point. Mint into Scallop, wrap
+    // into the sCoin treasury — same shape every recent mainnet supply tx
+    // uses (verified Phase 1).
+    finalPayCoin = buildMintWithSCoinWrap(tx, {
+      coin: payCoin,
+      asset: yieldAsset,
+      callPackage: input.yieldRouting?.callPackage,
+      sCoinConverterPackage: input.yieldRouting?.sCoinConverterPackage,
+    });
+    finalReceiveType = yieldAsset.sCoinType;
+  }
+
   const memoArg = input.memo
     ? tx.pure.option("vector<u8>", Array.from(new TextEncoder().encode(input.memo)))
     : tx.pure.option("vector<u8>", null);
@@ -266,11 +343,11 @@ export async function buildPayAnyTokenPtb(
 
   tx.moveCall({
     target: `${QUAY.packageId}::payments::pay`,
-    typeArguments: [input.merchantReceiveType],
+    typeArguments: [finalReceiveType],
     arguments: [
       tx.object(QUAY.registryId),
       tx.pure.vector("u8", Array.from(new TextEncoder().encode(input.uen))),
-      payCoin,
+      finalPayCoin,
       memoArg,
       tx.pure.u64(BigInt(input.sgdMinorUnits)),
       quoteArg,
@@ -278,5 +355,12 @@ export async function buildPayAnyTokenPtb(
     ],
   });
 
-  return { tx, routedVia, expectedInputAmount, minOutAcceptable, venues };
+  return {
+    tx,
+    routedVia,
+    expectedInputAmount,
+    minOutAcceptable,
+    venues,
+    yieldRouted,
+  };
 }

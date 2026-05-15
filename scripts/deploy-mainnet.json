@@ -1,0 +1,21 @@
+{
+  "network": "mainnet",
+  "chain_id": 1,
+  "deployed_at_ms": 1778830509125,
+  "deployed_at": "2026-05-15T13:55:09.125Z",
+  "publish_tx_digest": "Gm74skAEfL5mocQ2q8TWWSmP7MbcvJVyt9Ui7nFZmT2b",
+  "set_issuer_pubkey_tx_digest": null,
+  "package_id": "0xdf4f409344e5e90cb284a9b62b52504817afbecb432dce59cb1bbf08f69296dd",
+  "merchant_registry_id": "0x50e3d1a6520b052ee06636808715a336b3d0c9a7cf3e5a7632031629939ddbf1",
+  "admin_cap_id": "0xa5c389b37aa21a5d9e033dd76a083319de43f8b8b7147f140050cc3162027e7e",
+  "upgrade_cap_id": "0xdb6cdc4b396391e8eecde81c94bb36f655439138d64fefe44f240d300268d67d",
+  "admin_address": "0xa91644aa47914b16b73258c1de984e3296ef15e40a838ffd3b8fa533b27def2f",
+  "issuer_pubkey_hex": "5d44735e96af7d30d245936458efc03f5fdc4ba042046848afc4ad9dd8d115c8",
+  "modules": ["payments"],
+  "publish_gas_mist": 34522680,
+  "notes": [
+    "First mainnet publish. Move source is the V4 testnet code (adds update_merchant_metadata).",
+    "Issuer pubkey + chain_id=1 set immediately after publish — registry is live.",
+    "Yield-routing feature flag (yield_routing.scallop.usdsui) is still off in Supabase; flip to enabled=true after Vercel env vars are configured."
+  ]
+}

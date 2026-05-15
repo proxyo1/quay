@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { fetchMerchantProfile, getEntriesTableId } from "@/lib/quay";
+import { USDSUI } from "@/lib/quay/scallop";
 import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
 import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
 import {
@@ -15,6 +16,7 @@ import {
   LEGACY_RECEIVE_TOKEN,
   RECEIVE_TOKEN_OPTIONS,
   type SupportedReceiveToken,
+  type YieldRouting,
 } from "@/lib/walrus/profileSchema";
 import { useZkLoginSession, zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
 
@@ -446,8 +448,258 @@ function UenPreferenceRow({
           </a>
         </p>
       )}
+
+      {/*
+        Yield-routing toggle (Phase 6). Only renders when the merchant has
+        chosen USDsui as their receive token — yield-routing currently only
+        supports USDsui on mainnet. On testnet, USDsui isn't in
+        SUPPORTED_RECEIVE_TOKENS so this block stays dormant.
+       */}
+      {!editing && current === USDSUI.coinType && (
+        <YieldRoutingToggle
+          uen={row.uen}
+          session={session}
+          logoBlobId={logoBlobId}
+          merchantName={merchantName}
+          receiveToken={current}
+          currentYieldRouting={profileQ.data?.yieldRouting ?? null}
+          onSaved={onSaved}
+        />
+      )}
     </li>
   );
+}
+
+// ─── Yield routing toggle ───────────────────────────────────────────────
+
+type YieldToggleState =
+  | { kind: "idle" }
+  | { kind: "uploading" }
+  | { kind: "sponsoring" }
+  | { kind: "signing" }
+  | { kind: "executing" }
+  | { kind: "success"; digest: string; summary: string }
+  | { kind: "error"; message: string };
+
+interface YieldRoutingMigration {
+  kind: "none" | "mint" | "redeem";
+  coin_count?: number;
+  total_underlying_minor?: string;
+  total_share_minor?: string;
+  redeemable_share_minor?: string;
+  leftover_share_minor?: string;
+  partial?: boolean;
+  reason?: string;
+  fee_underlying_minor?: string;
+  cost_basis_underlying_minor?: string;
+  insufficient_cost_basis?: boolean;
+  fee_recipient?: string;
+}
+
+function YieldRoutingToggle(props: {
+  uen: string;
+  session: ZkLoginSession;
+  logoBlobId: string | null;
+  merchantName: string | undefined;
+  receiveToken: SupportedReceiveToken;
+  currentYieldRouting: YieldRouting | null;
+  onSaved: () => void;
+}) {
+  const sui = useSuiClient();
+  const [state, setState] = useState<YieldToggleState>({ kind: "idle" });
+  const enabled = props.currentYieldRouting?.enabled === true;
+  const inFlight =
+    state.kind !== "idle" &&
+    state.kind !== "error" &&
+    state.kind !== "success";
+
+  async function handleToggle() {
+    const newEnabled = !enabled;
+    setState({ kind: "uploading" });
+    try {
+      // 1. Build the new profile blob — preserve everything, flip yield_routing.
+      const newBytes = buildMerchantProfileBytes({
+        logoBlobId: props.logoBlobId,
+        preferredReceiveToken: props.receiveToken,
+        merchantName: props.merchantName,
+        yieldRouting: { enabled: newEnabled, protocol: "scallop", asset: "usdsui" },
+      });
+      let newBlobId: string;
+      try {
+        const upload = await uploadBlob(newBytes);
+        newBlobId = upload.blobId;
+      } catch (e) {
+        const why = e instanceof WalrusUploadError ? e.message : String(e);
+        throw new Error(`Walrus upload failed: ${why}`);
+      }
+
+      // 2. Sponsor builds + signs the toggle-yield tx.
+      setState({ kind: "sponsoring" });
+      const res = await fetch("/api/sponsor/toggle-yield", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          uen: props.uen,
+          owner: props.session.address,
+          new_metadata_blob_id: newBlobId,
+          new_yield_enabled: newEnabled,
+          idempotency_key: `${props.uen}:${newEnabled ? "on" : "off"}:${Date.now()}`,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error ?? `sponsor HTTP ${res.status}`);
+      }
+      const sp = (await res.json()) as {
+        tx: { tx_bytes_b64: string; sponsor_signature: string };
+        migration: YieldRoutingMigration;
+      };
+
+      // 3. zkLogin sign as the merchant.
+      setState({ kind: "signing" });
+      const txBytes = base64ToBytes(sp.tx.tx_bytes_b64);
+      const senderSig = await zkLoginSign(props.session, txBytes);
+
+      // 4. Submit dual-signed.
+      setState({ kind: "executing" });
+      const result = await sui.executeTransactionBlock({
+        transactionBlock: txBytes,
+        signature: [senderSig, sp.tx.sponsor_signature],
+        options: { showEffects: true },
+      });
+      const status = result.effects?.status?.status;
+      if (status !== "success") {
+        throw new Error(result.effects?.status?.error ?? "tx failed");
+      }
+      await sui.waitForTransaction({ digest: result.digest });
+      setState({
+        kind: "success",
+        digest: result.digest,
+        summary: summarizeMigration(sp.migration, newEnabled),
+      });
+      props.onSaved();
+    } catch (e) {
+      setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] backdrop-blur-md p-3 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
+            Earn yield
+          </p>
+          <p className="text-[11px] text-[var(--muted-soft)] mt-0.5 leading-relaxed">
+            Incoming USDsui auto-deposits into Scallop in the same tx the
+            payer signs. Your balance earns the live supply rate (typically
+            3–7% APY). One tap to cash out — same wallet, same address.
+          </p>
+        </div>
+        <span
+          className={`shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium uppercase tracking-wide ${
+            enabled
+              ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+              : "bg-white/5 text-[var(--muted-soft)]"
+          }`}
+        >
+          {enabled ? "On" : "Off"}
+        </span>
+      </div>
+
+      {/* TODO: balance split (DR2/DR3) — earning vs cash with Move buttons.
+          Requires fetching live USDsui + sUSDsui balances against mainnet
+          RPC. Skipped on testnet (no real balances exist) — slot in here
+          when QUAY flips to mainnet. */}
+
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          onClick={handleToggle}
+          disabled={inFlight}
+          className={`text-xs py-2 px-3 disabled:opacity-50 ${
+            enabled ? "glass-chip rounded-lg" : "glass-btn-primary"
+          }`}
+        >
+          {state.kind === "idle" || state.kind === "error" || state.kind === "success"
+            ? enabled ? "Turn earning off" : "Turn earning on"
+            : state.kind === "uploading"
+              ? "Uploading profile…"
+              : state.kind === "sponsoring"
+                ? "Sponsor signing…"
+                : state.kind === "signing"
+                  ? "zkLogin signing…"
+                  : "Submitting…"}
+        </button>
+      </div>
+
+      {state.kind === "error" && (
+        <p className="text-[11px] text-red-300 break-words">Error: {state.message}</p>
+      )}
+      {state.kind === "success" && (
+        <div className="space-y-1">
+          <p className="text-[11px] text-[var(--success)]">
+            {state.summary} · tx{" "}
+            <a
+              href={txUrl(state.digest)}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono hover:underline"
+            >
+              {state.digest.slice(0, 10)}…{state.digest.slice(-6)} ↗
+            </a>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function summarizeMigration(
+  migration: YieldRoutingMigration,
+  newEnabled: boolean,
+): string {
+  if (migration.kind === "none") {
+    return newEnabled
+      ? "Earning on. Future payments will route through Scallop."
+      : "Earning off. Future payments settle as liquid USDsui.";
+  }
+  if (migration.kind === "mint") {
+    const usdsui = formatUsdsuiMinor(migration.total_underlying_minor);
+    return `Earning on. Migrated ${usdsui} USDsui (${migration.coin_count ?? 0} coin${
+      migration.coin_count === 1 ? "" : "s"
+    }) into Scallop.`;
+  }
+  // redeem
+  const feeStr = migration.fee_underlying_minor
+    ? formatUsdsuiMinor(migration.fee_underlying_minor)
+    : null;
+  const feeSuffix =
+    feeStr && feeStr !== "0.00" ? ` (net of ${feeStr} USDsui Quay fee)` : "";
+  if (migration.partial) {
+    const redeemed = formatShareToUsdsui(migration.redeemable_share_minor);
+    const leftover = formatShareToUsdsui(migration.leftover_share_minor);
+    return `Earning off. Cashed out ${redeemed} USDsui${feeSuffix}; ${leftover} sUSDsui stays earning (pool low — try again later).`;
+  }
+  const shares = formatShareToUsdsui(migration.total_share_minor);
+  return `Earning off. Cashed out ${shares} USDsui${feeSuffix}.`;
+}
+
+function formatUsdsuiMinor(minor: string | undefined): string {
+  if (!minor) return "0";
+  try {
+    const v = Number(BigInt(minor)) / 1_000_000;
+    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  } catch {
+    return minor;
+  }
+}
+
+// Approximate — without the live share price we can't be exact. Shows
+// the share amount in nominal USDsui units (1:1 floor); the indexer
+// supplies the exact underlying once the tx commits.
+function formatShareToUsdsui(minor: string | undefined): string {
+  return formatUsdsuiMinor(minor);
 }
 
 function base64ToBytes(b64: string): Uint8Array {

@@ -29,42 +29,97 @@
  */
 
 import { COIN_TYPES } from "@/lib/quay/pay";
+import { SUI_NETWORK } from "@/lib/sui-config";
 
 // ─── Schema ─────────────────────────────────────────────────────────────
 
 export const PROFILE_SCHEMA_VERSION = 1 as const;
 
-/** Sui Move type strings the merchant may pick as their receive token. */
-export const SUPPORTED_RECEIVE_TOKENS = [
-  COIN_TYPES.SUI,
-  COIN_TYPES.USDC_TESTNET,
-] as const;
+/**
+ * Network-active receive tokens.
+ *
+ * Testnet keeps both SUI and the Mysten-issued testnet USDC — the original
+ * dogfood path. Mainnet locks settlement to USDsui only: it's the unit
+ * USDsui-on-Scallop yield-routing works against (Phase 6), and offering
+ * SUI-as-receive on mainnet would just create a third axis of payer/aggregator
+ * complexity without a product reason. Add new mainnet tokens here only
+ * when they have a wedge — not "because we can".
+ *
+ * The TYPE `SupportedReceiveToken` is the UNION of both networks' values,
+ * so handler code that branches on token still type-checks across builds.
+ * The runtime `SUPPORTED_RECEIVE_TOKENS` is whichever set is live for the
+ * current network — that's what `isSupportedReceiveToken` validates against.
+ */
+const TESTNET_RECEIVE_TOKENS = [COIN_TYPES.SUI, COIN_TYPES.USDC_TESTNET] as const;
+const MAINNET_RECEIVE_TOKENS = [COIN_TYPES.USDSUI] as const;
 
-export type SupportedReceiveToken = (typeof SUPPORTED_RECEIVE_TOKENS)[number];
+export type SupportedReceiveToken =
+  | (typeof TESTNET_RECEIVE_TOKENS)[number]
+  | (typeof MAINNET_RECEIVE_TOKENS)[number];
 
-/** Display labels for the merchant onboard picker. */
+export const SUPPORTED_RECEIVE_TOKENS: readonly SupportedReceiveToken[] =
+  SUI_NETWORK === "mainnet" ? MAINNET_RECEIVE_TOKENS : TESTNET_RECEIVE_TOKENS;
+
+/** Display labels for the merchant onboard picker. Network-specific. */
 export const RECEIVE_TOKEN_OPTIONS: Array<{
   type: SupportedReceiveToken;
   label: string;
   description: string;
-}> = [
-  {
-    type: COIN_TYPES.USDC_TESTNET,
-    label: "USDC",
-    description: "Stable revenue. Recommended.",
-  },
-  {
-    type: COIN_TYPES.SUI,
-    label: "SUI",
-    description: "Native Sui. Volatile against SGD.",
-  },
-];
+}> =
+  SUI_NETWORK === "mainnet"
+    ? [
+        {
+          type: COIN_TYPES.USDSUI,
+          label: "USDsui",
+          description: "Bridge/Stripe Sui-native stablecoin. Yield-eligible.",
+        },
+      ]
+    : [
+        {
+          type: COIN_TYPES.USDC_TESTNET,
+          label: "USDC",
+          description: "Stable revenue. Recommended.",
+        },
+        {
+          type: COIN_TYPES.SUI,
+          label: "SUI",
+          description: "Native Sui. Volatile against SGD.",
+        },
+      ];
 
 /** The default receive token when a new merchant doesn't pick one. */
-export const DEFAULT_RECEIVE_TOKEN: SupportedReceiveToken = COIN_TYPES.USDC_TESTNET;
+export const DEFAULT_RECEIVE_TOKEN: SupportedReceiveToken =
+  SUI_NETWORK === "mainnet" ? COIN_TYPES.USDSUI : COIN_TYPES.USDC_TESTNET;
 
-/** The fallback token for legacy merchants (pre-schema blobs). */
-export const LEGACY_RECEIVE_TOKEN: SupportedReceiveToken = COIN_TYPES.SUI;
+/**
+ * Fallback token when a legacy/unparseable profile is encountered.
+ *
+ * On testnet, legacy = raw-logo-blob merchants registered before the v1
+ * JSON profile shipped — they were defaulted to SUI. On mainnet there is
+ * no legacy population (mainnet ships with the v1 schema from day 1), so
+ * we fall back to the network default (USDsui) — keeps the contract
+ * simple: profile read failure → still produces a valid receive token.
+ */
+export const LEGACY_RECEIVE_TOKEN: SupportedReceiveToken =
+  SUI_NETWORK === "mainnet" ? COIN_TYPES.USDSUI : COIN_TYPES.SUI;
+
+/**
+ * Yield-routing opt-in (Phase 6). When `enabled`, incoming `preferred_receive_token`
+ * payments auto-deposit into the named protocol's lending pool in the same
+ * PTB the payer signs — the merchant receives an interest-bearing receipt
+ * coin (e.g. `Coin<SCALLOP_USDSUI>`) instead of the bare token.
+ *
+ * Currently only `scallop`/`usdsui` is supported; the struct is shaped for
+ * multi-protocol/multi-asset expansion without a schema bump.
+ *
+ * Back-compat: absent field is treated as `enabled: false`. Existing
+ * merchants are unaffected until they tick the wallet checkbox.
+ */
+export interface YieldRouting {
+  enabled: boolean;
+  protocol: "scallop";
+  asset: "usdsui";
+}
 
 export interface MerchantProfileV1 {
   v: typeof PROFILE_SCHEMA_VERSION;
@@ -76,6 +131,11 @@ export interface MerchantProfileV1 {
   merchant_name?: string;
   /** Unix epoch ms — when this profile was last written. */
   updated_at_ms: number;
+  /**
+   * Yield-routing opt-in. Absent = disabled (back-compat for pre-Phase-6
+   * profiles). See `YieldRouting` for the shape.
+   */
+  yield_routing?: YieldRouting;
 }
 
 // ─── Parse / read ───────────────────────────────────────────────────────
@@ -134,6 +194,8 @@ export function parseMerchantProfile(
       ? json.updated_at_ms
       : 0;
 
+  const yield_routing = parseYieldRouting(json.yield_routing);
+
   return {
     kind: "v1",
     profile: {
@@ -142,13 +204,15 @@ export function parseMerchantProfile(
       preferred_receive_token: rawToken,
       merchant_name,
       updated_at_ms,
+      ...(yield_routing ? { yield_routing } : {}),
     },
   };
 }
 
 /**
  * Resolve a profile (or legacy blob) into the fields callers actually use.
- * Centralizes the "default token for legacy merchants" rule.
+ * Centralizes the "default token for legacy merchants" rule and the
+ * "yield_routing absent = disabled" rule.
  */
 export function resolveProfile(
   result: ParseResult,
@@ -156,18 +220,21 @@ export function resolveProfile(
   logoBlobId: string | null;
   receiveToken: SupportedReceiveToken;
   merchantName: string | undefined;
+  yieldRouting: YieldRouting | null;
 } {
   if (result.kind === "v1") {
     return {
       logoBlobId: result.profile.logo_blob_id,
       receiveToken: result.profile.preferred_receive_token,
       merchantName: result.profile.merchant_name,
+      yieldRouting: result.profile.yield_routing ?? null,
     };
   }
   return {
     logoBlobId: result.logoBlobId,
     receiveToken: LEGACY_RECEIVE_TOKEN,
     merchantName: undefined,
+    yieldRouting: null,
   };
 }
 
@@ -179,6 +246,12 @@ export interface BuildProfileInput {
   merchantName?: string;
   /** Defaults to `Date.now()`. Override for deterministic tests. */
   nowMs?: number;
+  /**
+   * Optional yield-routing opt-in. Omit (or pass `null`) to write a
+   * pre-Phase-6 profile shape — the field is absent in JSON, which old
+   * readers interpret as disabled.
+   */
+  yieldRouting?: YieldRouting | null;
 }
 
 /** Build the bytes to upload as the v1 profile blob. */
@@ -189,6 +262,7 @@ export function buildMerchantProfileBytes(input: BuildProfileInput): Uint8Array 
     preferred_receive_token: input.preferredReceiveToken,
     merchant_name: input.merchantName,
     updated_at_ms: input.nowMs ?? Date.now(),
+    ...(input.yieldRouting ? { yield_routing: input.yieldRouting } : {}),
   };
   return new TextEncoder().encode(JSON.stringify(profile));
 }
@@ -201,4 +275,18 @@ function isObject(v: unknown): v is Record<string, unknown> {
 
 function isSupportedReceiveToken(v: unknown): v is SupportedReceiveToken {
   return typeof v === "string" && (SUPPORTED_RECEIVE_TOKENS as readonly string[]).includes(v);
+}
+
+/**
+ * Validate the `yield_routing` sub-object. Bad shape → returns null (the
+ * profile reader degrades gracefully, treating it as "absent / disabled").
+ * This is deliberately strict on protocol/asset enum values so a future
+ * "yield_routing: { protocol: 'naviv2', ... }" doesn't get silently mis-parsed.
+ */
+function parseYieldRouting(v: unknown): YieldRouting | null {
+  if (!isObject(v)) return null;
+  if (typeof v.enabled !== "boolean") return null;
+  if (v.protocol !== "scallop") return null;
+  if (v.asset !== "usdsui") return null;
+  return { enabled: v.enabled, protocol: "scallop", asset: "usdsui" };
 }

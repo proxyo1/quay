@@ -7,6 +7,7 @@ import {
   parseMerchantProfile,
   resolveProfile,
   type SupportedReceiveToken,
+  type YieldRouting,
 } from "@/lib/walrus/profileSchema";
 
 const PAYNOW_UEN_V1 = new TextEncoder().encode("PAYNOW_UEN_V1");
@@ -157,6 +158,11 @@ export interface ResolvedMerchantProfile {
   merchantName: string | undefined;
   /** True if the on-chain metadata pointed at a v1 JSON profile. */
   isV1: boolean;
+  /**
+   * Yield-routing opt-in (Phase 6). `null` for legacy profiles or v1
+   * profiles that pre-date the field. Callers treat `null` as disabled.
+   */
+  yieldRouting: YieldRouting | null;
 }
 
 /**
@@ -188,6 +194,7 @@ export async function fetchMerchantProfile(
         receiveToken: LEGACY_RECEIVE_TOKEN,
         merchantName: undefined,
         isV1: false,
+        yieldRouting: null,
       };
     }
     throw err;
@@ -200,5 +207,6 @@ export async function fetchMerchantProfile(
     receiveToken: resolved.receiveToken,
     merchantName: resolved.merchantName,
     isV1: parsed.kind === "v1",
+    yieldRouting: resolved.yieldRouting,
   };
 }
