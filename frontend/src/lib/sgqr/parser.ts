@@ -242,11 +242,22 @@ export function extractMerchant(
 ): import("./types").MerchantQrInfo | null {
   const payNow = extractPayNow(payload);
   if (payNow) {
+    // PayNow proxy values can carry a sub-account suffix after the ACRA
+    // UEN — e.g. "53014014D888" for Fernvale Cafe 2 (UEN 53014014D,
+    // cashier suffix 888). Normalize to the bare UEN for the on-chain
+    // registry lookup; the suffix is a PayNow rail concept that has no
+    // analog in Quay's identity model. Mobile-number proxies are passed
+    // through untouched and rejected upstream.
+    let proxyValue = payNow.proxyValue;
+    if (payNow.proxyType === "uen") {
+      const normalized = extractUenSubstring(proxyValue);
+      if (normalized) proxyValue = normalized;
+    }
     return {
       tag: payNow.tag,
       rail: "paynow",
       proxyType: payNow.proxyType,
-      proxyValue: payNow.proxyValue,
+      proxyValue,
       editable: payNow.editable,
       expiryDate: payNow.expiryDate,
     };
