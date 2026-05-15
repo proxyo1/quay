@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 
 import { QUAY, objectUrl } from "@/lib/sui-config";
@@ -7,17 +6,9 @@ export default function Home() {
   return (
     <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-md flex-col px-5 py-8">
       <header className="flex items-center justify-between glass-rise">
-        <div className="flex items-center gap-2">
-          <Image
-            src="/quay.png"
-            alt="quay"
-            width={28}
-            height={28}
-            className="rounded-md ring-1 ring-white/20"
-            priority
-          />
-          <span className="text-base font-semibold tracking-tight">quay</span>
-        </div>
+        <span className="text-base font-semibold tracking-tight" aria-label="quay">
+          quay<span className="text-[var(--accent)]">.</span>
+        </span>
         <span className="glass-pill">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
           testnet
