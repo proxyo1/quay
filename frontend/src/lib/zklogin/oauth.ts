@@ -8,13 +8,15 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { generateNonce, generateRandomness } from "@mysten/sui/zklogin";
 
+import { SUI_NETWORK } from "@/lib/sui-config";
+
 import {
   EPOCH_LOOKAHEAD,
   GOOGLE_CLIENT_ID,
   redirectUri,
 } from "./config";
 
-const sui = new SuiClient({ network: "testnet", url: getFullnodeUrl("testnet") });
+const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
 
 const PENDING_KEY = "quay.zklogin.pending.v1";
 

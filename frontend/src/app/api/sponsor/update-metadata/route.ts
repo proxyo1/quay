@@ -12,7 +12,7 @@ import {
   loadSponsorKeypair,
 } from "@/lib/server/sponsor";
 import { looksLikeUen } from "@/lib/sgqr";
-import { QUAY } from "@/lib/sui-config";
+import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
 
 export const runtime = "nodejs";
 
@@ -35,7 +35,7 @@ const DAILY_CAP = 10;
 const LOW_BALANCE_FLOOR_MIST = 40_000_000n; // 20% of 200M target
 const CLOCK = "0x6";
 
-const sui = new SuiClient({ network: "testnet", url: getFullnodeUrl("testnet") });
+const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
 
 interface SponsorUpdateMetadataRequest {
   uen: string;

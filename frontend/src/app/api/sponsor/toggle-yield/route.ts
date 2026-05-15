@@ -27,7 +27,7 @@ import {
   readCostBasis,
 } from "@/lib/server/yield-cost-basis";
 import { looksLikeUen } from "@/lib/sgqr";
-import { QUAY } from "@/lib/sui-config";
+import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
 
 export const runtime = "nodejs";
 
@@ -77,7 +77,7 @@ const MAX_COINS_PER_PTB = 50;
 const IDEMPOTENCY_TTL_MS = 15 * 60 * 1000;
 const FEATURE_FLAG_NAME = "yield_routing.scallop.usdsui";
 
-const sui = new SuiClient({ network: "testnet", url: getFullnodeUrl("testnet") });
+const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
 
 interface ToggleYieldRequest {
   uen: string;
