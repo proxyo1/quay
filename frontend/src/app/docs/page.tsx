@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-const APP_URL = "http://app.localhost:3000";
+const APP_URL = "https://app.quay.cash";
 
 export const metadata = {
   title: "Docs — Quay",
