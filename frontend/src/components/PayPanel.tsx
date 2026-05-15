@@ -7,6 +7,7 @@ import {
   useSuiClient,
 } from "@mysten/dapp-kit";
 import { blake2b } from "@noble/hashes/blake2.js";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -27,7 +28,7 @@ import {
   encodeQuoteMetadata,
 } from "@/lib/quay";
 import { getDexClients } from "@/lib/dex/client";
-import { AggregatorRouteError } from "@/lib/dex/aggregator";
+import { AggregatorRouteError, quoteRoute } from "@/lib/dex/aggregator";
 import { formatBalance, useUserBalances, type UserBalance } from "@/lib/dex/balances";
 import { type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
 import { txUrl } from "@/lib/sui-config";
@@ -180,6 +181,44 @@ export function PayPanel({
     outputAmount > 0n &&
     pay.kind !== "submitting" &&
     !stale;
+
+  /**
+   * Eager aggregator quote so the Pay button can show the exact source-
+   * token amount before sign. On-click `handlePay` still runs its own
+   * fresh quote (slippage assertion against latest pool state) — this
+   * mirror is display-only.
+   *
+   * Direct route: amountIn equals outputAmount, no RPC needed.
+   * Aggregator route: one Cetus `findRouters` call per (source, target,
+   * amount). Cached 5s by React Query so re-renders while the user
+   * scrolls/types don't re-hit Cetus. Cancellation on dep change comes
+   * for free.
+   */
+  const routeQuoteQ = useQuery<{ amountIn: bigint }>({
+    queryKey: [
+      "pay-route-quote",
+      payerCoinType,
+      merchantReceiveType,
+      outputAmount?.toString() ?? "",
+    ],
+    queryFn: async () => {
+      if (!outputAmount) throw new Error("no outputAmount");
+      if (isDirect) return { amountIn: outputAmount };
+      const quote = await quoteRoute(dexClients.cetusAggregator, {
+        inputCoinType: payerCoinType,
+        outputCoinType: merchantReceiveType,
+        amountOut: outputAmount,
+      });
+      return quote.kind === "direct"
+        ? { amountIn: outputAmount }
+        : { amountIn: quote.amountIn };
+    },
+    enabled: outputAmount != null && outputAmount > 0n,
+    staleTime: 5_000,
+    retry: false,
+  });
+  const routePayerAmountIn = routeQuoteQ.data?.amountIn ?? null;
+  const routeQuoteLoading = routeQuoteQ.isFetching;
 
   async function handlePay() {
     if (!outputAmount || !pricesQ.data || !account) return;
@@ -429,6 +468,10 @@ export function PayPanel({
             sgdMinorUnits={sgdMinorUnits}
             canPay={canPay}
             onClick={handlePay}
+            payerSymbol={payerLabel}
+            payerDecimals={payerBalance?.decimals ?? 0}
+            payerAmountIn={routePayerAmountIn}
+            quoteLoading={routeQuoteLoading}
           />
         </div>
       )}
@@ -600,11 +643,27 @@ function PayButton({
   sgdMinorUnits,
   canPay,
   onClick,
+  payerSymbol,
+  payerDecimals,
+  payerAmountIn,
+  quoteLoading,
 }: {
   state: PayState;
   sgdMinorUnits: number;
   canPay: boolean;
   onClick: () => void;
+  /** Symbol of the source token the user is spending (e.g. "USDsui", "HAEDAL"). */
+  payerSymbol: string;
+  /** Decimals of the source token, used to format `payerAmountIn`. */
+  payerDecimals: number;
+  /**
+   * Exact source-token amount the user will spend (smallest units).
+   * - Direct route: equal to `outputAmount` (caller resolves).
+   * - Aggregator route: `amountIn` from the eager Cetus quote.
+   * - Loading / errored / no route yet: null — fall back to SGD-only label.
+   */
+  payerAmountIn: bigint | null;
+  quoteLoading: boolean;
 }) {
   const submitting = state.kind === "submitting";
   const phaseLabel =
@@ -614,6 +673,11 @@ function PayButton({
         : state.phase === "quoting-route"
         ? "Quoting route on Cetus Aggregator…"
         : "Awaiting wallet signature…"
+      : null;
+  const sgdLabel = sgdMinorUnits > 0 ? formatSgd(sgdMinorUnits / 100) : null;
+  const tokenLabel =
+    payerAmountIn !== null && payerAmountIn > 0n && payerDecimals > 0
+      ? `${formatBalance(payerAmountIn, payerDecimals)} ${payerSymbol}`
       : null;
   return (
     <button
@@ -627,10 +691,20 @@ function PayButton({
           <Spinner /> {phaseLabel}
         </span>
       ) : sgdMinorUnits > 0 ? (
-        <>
-          <span>Pay {formatSgd(sgdMinorUnits / 100)}</span>
-          <span className="text-white/80 group-hover:text-white transition">→</span>
-        </>
+        <span className="flex flex-col items-center leading-tight">
+          <span className="flex items-center gap-2">
+            <span>
+              Pay {tokenLabel ?? sgdLabel}
+              {tokenLabel && quoteLoading ? "…" : ""}
+            </span>
+            <span className="text-white/80 group-hover:text-white transition">→</span>
+          </span>
+          {tokenLabel && sgdLabel && (
+            <span className="text-[11px] font-normal text-white/70 mt-0.5">
+              ≈ {sgdLabel}
+            </span>
+          )}
+        </span>
       ) : (
         <span>Enter an SGD amount</span>
       )}
