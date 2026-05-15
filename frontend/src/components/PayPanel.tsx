@@ -132,17 +132,22 @@ export function PayPanel({
     if (merchantReceiveType === COIN_TYPES.SUI) {
       return suiQuote?.suiMist ?? null;
     }
-    if (merchantReceiveType === COIN_TYPES.USDC_TESTNET) {
+    // USDC_TESTNET and USDSUI are both USD-pegged stables with 6 decimals,
+    // so the SGD → token math is identical: convert SGD to USD via Pyth
+    // USD/SGD, then express as 6-decimal micro-units. Done with raw
+    // price/expo math (no Number) to keep precision on large amounts.
+    if (
+      merchantReceiveType === COIN_TYPES.USDC_TESTNET ||
+      merchantReceiveType === COIN_TYPES.USDSUI
+    ) {
       const usdSgd = pricesQ.data.get(PYTH_FEEDS.USD_SGD);
       if (!usdSgd) return null;
-      // usdSgd is "USD per 1 SGD" (e.g., ~0.74). USDC ≈ USD.
-      // outputUsdcMicro = (sgdMinor / 100) * usdPerSgd * 1e6
-      //                 = sgdMinor * usdPerSgd * 10_000
-      // Use raw price/expo math to avoid Number precision loss on big amounts.
-      const usdPerSgdScaled = BigInt(usdSgd.rawPrice); // signed in SDK; raw is u64
-      const expo = usdSgd.expo; // typically negative
-      // outputUsdcMicro = sgdMinor * (rawPrice * 10^expo) * 10_000
-      // Rearrange to integer math: multiply by 10^(4 + max(0, -expo)) then divide by 10^max(0, -expo).
+      // outputMicro = (sgdMinor / 100) * usdPerSgd * 1e6
+      //             = sgdMinor * usdPerSgd * 10_000
+      // Rearrange to integer math: multiply by 10^(4 + max(0, -expo)) then
+      // divide by 10^max(0, -expo).
+      const usdPerSgdScaled = BigInt(usdSgd.rawPrice);
+      const expo = usdSgd.expo;
       const negExpo = expo < 0 ? -expo : 0;
       const num = BigInt(sgdMinorUnits) * usdPerSgdScaled * 10_000n;
       const denom = 10n ** BigInt(negExpo);
