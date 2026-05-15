@@ -311,24 +311,10 @@ function Header() {
             "linear-gradient(to bottom, black 20%, transparent 100%)",
         }}
       />
-      <div className="relative mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
+      <div className="relative mx-auto flex w-full max-w-6xl items-center px-6 py-5">
         <Link href="/" className="text-lg font-semibold tracking-tight">
           quay<span className="text-[var(--accent)]">.</span>
         </Link>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/docs"
-            className="glass-btn-ghost rounded-full px-4 py-2 text-sm font-medium"
-          >
-            Docs
-          </Link>
-          <Link
-            href={APP_URL}
-            className="glass-btn-primary rounded-full px-5 py-2 text-sm font-medium"
-          >
-            Launch dApp
-          </Link>
-        </div>
       </div>
     </header>
   );
