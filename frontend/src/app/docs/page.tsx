@@ -33,7 +33,7 @@ export default function DocsPage() {
             </p>
             <Callout>
               <strong>One-line:</strong> Slush is a wallet. Quay is a payment
-              terminal. Merchants want SGD in their books, USDC in their
+              terminal. Merchants want SGD in their books, USDsui in their
               treasury, and a receipt their accountant accepts.
             </Callout>
           </Section>
@@ -74,7 +74,7 @@ export default function DocsPage() {
           >
             <ul className="docs-list">
               <li>
-                <strong>Any liquid Sui token.</strong> SUI, USDC, USDsui, DEEP,
+                <strong>Any liquid Sui token.</strong> SUI, USDsui, DEEP,
                 CETUS, and anything Cetus Aggregator can route through.
               </li>
               <li>
@@ -122,7 +122,7 @@ export default function DocsPage() {
                 shoppers don&apos;t need SUI to pay you.
               </li>
               <li>
-                <strong>Idle-balance yield.</strong> Optional: route idle USDC
+                <strong>Idle-balance yield.</strong> Optional: route idle USDsui
                 balances into a vetted Sui yield strategy from the merchant
                 dashboard. Toggle off any time.
               </li>
@@ -225,7 +225,7 @@ export default function DocsPage() {
   merchant:     "0x...",
   input_token:  "0x2::sui::SUI",
   input_amount: "1234567890",
-  settled_token:"...::usdc::USDC",
+  settled_token:"...::usdsui::USDSUI",
   settled_amount:"9_870_000",
   sgd_quote:    "13.42",
   pyth_price_id:"0x...",
