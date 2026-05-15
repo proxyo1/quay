@@ -1,6 +1,11 @@
 "use client";
 
-import { ConnectButton, useCurrentAccount, useSuiClient } from "@mysten/dapp-kit";
+import {
+  ConnectButton,
+  useCurrentAccount,
+  useDisconnectWallet,
+  useSuiClient,
+} from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -270,6 +275,7 @@ export default function ScanPage() {
 }
 
 function WalletCard({ account }: { account: ReturnType<typeof useCurrentAccount> }) {
+  const { mutate: disconnect } = useDisconnectWallet();
   if (!account) {
     return (
       <section className="glass-card rounded-2xl p-4 flex items-center justify-between gap-3">
@@ -295,9 +301,19 @@ function WalletCard({ account }: { account: ReturnType<typeof useCurrentAccount>
             </p>
           </div>
         </div>
-        <Link href="/history" className="text-xs text-[var(--accent)] hover:underline shrink-0">
-          history →
-        </Link>
+        <div className="flex items-center gap-3 shrink-0">
+          <Link href="/history" className="text-xs text-[var(--accent)] hover:underline">
+            history →
+          </Link>
+          <button
+            type="button"
+            onClick={() => disconnect()}
+            className="text-xs text-[var(--muted-soft)] hover:text-white hover:underline transition"
+            aria-label="Disconnect wallet"
+          >
+            disconnect
+          </button>
+        </div>
       </div>
     </section>
   );

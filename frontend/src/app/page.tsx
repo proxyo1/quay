@@ -1,123 +1,244 @@
-import Image from "next/image";
 import Link from "next/link";
 
-import { QUAY, objectUrl } from "@/lib/sui-config";
+const APP_URL = "http://app.localhost:3000";
 
-export default function Home() {
+export default function MarketingHome() {
   return (
-    <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-md flex-col px-5 py-8">
-      <header className="flex items-center justify-between glass-rise">
-        <div className="flex items-center gap-2">
-          <Image
-            src="/quay.png"
-            alt="quay"
-            width={28}
-            height={28}
-            className="rounded-md ring-1 ring-white/20"
-            priority
-          />
-          <span className="text-base font-semibold tracking-tight">quay</span>
-        </div>
-        <span className="glass-pill">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
-          testnet
-        </span>
-      </header>
+    <div className="relative z-10 flex min-h-screen flex-col">
+      <Header />
 
-      <section className="flex-1 flex flex-col justify-center space-y-10 py-12 glass-rise" style={{ animationDelay: "120ms" }}>
-        <ScanMark />
-        <div className="space-y-3">
-          <h1 className="text-[44px] leading-[1.04] font-semibold tracking-tight">
-            SGQR meets Sui.
-            <br />
-            <span className="glass-shimmer">One scan to pay.</span>
-          </h1>
-          <p className="text-base text-[var(--muted)] leading-relaxed">
-            Scan any Singapore SGQR sticker. Pay any Sui token. Settle as USDC.
-          </p>
-        </div>
-      </section>
+      <main className="flex flex-col gap-32 pb-32">
+        <Hero />
+        <VideoPlaceholder />
+        <Steps />
+        <TwoSided />
+        <Outro />
+      </main>
 
-      <section className="space-y-2.5 glass-rise" style={{ animationDelay: "260ms" }}>
-        <Link href="/scan" className="glass-btn-primary group w-full">
-          <span>Scan SGQR</span>
-          <span className="text-white/80 group-hover:text-white transition">→</span>
-        </Link>
-
-        <Link href="/merchant" className="glass-btn-ghost group w-full">
-          <span>I&apos;m a merchant</span>
-          <span className="text-[var(--muted)] group-hover:text-white transition">→</span>
-        </Link>
-
-        <Link
-          href="/history"
-          className="block text-center text-sm text-[var(--muted)] hover:text-white py-3 transition"
-        >
-          View payment history →
-        </Link>
-      </section>
-
-      <footer className="text-[11px] text-[var(--muted-soft)] pt-8 mt-4 border-t border-white/5">
-        <a
-          href={objectUrl(QUAY.registryId)}
-          target="_blank"
-          rel="noreferrer"
-          className="font-mono hover:text-[var(--accent)]"
-        >
-          registry {QUAY.registryId.slice(0, 6)}…{QUAY.registryId.slice(-4)}
-        </a>
-        {" · "}
-        <a
-          href={objectUrl(QUAY.packageId)}
-          target="_blank"
-          rel="noreferrer"
-          className="font-mono hover:text-[var(--accent)]"
-        >
-          pkg {QUAY.packageId.slice(0, 6)}…{QUAY.packageId.slice(-4)}
-        </a>
-        {" · "}
-        {QUAY.network}
-      </footer>
-    </main>
+      <Footer />
+    </div>
   );
 }
 
-function ScanMark() {
+function Header() {
   return (
-    <div className="relative mx-auto h-36 w-36">
-      {/* outer iridescent halo */}
-      <div className="absolute inset-0 -z-10 rounded-full bg-[var(--accent)]/25 blur-3xl" />
-      <div className="absolute -inset-4 -z-10 rounded-full bg-[radial-gradient(circle_at_30%_30%,rgba(168,85,247,0.20),transparent_60%)] blur-2xl" />
-      {/* frosted glass disc holding the QR mark */}
-      <div className="relative h-full w-full rounded-3xl glass-card flex items-center justify-center">
-        <svg viewBox="0 0 100 100" className="h-3/4 w-3/4" aria-hidden>
-          <g stroke="var(--accent-strong)" strokeWidth="3" strokeLinecap="round" fill="none">
-            <path d="M8 22 L8 8 L22 8" />
-            <path d="M92 22 L92 8 L78 8" />
-            <path d="M8 78 L8 92 L22 92" />
-            <path d="M92 78 L92 92 L78 92" />
-          </g>
-          <g fill="var(--accent)">
-            <rect x="28" y="28" width="14" height="14" rx="1.5" />
-            <rect x="32" y="32" width="6" height="6" fill="rgba(2,3,10,0.85)" />
-            <rect x="58" y="28" width="14" height="14" rx="1.5" />
-            <rect x="62" y="32" width="6" height="6" fill="rgba(2,3,10,0.85)" />
-            <rect x="28" y="58" width="14" height="14" rx="1.5" />
-            <rect x="32" y="62" width="6" height="6" fill="rgba(2,3,10,0.85)" />
-            <rect x="48" y="30" width="4" height="4" />
-            <rect x="48" y="38" width="4" height="4" />
-            <rect x="46" y="48" width="4" height="4" />
-            <rect x="54" y="48" width="4" height="4" />
-            <rect x="62" y="48" width="4" height="4" />
-            <rect x="70" y="48" width="4" height="4" />
-            <rect x="48" y="56" width="4" height="4" />
-            <rect x="48" y="64" width="4" height="4" />
-            <rect x="58" y="62" width="4" height="4" />
-            <rect x="66" y="58" width="4" height="4" />
-            <rect x="66" y="66" width="4" height="4" />
-          </g>
-        </svg>
+    <header className="sticky top-0 z-20 w-full">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-[180%] backdrop-blur-md"
+        style={{
+          WebkitMaskImage:
+            "linear-gradient(to bottom, black 20%, transparent 100%)",
+          maskImage:
+            "linear-gradient(to bottom, black 20%, transparent 100%)",
+        }}
+      />
+      <div className="relative mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
+        <Link href="/" className="text-lg font-semibold tracking-tight">
+          quay<span className="text-[var(--accent)]">.</span>
+        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/docs"
+            className="glass-btn-ghost rounded-full px-4 py-2 text-sm font-medium"
+          >
+            Documentation
+          </Link>
+          <Link
+            href={APP_URL}
+            className="glass-btn-primary rounded-full px-5 py-2 text-sm font-medium"
+          >
+            Launch dApp
+          </Link>
+        </div>
       </div>
-    </div>
+    </header>
+  );
+}
+
+function Hero() {
+  return (
+    <section className="mx-auto flex w-full max-w-5xl flex-col items-center px-6 pt-20 text-center glass-rise">
+      <span className="glass-pill mb-8">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
+        Live beta · Singapore
+      </span>
+      <h1 className="text-[clamp(44px,8vw,96px)] font-semibold leading-[1.02] tracking-tight">
+        Any QR. Any token.
+        <br />
+        <span className="glass-shimmer">One scan.</span>
+      </h1>
+      <p className="mt-8 max-w-2xl text-lg leading-relaxed text-[var(--muted)] sm:text-xl">
+        The QR rail, on-chain. Shoppers pay in any token they hold. Merchants
+        receive stable. Singapore's SGQR rail is live today — every other QR
+        rail is next.
+      </p>
+      <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+        <Link
+          href={APP_URL}
+          className="glass-btn-primary rounded-full px-6 py-3 text-sm font-medium"
+        >
+          Launch dApp →
+        </Link>
+        <a
+          href="#how-it-works"
+          className="glass-btn-ghost rounded-full px-6 py-3 text-sm font-medium"
+        >
+          How it works
+        </a>
+      </div>
+      <p className="mt-8 text-xs uppercase tracking-[0.18em] text-[var(--muted-soft)]">
+        Proudly participating in{" "}
+        <span className="text-[var(--accent)]">Sui Overflow 2026</span>
+      </p>
+    </section>
+  );
+}
+
+function VideoPlaceholder() {
+  return (
+    <section className="mx-auto w-full max-w-5xl px-6">
+      <div className="glass-card relative aspect-video w-full overflow-hidden rounded-2xl">
+        {/* TODO: replace with <video> or embed when demo is ready */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] backdrop-blur-md">
+            <svg
+              aria-hidden
+              viewBox="0 0 24 24"
+              className="ml-1 h-6 w-6 fill-[var(--accent)]"
+            >
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
+          <p className="text-sm uppercase tracking-[0.18em] text-[var(--muted-soft)]">
+            Product video — coming soon
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Steps() {
+  const steps = [
+    {
+      n: "01",
+      title: "Scan",
+      body: "Parse the EMVCo payload. Look up the UEN on chain. Live Pyth quote.",
+    },
+    {
+      n: "02",
+      title: "Route",
+      body: "Pick any token in your wallet. Cetus Aggregator finds the route across every Sui DEX.",
+    },
+    {
+      n: "03",
+      title: "Settle",
+      body: "Atomic swap and transfer in one transaction. On-chain receipt, audit-ready.",
+    },
+  ];
+  return (
+    <section id="how-it-works" className="mx-auto w-full max-w-6xl px-6">
+      <div className="mb-12 text-center">
+        <p className="mb-3 text-sm uppercase tracking-[0.18em] text-[var(--accent)]">
+          How it works
+        </p>
+        <h2 className="text-[clamp(32px,5vw,56px)] font-semibold leading-tight tracking-tight">
+          Scan. Route. Settle.
+        </h2>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        {steps.map((s) => (
+          <div
+            key={s.n}
+            className="glass-card flex flex-col gap-3 rounded-2xl p-6"
+          >
+            <span className="font-mono text-xs text-[var(--muted-soft)]">
+              {s.n}
+            </span>
+            <h3 className="text-xl font-semibold tracking-tight">{s.title}</h3>
+            <p className="text-sm leading-relaxed text-[var(--muted)]">
+              {s.body}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TwoSided() {
+  return (
+    <section className="mx-auto w-full max-w-6xl px-6">
+      <div className="mb-12 text-center">
+        <h2 className="text-[clamp(32px,5vw,56px)] font-semibold leading-tight tracking-tight">
+          Crypto-native at the till.
+          <br />
+          <span className="text-[var(--muted)]">Fiat-stable in the books.</span>
+        </h2>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="glass-card flex flex-col gap-4 rounded-2xl p-7">
+          <p className="text-xs uppercase tracking-[0.18em] text-[var(--accent)]">
+            For shoppers
+          </p>
+          <h3 className="text-2xl font-semibold tracking-tight">
+            Spend what you already hold.
+          </h3>
+          <ul className="space-y-2 text-sm text-[var(--muted)]">
+            <li>— Pay in any liquid Sui token.</li>
+            <li>— No off-ramp. No KYC. No card.</li>
+            <li>— One tax event, not two.</li>
+            <li>— Non-custodial throughout.</li>
+          </ul>
+        </div>
+        <div className="glass-card flex flex-col gap-4 rounded-2xl p-7">
+          <p className="text-xs uppercase tracking-[0.18em] text-[var(--accent)]">
+            For merchants
+          </p>
+          <h3 className="text-2xl font-semibold tracking-tight">
+            Receive stable. Custody yourself.
+          </h3>
+          <ul className="space-y-2 text-sm text-[var(--muted)]">
+            <li>— Settle in USDsui. Switch any time.</li>
+            <li>— Onboard in 90 seconds with Google.</li>
+            <li>— No PCI. No chargebacks. No acquirer.</li>
+            <li>— On-chain receipts, GST-ready.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Outro() {
+  return (
+    <section className="mx-auto w-full max-w-4xl px-6 text-center">
+      <h2 className="text-[clamp(28px,4.5vw,48px)] font-semibold leading-tight tracking-tight">
+        SGQR today.
+        <br />
+        <span className="text-[var(--accent)]">Any QR rail tomorrow.</span>
+      </h2>
+      <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-[var(--muted)]">
+        DuitNow, QRIS, UPI, PIX — if a business prints a QR, Quay can wire it.
+      </p>
+      <div className="mt-10">
+        <Link
+          href={APP_URL}
+          className="glass-btn-primary rounded-full px-6 py-3 text-sm font-medium"
+        >
+          Launch dApp →
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-8 text-xs text-[var(--muted-soft)]">
+      <span>© quay</span>
+      <span>Sui Overflow 2026</span>
+    </footer>
   );
 }

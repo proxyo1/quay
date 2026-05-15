@@ -137,14 +137,23 @@ export async function POST(req: Request) {
     );
   }
 
-  // Global feature flag.
+  // Global feature flag. See toggle-yield/route.ts for the rationale on
+  // distinguishing the three 503 causes (Supabase unconfigured vs row
+  // missing vs flag off).
   const flag = await getFeatureFlag(FEATURE_FLAG_NAME);
   if (!flag || !flag.enabled) {
+    const supabaseConfigured = !!process.env.SUPABASE_URL &&
+      !!process.env.SUPABASE_SERVICE_KEY;
+    const cause = !flag
+      ? supabaseConfigured
+        ? "flag row not found in feature_flags table"
+        : "Supabase not configured on the server (set SUPABASE_URL + SUPABASE_SERVICE_KEY in Vercel)"
+      : flag.last_changed_reason ?? "flag is off";
     return NextResponse.json(
       {
-        error: "yield_routing feature is currently disabled",
+        error: "yield routing temporarily unavailable",
         flag: FEATURE_FLAG_NAME,
-        reason: flag?.last_changed_reason ?? "flag not configured",
+        cause,
       },
       { status: 503 },
     );

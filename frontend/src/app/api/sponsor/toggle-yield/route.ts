@@ -201,10 +201,27 @@ export async function POST(req: Request) {
   // hard Scallop anomalies).
   const flag = await getFeatureFlag(FEATURE_FLAG_NAME);
   if (!flag || !flag.enabled) {
+    // Three distinct failure shapes here, all surface as 503 but with
+    // different operator-actionable causes:
+    //   - flag === null AND Supabase isn't configured server-side → the
+    //     server can't reach Supabase to read the flag (missing env vars
+    //     in Vercel: SUPABASE_URL / SUPABASE_SERVICE_KEY). Most common
+    //     post-deploy failure.
+    //   - flag === null AND Supabase IS configured → the row genuinely
+    //     doesn't exist (migration not applied, or row deleted).
+    //   - flag.enabled === false → ops or the monitor cron disabled it
+    //     intentionally; reason field carries the explanation.
+    const supabaseConfigured = !!process.env.SUPABASE_URL &&
+      !!process.env.SUPABASE_SERVICE_KEY;
+    const cause = !flag
+      ? supabaseConfigured
+        ? "flag row not found in feature_flags table"
+        : "Supabase not configured on the server (set SUPABASE_URL + SUPABASE_SERVICE_KEY in Vercel)"
+      : flag.last_changed_reason ?? "flag is off";
     const body503 = {
-      error: "yield_routing feature is currently disabled",
+      error: "yield routing temporarily unavailable",
       flag: FEATURE_FLAG_NAME,
-      reason: flag?.last_changed_reason ?? "flag not configured",
+      cause,
     };
     putIdempotent(body.idempotency_key, {
       at: Date.now(),

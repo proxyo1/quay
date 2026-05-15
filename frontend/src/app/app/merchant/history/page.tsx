@@ -1,11 +1,26 @@
 "use client";
 
-import { ConnectButton, useCurrentAccount, useSuiClientQuery } from "@mysten/dapp-kit";
+/**
+ * Merchant-side payment history.
+ *
+ * Mirrors the payer-side /history page but oriented around INCOMING
+ * payments to this merchant — uses the zkLogin session for identity
+ * (no wallet connect required) and filters receipts by
+ * `merchant === session.address`. Day groupings, week sparkline, KPIs are
+ * the same as the payer history so the two pages feel like a pair.
+ *
+ * Auth pattern matches the other merchant pages (onboard / terminal / wallet):
+ * unsigned visitors get bounced to /merchant/login?next=/merchant/history.
+ */
+
+import { useSuiClientQuery } from "@mysten/dapp-kit";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
 
 import { decode as decodeQuoteMetadata } from "@/lib/sgqr/quote-metadata";
-import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
+import { QUAY, txUrl } from "@/lib/sui-config";
+import { useZkLoginSession } from "@/lib/zklogin";
 
 interface PaymentReceiptEvent {
   receipt_id: number[];
@@ -35,15 +50,18 @@ interface NormalizedReceipt {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Payer-side payment history (Midnight Quay).
- *
- * Sui RPC accepts a single EventFilter at a time, so we query
- * PaymentReceipt globally then filter `payer === account.address` on the
- * client. Limit 100 receipts in the most recent global window.
- */
-export default function HistoryPage() {
-  const account = useCurrentAccount();
+export default function MerchantHistoryPage() {
+  const { session, hydrated, expired, signOut } = useZkLoginSession();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (hydrated && !session) {
+      const expiredParam = expired ? "&expired=1" : "";
+      router.replace(`/merchant/login?next=/merchant/history${expiredParam}`);
+    }
+  }, [hydrated, session, expired, router]);
+
+  const merchantAddress = session?.address;
 
   const { data, error, isLoading } = useSuiClientQuery(
     "queryEvents",
@@ -55,100 +73,88 @@ export default function HistoryPage() {
     {
       refetchInterval: 5000,
       refetchIntervalInBackground: false,
-      enabled: !!account,
+      enabled: !!merchantAddress,
     },
   );
 
   const receipts: NormalizedReceipt[] = useMemo(() => {
-    if (!data?.data || !account) return [];
+    if (!data?.data || !merchantAddress) return [];
     return data.data
       .map(normalizeEvent)
-      .filter((r): r is NormalizedReceipt => r !== null && r.payer === account.address);
-  }, [data, account]);
+      .filter((r): r is NormalizedReceipt => r !== null && r.merchant === merchantAddress);
+  }, [data, merchantAddress]);
 
   const stats = useMemo(() => computeStats(receipts), [receipts]);
+
+  if (hydrated && !session) {
+    return (
+      <main className="relative z-10 mx-auto w-full max-w-md px-5 py-16">
+        <p className="text-sm text-[var(--muted-soft)]">Redirecting to sign-in…</p>
+      </main>
+    );
+  }
+  if (!session) return null;
 
   return (
     <main className="relative z-10 mx-auto w-full max-w-md px-5 py-6 space-y-6">
       <header className="flex items-center justify-between">
-        <Link href="/" className="text-[var(--accent)] hover:underline text-sm inline-flex items-center gap-1">
-          <span aria-hidden>←</span> home
+        <Link
+          href="/merchant"
+          className="text-[var(--accent)] hover:underline text-sm inline-flex items-center gap-1"
+        >
+          <span aria-hidden>←</span> merchant
         </Link>
-        <span className="glass-pill">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--accent)] live-dot" />
-          live
-        </span>
+        <button
+          type="button"
+          onClick={signOut}
+          className="glass-chip rounded-full"
+        >
+          Sign out
+        </button>
       </header>
 
       <section className="space-y-1">
-        <h1 className="text-3xl font-semibold tracking-tight">Payment history</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">History</h1>
         <p className="text-sm text-[var(--muted)]">
-          Outgoing receipts from your connected wallet. Refreshes every 5s.
+          Payments received by your business. Refreshes every 5s.
         </p>
       </section>
 
-      {!account ? (
-        <section className="glass-card-accent rounded-2xl p-5 space-y-3">
-          <p className="relative z-10 text-sm text-white">Connect a Sui wallet to view your payment history.</p>
-          <div className="relative z-10">
-            <ConnectButton />
-          </div>
+      <WeekHero stats={stats} />
+
+      <div className="grid grid-cols-3 gap-2">
+        <KPI label="Today" amount={stats.todaySgd} />
+        <KPI label="7 days" amount={stats.weekSgd} />
+        <KPI label="All time" amount={stats.allTimeSgd} />
+      </div>
+
+      {error ? (
+        <section className="glass-card-danger rounded-2xl p-4 space-y-1">
+          <p className="text-sm font-medium text-red-200">Couldn&apos;t load payments</p>
+          <p className="text-xs text-red-200/80 break-words">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
         </section>
+      ) : isLoading && receipts.length === 0 ? (
+        <p className="text-sm text-[var(--muted-soft)] text-center py-6">Loading…</p>
+      ) : receipts.length === 0 ? (
+        <EmptyState />
       ) : (
-        <>
-          <WeekHero stats={stats} />
-
-          <div className="grid grid-cols-3 gap-2">
-            <KPI label="Today" amount={stats.todaySgd} />
-            <KPI label="7 days" amount={stats.weekSgd} />
-            <KPI label="All time" amount={stats.allTimeSgd} />
-          </div>
-
-          {error ? (
-            <section className="glass-card-danger rounded-2xl p-4 space-y-1">
-              <p className="text-sm font-medium text-red-200">Event query failed</p>
-              <p className="text-xs text-red-200/80 break-words">
-                {error instanceof Error ? error.message : String(error)}
-              </p>
-            </section>
-          ) : isLoading && receipts.length === 0 ? (
-            <p className="text-sm text-[var(--muted-soft)] text-center py-6">Loading…</p>
-          ) : receipts.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <ReceiptList receipts={receipts} />
-          )}
-        </>
+        <ReceiptList receipts={receipts} />
       )}
 
       <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5">
-        Connected wallet:{" "}
-        {account ? (
-          <a
-            href={objectUrl(account.address)}
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono text-[var(--accent)] hover:underline"
-          >
-            {account.address.slice(0, 8)}…{account.address.slice(-6)}
-          </a>
-        ) : (
-          <span className="text-[var(--muted-soft)]">none</span>
-        )}
+        Powered by Sui · Walrus · Pyth
       </footer>
     </main>
   );
 }
 
-function WeekHero({
-  stats,
-}: {
-  stats: ReturnType<typeof computeStats>;
-}) {
+function WeekHero({ stats }: { stats: ReturnType<typeof computeStats> }) {
   return (
     <section className="glass-card-accent rounded-3xl p-5 overflow-hidden">
       <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">
-        Spent this week
+        Received this week
       </p>
       <p className="relative z-10 mt-1 text-4xl font-semibold tabular-nums">
         <span className="glass-shimmer">${stats.weekSgd.toFixed(2)}</span>
@@ -179,20 +185,35 @@ function Sparkline({ points }: { points: number[] }) {
     const y = h - (v / max) * h;
     return [x, y] as const;
   });
-  const path = coords.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+  const path = coords
+    .map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`)
+    .join(" ");
   const areaPath = `${path} L${w},${h} L0,${h} Z`;
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full" preserveAspectRatio="none" aria-hidden>
       <defs>
-        <linearGradient id="spark-area" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="merchant-history-spark-area" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="var(--accent)" stopOpacity="0.4" />
           <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={areaPath} fill="url(#spark-area)" />
-      <path d={path} fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <path d={areaPath} fill="url(#merchant-history-spark-area)" />
+      <path
+        d={path}
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
       {coords.length > 0 && (
-        <circle cx={coords[coords.length - 1][0]} cy={coords[coords.length - 1][1]} r="2" fill="var(--accent)" />
+        <circle
+          cx={coords[coords.length - 1][0]}
+          cy={coords[coords.length - 1][1]}
+          r="2"
+          fill="var(--accent)"
+        />
       )}
     </svg>
   );
@@ -221,11 +242,15 @@ function EmptyState() {
       </div>
       <p className="relative z-10 text-base font-medium text-white">No payments yet</p>
       <p className="relative z-10 text-xs text-[var(--muted-soft)]">
-        Scan an SGQR sticker. Once it&apos;s on chain, it shows up here.
+        When customers pay you, the receipts show up here.
       </p>
-      <div className="relative z-10 pt-1">
+      <div className="relative z-10 pt-1 flex justify-center gap-3">
+        <Link href="/merchant/onboard" className="text-xs text-[var(--accent)] hover:underline">
+          Add a business →
+        </Link>
+        <span className="text-[var(--muted-soft)]">·</span>
         <Link href="/scan" className="text-xs text-[var(--accent)] hover:underline">
-          Go to scan →
+          Try a test payment →
         </Link>
       </div>
     </section>
@@ -251,17 +276,11 @@ function ReceiptList({ receipts }: { receipts: NormalizedReceipt[] }) {
 }
 
 function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolean }) {
-  const tokenLabel = shortTokenLabel(r.tokenType);
-  const merchantInitial = r.merchant.slice(2, 3).toUpperCase();
   return (
-    <li
-      className={`rounded-2xl p-4 ${
-        highlight ? "glass-card-accent" : "glass-card"
-      }`}
-    >
+    <li className={`rounded-2xl p-4 ${highlight ? "glass-card-accent" : "glass-card"}`}>
       <div className="relative z-10 flex items-start gap-3">
-        <div className="h-9 w-9 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/35 flex items-center justify-center text-[var(--accent-strong)] text-xs font-semibold shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
-          {merchantInitial}
+        <div className="h-9 w-9 rounded-full bg-[var(--success)]/15 border border-[var(--success)]/40 flex items-center justify-center text-[var(--success)] shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)]">
+          <ArrowDown />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline justify-between gap-2">
@@ -273,8 +292,8 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
               {formatRelativeTime(r.timestampMs)}
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-[var(--muted)] font-mono truncate">
-            {formatTokenAmount(r.amount, tokenLabel)} → {r.merchant.slice(0, 6)}…{r.merchant.slice(-4)}
+          <p className="mt-0.5 text-xs text-[var(--muted)] truncate">
+            Paid with <span className="font-mono">{formatTokenAmount(r.amount, r.tokenType)}</span>
           </p>
           {r.memo && (
             <p className="mt-1.5 text-xs text-[var(--muted)] italic">&ldquo;{r.memo}&rdquo;</p>
@@ -284,9 +303,9 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
               href={txUrl(r.txDigest)}
               target="_blank"
               rel="noreferrer"
-              className="text-[var(--accent)] hover:underline font-mono"
+              className="text-[var(--accent)] hover:underline"
             >
-              tx ↗
+              Receipt ↗
             </a>
             {r.receiptBlobId && (
               <Link
@@ -301,6 +320,14 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
         </div>
       </div>
     </li>
+  );
+}
+
+function ArrowDown() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v14M19 12l-7 7-7-7" />
+    </svg>
   );
 }
 
@@ -320,7 +347,6 @@ function computeStats(receipts: NormalizedReceipt[]) {
     if (r.timestampMs >= startWeek) weekMinor += r.sgdMinorUnits;
   }
 
-  // Bucket the last 7 days (including today) into daily totals
   const weeklyDaily: number[] = [];
   const weekLabels: string[] = [];
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -405,17 +431,36 @@ function normalizeEvent(ev: {
   }
 }
 
-function shortTokenLabel(typeName: string): string {
+// Mirrors the curated-label table used by /history so casing matches the
+// canonical brand names (USDsui, sUSDsui) regardless of the all-caps
+// Move struct names that arrive over RPC.
+const TOKEN_DISPLAY: Record<string, { label: string; decimals: number }> = {
+  "::sui::SUI": { label: "SUI", decimals: 9 },
+  "::usdc::USDC": { label: "USDC", decimals: 6 },
+  "::usdsui::USDSUI": { label: "USDsui", decimals: 6 },
+  "::scallop_usdsui::SCALLOP_USDSUI": { label: "sUSDsui", decimals: 6 },
+};
+
+function tokenDisplay(typeName: string): { label: string; decimals: number } {
+  for (const [suffix, info] of Object.entries(TOKEN_DISPLAY)) {
+    if (typeName.endsWith(suffix)) return info;
+  }
   const parts = typeName.split("::");
-  return parts.at(-1) ?? typeName;
+  return { label: parts.at(-1) ?? typeName, decimals: 0 };
 }
 
-function formatTokenAmount(amount: bigint, symbol: string): string {
-  if (symbol === "SUI") {
-    const sui = Number(amount) / 1_000_000_000;
-    return `${sui < 1 ? sui.toFixed(4) : sui.toFixed(2)} SUI`;
-  }
-  return `${amount.toString()} ${symbol}`;
+function formatTokenAmount(amount: bigint, typeName: string): string {
+  const { label, decimals } = tokenDisplay(typeName);
+  if (decimals === 0) return `${amount.toString()} ${label}`;
+  const scale = 10n ** BigInt(decimals);
+  const whole = amount / scale;
+  const frac = amount % scale;
+  const showFour = whole === 0n;
+  const fracDigits = showFour ? 4 : 2;
+  const trimmed = (frac * 10n ** BigInt(fracDigits) / scale)
+    .toString()
+    .padStart(fracDigits, "0");
+  return `${whole.toString()}.${trimmed} ${label}`;
 }
 
 function formatRelativeTime(ms: number): string {

@@ -25,8 +25,6 @@
 import type { AggregatorClient, RouterDataV3 } from "@cetusprotocol/aggregator-sdk";
 import type { Transaction, TransactionObjectArgument } from "@mysten/sui/transactions";
 
-import { QUAY_TREASURY_ADDRESS } from "./client";
-
 // ─── Errors ─────────────────────────────────────────────────────────────
 
 export class AggregatorRouteError extends Error {
@@ -170,7 +168,11 @@ export async function appendSwapToPtb(
     inputCoin: input.inputCoin,
     slippage,
     txb: input.tx,
-    partner: QUAY_TREASURY_ADDRESS,
+    // `partner` intentionally unset — `QUAY_TREASURY_ADDRESS` is a wallet
+    // address, not a Cetus Partner object ID, so passing it makes the SDK
+    // throw "Invalid Sui address" when it tries to load the partner.
+    // Cetus's default partner kicks in; we forgo the referral split until
+    // Quay is a registered Cetus partner.
   });
 }
 

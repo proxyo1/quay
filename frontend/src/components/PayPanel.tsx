@@ -7,6 +7,7 @@ import {
   useSuiClient,
 } from "@mysten/dapp-kit";
 import { blake2b } from "@noble/hashes/blake2.js";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -27,7 +28,7 @@ import {
   encodeQuoteMetadata,
 } from "@/lib/quay";
 import { getDexClients } from "@/lib/dex/client";
-import { AggregatorRouteError } from "@/lib/dex/aggregator";
+import { AggregatorRouteError, quoteRoute } from "@/lib/dex/aggregator";
 import { formatBalance, useUserBalances, type UserBalance } from "@/lib/dex/balances";
 import { type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
 import { txUrl } from "@/lib/sui-config";
@@ -69,7 +70,7 @@ export function PayPanel({
   merchantReceiveType: SupportedReceiveToken;
   uen: string;
 }) {
-  const [sgdInput, setSgdInput] = useState("3.50");
+  const [sgdInput, setSgdInput] = useState("");
   const [memo, setMemo] = useState("");
   /**
    * Payer-side token type. Any Sui Move type the wallet holds, not constrained
@@ -83,7 +84,13 @@ export function PayPanel({
   const sui = useSuiClient();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
-  const dexClients = useMemo(() => getDexClients(sui), [sui]);
+  // Pass the connected wallet address as the Cetus signer. Without it the
+  // SDK builds swap PTBs with recipient = "" and BCS throws "Invalid Sui
+  // address" at sign time. Re-memoized when the user reconnects.
+  const dexClients = useMemo(
+    () => getDexClients(sui, undefined, account?.address),
+    [sui, account?.address],
+  );
   const balancesQ = useUserBalances(account?.address);
   const balances = balancesQ.data ?? [];
 
@@ -106,7 +113,14 @@ export function PayPanel({
   }, [balancesQ.data, merchantReceiveType]);
 
   const payerBalance = balances.find((b) => b.coinType === payerCoinType);
-  const payerLabel = payerBalance?.symbol ?? RECEIVE_LABEL[payerCoinType as SupportedReceiveToken] ?? shortType(payerCoinType);
+  // Prefer our curated `RECEIVE_LABEL` over the raw on-chain `CoinMetadata.symbol`.
+  // Bridge publishes USDsui's symbol as "USDSUI" all-caps but the brand reads
+  // "USDsui" — so for any token in our settlement set, force the nice label.
+  // For tokens we don't curate (HAEDAL, WAL, …), fall through to the chain symbol.
+  const payerLabel =
+    RECEIVE_LABEL[payerCoinType as SupportedReceiveToken] ??
+    payerBalance?.symbol ??
+    shortType(payerCoinType);
 
   const feeds = useMemo(() => [PYTH_FEEDS.USD_SGD, PYTH_FEEDS.SUI_USD], []);
   const pricesQ = usePythPrices(feeds);
@@ -132,21 +146,34 @@ export function PayPanel({
     if (merchantReceiveType === COIN_TYPES.SUI) {
       return suiQuote?.suiMist ?? null;
     }
-    if (merchantReceiveType === COIN_TYPES.USDC_TESTNET) {
+    // USDC_TESTNET and USDSUI are both USD-pegged stables with 6 decimals,
+    // so the SGD → token math is identical: convert SGD to USD via Pyth
+    // FX.USD/SGD, then express as 6-decimal micro-units. Done with raw
+    // price/expo math (no Number) to keep precision on large amounts.
+    if (
+      merchantReceiveType === COIN_TYPES.USDC_TESTNET ||
+      merchantReceiveType === COIN_TYPES.USDSUI
+    ) {
       const usdSgd = pricesQ.data.get(PYTH_FEEDS.USD_SGD);
       if (!usdSgd) return null;
-      // usdSgd is "USD per 1 SGD" (e.g., ~0.74). USDC ≈ USD.
-      // outputUsdcMicro = (sgdMinor / 100) * usdPerSgd * 1e6
-      //                 = sgdMinor * usdPerSgd * 10_000
-      // Use raw price/expo math to avoid Number precision loss on big amounts.
-      const usdPerSgdScaled = BigInt(usdSgd.rawPrice); // signed in SDK; raw is u64
-      const expo = usdSgd.expo; // typically negative
-      // outputUsdcMicro = sgdMinor * (rawPrice * 10^expo) * 10_000
-      // Rearrange to integer math: multiply by 10^(4 + max(0, -expo)) then divide by 10^max(0, -expo).
+      // Pyth FX.USD/SGD publishes "1 USD priced in SGD", i.e. SGD per
+      // 1 USD (≈ 1.27 today). To convert SGD → USD we DIVIDE by this,
+      // not multiply. (`quoteSgdToSui` in lib/pyth/convert.ts uses the
+      // same direction — `usdPerSgd = 1 / sgdPerUsd` — keep the two
+      // code paths consistent.)
+      //
+      //   sgd     = sgdMinor / 100
+      //   usd     = sgd / sgdPerUsd
+      //   usdcMicro = usd * 1e6 = sgdMinor * 1e4 / sgdPerUsd
+      //
+      // With Pyth raw/expo: sgdPerUsd = rawPrice * 10^expo (expo < 0).
+      //   usdcMicro = sgdMinor * 1e4 * 10^(-expo) / rawPrice
+      //             = sgdMinor * 10^(4 + negExpo) / rawPrice
+      const sgdPerUsdScaled = BigInt(usdSgd.rawPrice);
+      const expo = usdSgd.expo;
       const negExpo = expo < 0 ? -expo : 0;
-      const num = BigInt(sgdMinorUnits) * usdPerSgdScaled * 10_000n;
-      const denom = 10n ** BigInt(negExpo);
-      const out = num / denom;
+      const num = BigInt(sgdMinorUnits) * 10n ** BigInt(4 + negExpo);
+      const out = num / sgdPerUsdScaled;
       return out > 0n ? out : null;
     }
     return null;
@@ -161,6 +188,44 @@ export function PayPanel({
     outputAmount > 0n &&
     pay.kind !== "submitting" &&
     !stale;
+
+  /**
+   * Eager aggregator quote so the Pay button can show the exact source-
+   * token amount before sign. On-click `handlePay` still runs its own
+   * fresh quote (slippage assertion against latest pool state) — this
+   * mirror is display-only.
+   *
+   * Direct route: amountIn equals outputAmount, no RPC needed.
+   * Aggregator route: one Cetus `findRouters` call per (source, target,
+   * amount). Cached 5s by React Query so re-renders while the user
+   * scrolls/types don't re-hit Cetus. Cancellation on dep change comes
+   * for free.
+   */
+  const routeQuoteQ = useQuery<{ amountIn: bigint }>({
+    queryKey: [
+      "pay-route-quote",
+      payerCoinType,
+      merchantReceiveType,
+      outputAmount?.toString() ?? "",
+    ],
+    queryFn: async () => {
+      if (!outputAmount) throw new Error("no outputAmount");
+      if (isDirect) return { amountIn: outputAmount };
+      const quote = await quoteRoute(dexClients.cetusAggregator, {
+        inputCoinType: payerCoinType,
+        outputCoinType: merchantReceiveType,
+        amountOut: outputAmount,
+      });
+      return quote.kind === "direct"
+        ? { amountIn: outputAmount }
+        : { amountIn: quote.amountIn };
+    },
+    enabled: outputAmount != null && outputAmount > 0n,
+    staleTime: 5_000,
+    retry: false,
+  });
+  const routePayerAmountIn = routeQuoteQ.data?.amountIn ?? null;
+  const routeQuoteLoading = routeQuoteQ.isFetching;
 
   async function handlePay() {
     if (!outputAmount || !pricesQ.data || !account) return;
@@ -359,6 +424,7 @@ export function PayPanel({
         <SourceTokenPicker
           balances={balances}
           balancesLoading={balancesQ.isLoading}
+          outputAmount={outputAmount}
           merchantReceiveType={merchantReceiveType}
           value={payerCoinType}
           onChange={setPayerCoinType}
@@ -409,6 +475,10 @@ export function PayPanel({
             sgdMinorUnits={sgdMinorUnits}
             canPay={canPay}
             onClick={handlePay}
+            payerSymbol={payerLabel}
+            payerDecimals={payerBalance?.decimals ?? 0}
+            payerAmountIn={routePayerAmountIn}
+            quoteLoading={routeQuoteLoading}
           />
         </div>
       )}
@@ -422,6 +492,7 @@ function SourceTokenPicker({
   balances,
   balancesLoading,
   merchantReceiveType,
+  outputAmount,
   value,
   onChange,
   disabled,
@@ -429,6 +500,10 @@ function SourceTokenPicker({
   balances: UserBalance[];
   balancesLoading: boolean;
   merchantReceiveType: SupportedReceiveToken;
+  /** Exact amount the merchant will receive in `merchantReceiveType` units.
+   *  Surfaced as the cost-to-pay on the direct-routed row so the user
+   *  doesn't have to mentally convert "$0.10 SGD" into the token amount. */
+  outputAmount: bigint | null;
   value: string;
   onChange: (next: string) => void;
   disabled: boolean;
@@ -464,6 +539,22 @@ function SourceTokenPicker({
         {balances.map((b) => {
           const selected = value === b.coinType;
           const direct = b.coinType === merchantReceiveType;
+          // On the direct-routed row, the user pays exactly the merchant's
+          // outputAmount (no swap). Show "pay X" prominently so the user
+          // sees the actual token cost — not just their balance.
+          // Non-direct rows go through Cetus; the amount-in varies with
+          // route depth + slippage, so we can't pre-quote without an RPC
+          // roundtrip per token. They see just the balance + the hint
+          // below the list.
+          const directCost =
+            direct && outputAmount != null
+              ? formatBalance(outputAmount, b.decimals)
+              : null;
+          const balanceFmt = formatBalance(BigInt(b.balance), b.decimals);
+          const insufficient =
+            direct &&
+            outputAmount != null &&
+            BigInt(b.balance) < outputAmount;
           return (
             <li key={b.coinType}>
               <button
@@ -479,16 +570,33 @@ function SourceTokenPicker({
                 }`}
               >
                 <span className="flex items-center gap-2 min-w-0">
-                  <span className="text-sm font-medium">{b.symbol}</span>
+                  <span className="text-sm font-medium">
+                    {RECEIVE_LABEL[b.coinType as SupportedReceiveToken] ?? b.symbol}
+                  </span>
                   {direct && (
                     <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--success)]">
                       direct
                     </span>
                   )}
                 </span>
-                <span className="text-xs tabular-nums text-[var(--muted)] shrink-0">
-                  {formatBalance(b.balance, b.decimals)}
-                </span>
+                {directCost != null ? (
+                  <span className="flex flex-col items-end text-xs tabular-nums shrink-0 leading-tight">
+                    <span
+                      className={`font-medium ${
+                        insufficient ? "text-amber-300" : "text-white"
+                      }`}
+                    >
+                      pay {directCost}
+                    </span>
+                    <span className="text-[10px] text-[var(--muted-soft)]">
+                      hold {balanceFmt}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-xs tabular-nums text-[var(--muted)] shrink-0">
+                    {balanceFmt}
+                  </span>
+                )}
               </button>
             </li>
           );
@@ -544,11 +652,27 @@ function PayButton({
   sgdMinorUnits,
   canPay,
   onClick,
+  payerSymbol,
+  payerDecimals,
+  payerAmountIn,
+  quoteLoading,
 }: {
   state: PayState;
   sgdMinorUnits: number;
   canPay: boolean;
   onClick: () => void;
+  /** Symbol of the source token the user is spending (e.g. "USDsui", "HAEDAL"). */
+  payerSymbol: string;
+  /** Decimals of the source token, used to format `payerAmountIn`. */
+  payerDecimals: number;
+  /**
+   * Exact source-token amount the user will spend (smallest units).
+   * - Direct route: equal to `outputAmount` (caller resolves).
+   * - Aggregator route: `amountIn` from the eager Cetus quote.
+   * - Loading / errored / no route yet: null — fall back to SGD-only label.
+   */
+  payerAmountIn: bigint | null;
+  quoteLoading: boolean;
 }) {
   const submitting = state.kind === "submitting";
   const phaseLabel =
@@ -558,6 +682,11 @@ function PayButton({
         : state.phase === "quoting-route"
         ? "Quoting route on Cetus Aggregator…"
         : "Awaiting wallet signature…"
+      : null;
+  const sgdLabel = sgdMinorUnits > 0 ? formatSgd(sgdMinorUnits / 100) : null;
+  const tokenLabel =
+    payerAmountIn !== null && payerAmountIn > 0n && payerDecimals > 0
+      ? `${formatBalance(payerAmountIn, payerDecimals)} ${payerSymbol}`
       : null;
   return (
     <button
@@ -571,10 +700,20 @@ function PayButton({
           <Spinner /> {phaseLabel}
         </span>
       ) : sgdMinorUnits > 0 ? (
-        <>
-          <span>Pay {formatSgd(sgdMinorUnits / 100)}</span>
-          <span className="text-white/80 group-hover:text-white transition">→</span>
-        </>
+        <span className="flex flex-col items-center leading-tight">
+          <span className="flex items-center gap-2">
+            <span>
+              Pay {tokenLabel ?? sgdLabel}
+              {tokenLabel && quoteLoading ? "…" : ""}
+            </span>
+            <span className="text-white/80 group-hover:text-white transition">→</span>
+          </span>
+          {tokenLabel && sgdLabel && (
+            <span className="text-[11px] font-normal text-white/70 mt-0.5">
+              ≈ {sgdLabel}
+            </span>
+          )}
+        </span>
       ) : (
         <span>Enter an SGD amount</span>
       )}

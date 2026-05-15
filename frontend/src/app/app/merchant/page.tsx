@@ -1,12 +1,32 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
-import { useZkLoginSession } from "@/lib/zklogin";
+import { isZkLoginConfigured, startGoogleZkLogin, useZkLoginSession } from "@/lib/zklogin";
 
 export default function MerchantHome() {
-  const { session, hydrated } = useZkLoginSession();
+  const { session, hydrated, signOut } = useZkLoginSession();
   const signedIn = hydrated && !!session;
+  const [signInError, setSignInError] = useState<string | null>(null);
+  const [signInPending, setSignInPending] = useState(false);
+
+  async function handleSignIn() {
+    setSignInError(null);
+    setSignInPending(true);
+    try {
+      // Skip the intermediate /merchant/login page entirely — kick straight
+      // into Google's OAuth flow. On success the callback lands the user at
+      // /merchant/post-signin, which checks their UEN registrations and
+      // forwards them to /merchant/onboard (new merchant) or
+      // /merchant/terminal (returning merchant).
+      await startGoogleZkLogin("/merchant/post-signin");
+      // startGoogleZkLogin redirects; the line below only runs if it didn't.
+    } catch (e) {
+      setSignInError(e instanceof Error ? e.message : String(e));
+      setSignInPending(false);
+    }
+  }
 
   return (
     <main className="relative z-10 mx-auto w-full max-w-md px-5 py-6 space-y-6">
@@ -22,8 +42,8 @@ export default function MerchantHome() {
           {signedIn ? `Welcome back` : `For merchants`}
         </h1>
         <p className="text-sm text-[var(--muted)]">
-          Sign in once. Your quay wallet is derived from your identity. Quay
-          pays the gas while you onboard.
+          Sign in once with Google. Setup is free — Quay covers the network
+          fees so you can start accepting payments right away.
         </p>
       </section>
 
@@ -33,48 +53,76 @@ export default function MerchantHome() {
             <div className="h-10 w-10 rounded-full bg-[var(--accent)]/20 border border-[var(--accent)]/40 flex items-center justify-center text-[var(--accent-strong)] text-sm font-semibold shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]">
               {session.email?.charAt(0).toUpperCase() ?? "M"}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">Signed in</p>
               <p className="text-sm text-white truncate">{session.email}</p>
-              <p className="text-[11px] font-mono text-[var(--muted-soft)] truncate">
-                {session.address.slice(0, 10)}…{session.address.slice(-6)}
-              </p>
             </div>
+            <button
+              type="button"
+              onClick={signOut}
+              className="glass-chip shrink-0"
+              aria-label="Sign out"
+            >
+              Sign out
+            </button>
           </div>
         </section>
       )}
 
       {!signedIn ? (
-        <Link href="/merchant/login" className="glass-btn-primary group w-full">
-          <span className="flex items-center gap-2.5">
-            <GoogleIcon />
-            Sign in with Google
-          </span>
-          <span className="text-white/80 group-hover:text-white transition">→</span>
-        </Link>
+        <div className="space-y-2">
+          {!isZkLoginConfigured() ? (
+            <div className="glass-card-warning rounded-2xl p-4 space-y-1">
+              <p className="text-sm font-medium text-amber-100">
+                Sign-in not configured
+              </p>
+              <p className="text-xs text-amber-200/80">
+                The site is missing its Google OAuth + Enoki credentials.
+                Ops: set <code className="font-mono">NEXT_PUBLIC_GOOGLE_CLIENT_ID</code>{" "}
+                and <code className="font-mono">NEXT_PUBLIC_ENOKI_API_KEY</code> in Vercel.
+              </p>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSignIn}
+              disabled={signInPending}
+              className="glass-btn-primary group w-full disabled:opacity-60"
+            >
+              <span className="flex items-center gap-2.5">
+                <GoogleIcon />
+                {signInPending ? "Redirecting to Google…" : "Sign in with Google"}
+              </span>
+              <span className="text-white/80 group-hover:text-white transition">→</span>
+            </button>
+          )}
+          {signInError && (
+            <p className="text-xs text-red-300 break-words">{signInError}</p>
+          )}
+        </div>
       ) : (
         <section className="grid grid-cols-2 gap-3">
           <ActionCard
             href="/merchant/onboard"
-            title="Onboard UEN"
-            sub="Claim your UEN"
+            title="Add business"
+            sub="Register your UEN"
             icon={<QrIcon />}
             accent
           />
           <ActionCard
             href="/merchant/terminal"
             title="Terminal"
-            sub="Live payment feed"
+            sub="See live payments"
             icon={<TerminalIcon />}
           />
           <ActionCard
             href="/merchant/wallet"
-            title="Wallet"
-            sub="Sui address · zkLogin"
+            title="Account"
+            sub="Payouts & settings"
             icon={<WalletIcon />}
           />
           <ActionCard
-            href="/history"
+            href="/merchant/history"
             title="History"
             sub="Past receipts"
             icon={<ClockIcon />}
@@ -84,20 +132,20 @@ export default function MerchantHome() {
 
       <section className="glass-card rounded-2xl p-4 space-y-2">
         <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
-          What V0 does not do yet
+          Coming soon
         </p>
         <ul className="text-xs text-[var(--muted)] space-y-1.5 leading-relaxed">
           <li className="flex gap-2">
             <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            Mobile-number PayNow (~70% of SG hawkers) — UEN-based only.
+            PayNow with mobile numbers (UEN-only for now).
           </li>
           <li className="flex gap-2">
             <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            Manual SGQR-photo + BizFile+ review before attestation.
+            Manual SGQR photo review before approval.
           </li>
           <li className="flex gap-2">
             <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            Production zkLogin (V0 uses Enoki proof on testnet).
+            Mainnet launch (currently in beta).
           </li>
         </ul>
       </section>
@@ -149,10 +197,22 @@ function ActionCard({
 
 function GoogleIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
       <path
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-        fill="#ffffff"
+        fill="#4285F4"
+        d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
+      />
+      <path
+        fill="#34A853"
+        d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.836.86-3.048.86-2.344 0-4.328-1.583-5.036-3.71H.957v2.332A8.997 8.997 0 0 0 9 18z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+      />
+      <path
+        fill="#EA4335"
+        d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
       />
     </svg>
   );

@@ -17,7 +17,8 @@ export default function MerchantLoginPage() {
 function LoginInner() {
   const router = useRouter();
   const search = useSearchParams();
-  const next = search.get("next") ?? "/merchant/onboard";
+  const next = search.get("next") ?? "/merchant/post-signin";
+  const wasExpired = search.get("expired") === "1";
 
   const { session } = useZkLoginSession();
   const [error, setError] = useState<string | null>(null);
@@ -51,11 +52,23 @@ function LoginInner() {
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Sign in</h1>
         <p className="text-sm text-[var(--muted)] leading-relaxed">
-          One Google account = one Sui address = one merchant entry on chain.
-          quay never sees your password; Google does the identity work and
-          Enoki binds it to your Sui wallet with a Groth16 zk proof.
+          One Google account, one merchant account. Quay never sees your
+          password — Google handles sign-in, and you can come back from any
+          device to find your business right where you left it.
         </p>
       </header>
+
+      {wasExpired && (
+        <section className="glass-card-warning rounded-2xl p-4 space-y-1">
+          <p className="text-sm font-medium text-amber-100">
+            Your session expired
+          </p>
+          <p className="text-xs text-amber-200/80 leading-relaxed">
+            We expire sessions after a while to keep your account safe. Sign in
+            again with Google to continue — same business, nothing to remember.
+          </p>
+        </section>
+      )}
 
       <section className="glass-card rounded-2xl p-6 space-y-4">
         {!configured ? (
@@ -86,13 +99,13 @@ function LoginInner() {
           <p className="relative z-10 text-xs text-red-300">{error}</p>
         )}
 
-        <ol className="relative z-10 text-[11px] text-[var(--muted-soft)] space-y-1 pt-1">
-          <li>1. Browser mints an ephemeral Ed25519 keypair</li>
-          <li>2. Google issues an ID token with our ephemeral nonce</li>
-          <li>3. Enoki proves the JWT + salt + ephemeral binding in zero knowledge</li>
-          <li>4. The proof yields a stable addressSeed → your Sui address</li>
-          <li>5. Yours forever — no private key to back up, no seed phrase</li>
-        </ol>
+        <ul className="relative z-10 text-[11px] text-[var(--muted-soft)] space-y-1 pt-1">
+          <li>· No new password to remember — Google does the sign-in</li>
+          <li>· Same account on every device, every time</li>
+          <li>· Free to set up — Quay covers the network fees</li>
+          <li>· Get paid in SGD-pegged dollars, or pick another currency</li>
+          <li>· Your money stays yours — Quay never holds funds</li>
+        </ul>
       </section>
     </main>
   );
