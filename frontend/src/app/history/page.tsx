@@ -251,7 +251,6 @@ function ReceiptList({ receipts }: { receipts: NormalizedReceipt[] }) {
 }
 
 function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolean }) {
-  const tokenLabel = shortTokenLabel(r.tokenType);
   const merchantInitial = r.merchant.slice(2, 3).toUpperCase();
   return (
     <li
@@ -274,7 +273,7 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
             </span>
           </div>
           <p className="mt-0.5 text-xs text-[var(--muted)] font-mono truncate">
-            {formatTokenAmount(r.amount, tokenLabel)} → {r.merchant.slice(0, 6)}…{r.merchant.slice(-4)}
+            {formatTokenAmount(r.amount, r.tokenType)} → {r.merchant.slice(0, 6)}…{r.merchant.slice(-4)}
           </p>
           {r.memo && (
             <p className="mt-1.5 text-xs text-[var(--muted)] italic">&ldquo;{r.memo}&rdquo;</p>
@@ -405,17 +404,36 @@ function normalizeEvent(ev: {
   }
 }
 
-function shortTokenLabel(typeName: string): string {
+// Bridge publishes USDsui's on-chain symbol as "USDSUI" all-caps but the brand
+// reads "USDsui" — mirror PayPanel's curated labels here.
+const TOKEN_DISPLAY: Record<string, { label: string; decimals: number }> = {
+  "::sui::SUI": { label: "SUI", decimals: 9 },
+  "::usdc::USDC": { label: "USDC", decimals: 6 },
+  "::usdsui::USDSUI": { label: "USDsui", decimals: 6 },
+  "::scallop_usdsui::SCALLOP_USDSUI": { label: "sUSDsui", decimals: 6 },
+};
+
+function tokenDisplay(typeName: string): { label: string; decimals: number } {
+  for (const [suffix, info] of Object.entries(TOKEN_DISPLAY)) {
+    if (typeName.endsWith(suffix)) return info;
+  }
   const parts = typeName.split("::");
-  return parts.at(-1) ?? typeName;
+  return { label: parts.at(-1) ?? typeName, decimals: 0 };
 }
 
-function formatTokenAmount(amount: bigint, symbol: string): string {
-  if (symbol === "SUI") {
-    const sui = Number(amount) / 1_000_000_000;
-    return `${sui < 1 ? sui.toFixed(4) : sui.toFixed(2)} SUI`;
-  }
-  return `${amount.toString()} ${symbol}`;
+function formatTokenAmount(amount: bigint, typeName: string): string {
+  const { label, decimals } = tokenDisplay(typeName);
+  if (decimals === 0) return `${amount.toString()} ${label}`;
+  const scale = 10n ** BigInt(decimals);
+  const whole = amount / scale;
+  const frac = amount % scale;
+  // Show up to 4 fractional digits for sub-unit amounts, 2 otherwise.
+  const showFour = whole === 0n;
+  const fracDigits = showFour ? 4 : 2;
+  const trimmed = (frac * 10n ** BigInt(fracDigits) / scale)
+    .toString()
+    .padStart(fracDigits, "0");
+  return `${whole.toString()}.${trimmed} ${label}`;
 }
 
 function formatRelativeTime(ms: number): string {
