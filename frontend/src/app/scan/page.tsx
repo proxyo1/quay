@@ -9,7 +9,7 @@ import { PayPanel } from "@/components/PayPanel";
 import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
 import { fetchMerchantProfile, lookupUen } from "@/lib/quay";
 import {
-  extractPayNow,
+  extractMerchant,
   looksLikeUen,
   parseSgqr,
   sanitizeMerchantCity,
@@ -74,12 +74,16 @@ export default function ScanPage() {
         setInput({ kind: "error", message: "Scanned QR has an invalid CRC — not an SGQR." });
         return;
       }
-      const payNow = extractPayNow(payload);
-      if (!payNow) {
-        setInput({ kind: "error", message: "Scanned QR isn't an SG.PAYNOW code." });
+      const merchant = extractMerchant(payload);
+      if (!merchant) {
+        setInput({
+          kind: "error",
+          message:
+            "Scanned QR doesn't carry a recognized SG payment rail — Quay supports PayNow and NETS.",
+        });
         return;
       }
-      if (payNow.proxyType === "mobile") {
+      if (merchant.proxyType === "mobile") {
         setInput({
           kind: "error",
           message:
@@ -87,16 +91,16 @@ export default function ScanPage() {
         });
         return;
       }
-      if (payNow.proxyType !== "uen") {
+      if (merchant.proxyType !== "uen") {
         setInput({
           kind: "error",
-          message: `Proxy type '${payNow.proxyType}' isn't supported. UEN only in V0.`,
+          message: `Proxy type '${merchant.proxyType}' isn't supported. UEN only in V0.`,
         });
         return;
       }
-      setUen(payNow.proxyValue);
+      setUen(merchant.proxyValue);
       setLookup({ kind: "idle" });
-      setInput({ kind: "ok", source: "scan", uen: payNow.proxyValue, payload });
+      setInput({ kind: "ok", source: "scan", uen: merchant.proxyValue, payload });
     } catch (e) {
       setInput({
         kind: "error",

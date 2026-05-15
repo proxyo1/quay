@@ -61,6 +61,37 @@ export interface PayNowInfo {
   expiryDate?: string;
 }
 
+/** Payment rail surfaced by `extractMerchant`. */
+export type MerchantRail = "paynow" | "nets";
+
+/**
+ * Unified merchant identity extracted from an SGQR, regardless of which
+ * payment rail the printed sticker uses. The on-chain Quay registry only
+ * cares about the UEN — the rail is informational (for analytics + UX
+ * messaging, e.g. "scanned a NETS sticker").
+ *
+ * Resolution order in `extractMerchant`:
+ *   1. SG.PAYNOW (preferred — structured `proxy_type` + `proxy_value`)
+ *   2. SG.COM.NETS (UEN embedded inside sub-tag 01; regex'd out)
+ *
+ * Multi-rail stickers (most chain stores) include both; the first match
+ * wins. NETS-only stickers (smaller SMEs, e.g. DOT DESIGN) still work.
+ */
+export interface MerchantQrInfo {
+  /** Source MAI tag (e.g., "26"). */
+  tag: string;
+  /** Which Singapore rail the GUID matched. */
+  rail: MerchantRail;
+  /** Proxy type. Always `"uen"` for NETS extraction (we only mine UENs). */
+  proxyType: ProxyType;
+  /** Raw proxy value — the UEN. */
+  proxyValue: string;
+  /** PayNow only: editable flag. NETS QRs don't carry this. */
+  editable?: boolean;
+  /** PayNow only: expiry date (YYYYMMDD). NETS QRs don't carry this. */
+  expiryDate?: string;
+}
+
 export interface AdditionalData {
   /** Bill number / reference. */
   billNumber?: string;

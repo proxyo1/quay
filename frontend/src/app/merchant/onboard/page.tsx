@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
-import { extractPayNow, looksLikeUen, parseSgqr } from "@/lib/sgqr";
+import { extractMerchant, looksLikeUen, parseSgqr } from "@/lib/sgqr";
 import { lookupUen } from "@/lib/quay";
 import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
 import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
@@ -88,21 +88,25 @@ export default function OnboardPage() {
         setScanFeedback("Scanned QR has an invalid CRC — type the UEN manually.");
         return;
       }
-      const payNow = extractPayNow(payload);
-      if (!payNow) {
-        setScanFeedback("Scanned QR isn't an SG.PAYNOW code.");
+      const merchant = extractMerchant(payload);
+      if (!merchant) {
+        setScanFeedback(
+          "Scanned QR doesn't carry a recognized SG payment rail — PayNow or NETS only.",
+        );
         return;
       }
-      if (payNow.proxyType === "mobile") {
+      if (merchant.proxyType === "mobile") {
         setScanFeedback("Mobile-number PayNow isn't supported in V0. Use a UEN SGQR.");
         return;
       }
-      if (payNow.proxyType !== "uen") {
-        setScanFeedback(`Proxy type '${payNow.proxyType}' not supported.`);
+      if (merchant.proxyType !== "uen") {
+        setScanFeedback(`Proxy type '${merchant.proxyType}' not supported.`);
         return;
       }
-      setUen(payNow.proxyValue);
-      setScanFeedback(`Captured UEN ${payNow.proxyValue}.`);
+      setUen(merchant.proxyValue);
+      setScanFeedback(
+        `Captured UEN ${merchant.proxyValue} from ${merchant.rail.toUpperCase()} sticker.`,
+      );
       if (state.kind !== "idle" && state.kind !== "submitting") setState({ kind: "idle" });
     } catch (e) {
       setScanFeedback(`Couldn't parse QR: ${e instanceof Error ? e.message : String(e)}`);
