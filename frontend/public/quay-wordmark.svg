@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200" role="img" aria-label="quay">
+  <title>quay.</title>
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Geist:wght@600&amp;display=swap');
+      .wm {
+        font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+        font-weight: 600;
+        font-size: 160px;
+        letter-spacing: -7px;
+      }
+    </style>
+  </defs>
+  <rect width="600" height="200" fill="#0a1024"/>
+  <text x="300" y="130" class="wm" fill="#f4f6fb" text-anchor="middle">quay<tspan fill="#4DA2FF">.</tspan></text>
+</svg>
