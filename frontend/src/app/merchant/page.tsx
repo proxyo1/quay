@@ -1,12 +1,30 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
-import { useZkLoginSession } from "@/lib/zklogin";
+import { isZkLoginConfigured, startGoogleZkLogin, useZkLoginSession } from "@/lib/zklogin";
 
 export default function MerchantHome() {
   const { session, hydrated } = useZkLoginSession();
   const signedIn = hydrated && !!session;
+  const [signInError, setSignInError] = useState<string | null>(null);
+  const [signInPending, setSignInPending] = useState(false);
+
+  async function handleSignIn() {
+    setSignInError(null);
+    setSignInPending(true);
+    try {
+      // Skip the intermediate /merchant/login page entirely — kick straight
+      // into Google's OAuth flow. On success the callback lands the user at
+      // /merchant/onboard with a fresh session.
+      await startGoogleZkLogin("/merchant/onboard");
+      // startGoogleZkLogin redirects; the line below only runs if it didn't.
+    } catch (e) {
+      setSignInError(e instanceof Error ? e.message : String(e));
+      setSignInPending(false);
+    }
+  }
 
   return (
     <main className="relative z-10 mx-auto w-full max-w-md px-5 py-6 space-y-6">
@@ -45,13 +63,36 @@ export default function MerchantHome() {
       )}
 
       {!signedIn ? (
-        <Link href="/merchant/login" className="glass-btn-primary group w-full">
-          <span className="flex items-center gap-2.5">
-            <GoogleIcon />
-            Sign in with Google
-          </span>
-          <span className="text-white/80 group-hover:text-white transition">→</span>
-        </Link>
+        <div className="space-y-2">
+          {!isZkLoginConfigured() ? (
+            <div className="glass-card-warning rounded-2xl p-4 space-y-1">
+              <p className="text-sm font-medium text-amber-100">
+                Sign-in not configured
+              </p>
+              <p className="text-xs text-amber-200/80">
+                The site is missing its Google OAuth + Enoki credentials.
+                Ops: set <code className="font-mono">NEXT_PUBLIC_GOOGLE_CLIENT_ID</code>{" "}
+                and <code className="font-mono">NEXT_PUBLIC_ENOKI_API_KEY</code> in Vercel.
+              </p>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSignIn}
+              disabled={signInPending}
+              className="glass-btn-primary group w-full disabled:opacity-60"
+            >
+              <span className="flex items-center gap-2.5">
+                <GoogleIcon />
+                {signInPending ? "Redirecting to Google…" : "Sign in with Google"}
+              </span>
+              <span className="text-white/80 group-hover:text-white transition">→</span>
+            </button>
+          )}
+          {signInError && (
+            <p className="text-xs text-red-300 break-words">{signInError}</p>
+          )}
+        </div>
       ) : (
         <section className="grid grid-cols-2 gap-3">
           <ActionCard
