@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 
 import { decode as decodeQuoteMetadata } from "@/lib/sgqr/quote-metadata";
-import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
+import { QUAY, accountUrl, txUrl } from "@/lib/sui-config";
 
 interface PaymentReceiptEvent {
   receipt_id: number[];
@@ -125,7 +125,7 @@ export default function HistoryPage() {
         Connected wallet:{" "}
         {account ? (
           <a
-            href={objectUrl(account.address)}
+            href={accountUrl(account.address)}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-[var(--accent)] hover:underline"

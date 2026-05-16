@@ -43,3 +43,8 @@ export function txUrl(digest: string): string {
 export function objectUrl(id: string): string {
   return `https://suiscan.xyz/${SUI_NETWORK}/object/${id}`;
 }
+
+/** Sui explorer URL for a wallet address. */
+export function accountUrl(address: string): string {
+  return `https://suiscan.xyz/${SUI_NETWORK}/account/${address}`;
+}

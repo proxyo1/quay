@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 
 import { fetchMerchantProfile, getEntriesTableId } from "@/lib/quay";
 import { USDSUI } from "@/lib/quay/scallop";
-import { QUAY, objectUrl, txUrl } from "@/lib/sui-config";
+import { QUAY, accountUrl, txUrl } from "@/lib/sui-config";
 import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
 import {
   buildMerchantProfileBytes,
@@ -89,7 +89,7 @@ export default function WalletPage() {
         </div>
         <p className="relative z-10 text-xs text-[var(--muted-soft)]">
           <a
-            href={objectUrl(session.address)}
+            href={accountUrl(session.address)}
             target="_blank"
             rel="noreferrer"
             className="text-[var(--accent)] hover:underline"
