@@ -1,15 +1,25 @@
 "use client";
 
 import { useSuiClient } from "@mysten/dapp-kit";
-import { blake2b } from "@noble/hashes/blake2.js";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
+import {
+  bytesToBase64,
+  bytesToHex,
+  encryptDocument,
+  generateDek,
+  hexToBytes,
+  kybDocHash,
+  wrapDek,
+} from "@/lib/kyb/crypto";
+import { fetchAdminKybPubkey, submitKyb } from "@/lib/kyb/client";
+import { savePendingHandoff } from "@/lib/kyb/handoff";
 import { extractMerchant, looksLikeUen, parseSgqr } from "@/lib/sgqr";
 import { lookupUen } from "@/lib/quay";
-import { QUAY, txUrl } from "@/lib/sui-config";
+import { QUAY } from "@/lib/sui-config";
 import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
 import {
   buildMerchantProfileBytes,
@@ -17,27 +27,22 @@ import {
   RECEIVE_TOKEN_OPTIONS,
   type SupportedReceiveToken,
 } from "@/lib/walrus/profileSchema";
-import { useZkLoginSession, zkLoginSign } from "@/lib/zklogin";
+import { useZkLoginSession } from "@/lib/zklogin";
 
 const LOGO_MAX_BYTES = 200 * 1024;
 const LOGO_ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-function toHex(b: Uint8Array): string {
-  return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
-}
-
-type SponsoredRegister = {
-  tx_bytes_b64: string;
-  sponsor_signature: string;
-  sponsor_address: string;
-  expires_at_ms: number;
-  daily_cap: number;
-};
+const KYB_DOC_MAX_BYTES = 5 * 1024 * 1024;
+const KYB_DOC_ALLOWED_MIME = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+]);
 
 type State =
   | { kind: "idle" }
-  | { kind: "submitting" }
-  | { kind: "registered"; digest: string }
+  | { kind: "submitting"; phase: "encrypting" | "uploading" | "saving" }
   | { kind: "already-yours" }
   | { kind: "error"; message: string };
 
@@ -51,6 +56,8 @@ export default function OnboardPage() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [logoNotice, setLogoNotice] = useState<string | null>(null);
+  const [kybDocFile, setKybDocFile] = useState<File | null>(null);
+  const [kybDocError, setKybDocError] = useState<string | null>(null);
   const [receiveToken, setReceiveToken] = useState<SupportedReceiveToken>(DEFAULT_RECEIVE_TOKEN);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
@@ -73,9 +80,11 @@ export default function OnboardPage() {
   if (!session) return null;
 
   const uenValid = looksLikeUen(uen);
-  const ready = uenValid && state.kind !== "submitting";
-  const currentStep: 1 | 2 | 3 =
-    state.kind === "submitting" || state.kind === "registered" || state.kind === "already-yours"
+  const ready = uenValid && kybDocFile !== null && state.kind !== "submitting";
+  const currentStep: 1 | 2 | 3 | 4 =
+    state.kind === "submitting" || state.kind === "already-yours"
+      ? 4
+      : kybDocFile
       ? 3
       : uenValid
       ? 2
@@ -115,8 +124,8 @@ export default function OnboardPage() {
   }
 
   async function handleSubmit() {
-    if (!session) return;
-    setState({ kind: "submitting" });
+    if (!session || !kybDocFile) return;
+    setState({ kind: "submitting", phase: "encrypting" });
     setLogoNotice(null);
     try {
       const existing = await lookupUen(sui, QUAY.registryId, uen);
@@ -133,7 +142,9 @@ export default function OnboardPage() {
         return;
       }
 
-      // Upload the logo first so the v1 profile JSON can reference its blob ID.
+      // ── Upload the logo + profile metadata first (existing pattern). ──
+      // We do this BEFORE the KYB submit so the resulting blob ID can be
+      // stashed in the handoff record and carried through to /finalize.
       let logoBlobId: string | null = null;
       if (logoFile) {
         try {
@@ -146,11 +157,6 @@ export default function OnboardPage() {
         }
       }
 
-      // Build + upload the v1 merchant profile blob. This is what the on-chain
-      // `metadata_uri` points at — readers parse it via parseMerchantProfile.
-      // If the profile upload fails but the logo upload succeeded, fall back to
-      // the legacy "metadata_uri = logo blob ID" layout so the merchant still
-      // has SOMETHING on chain. Readers handle the legacy shape transparently.
       let metadataBlobId: string | undefined;
       try {
         const profileBytes = buildMerchantProfileBytes({
@@ -174,49 +180,72 @@ export default function OnboardPage() {
         }
       }
 
-      const evidenceObject = {
-        merchant_name: merchantName,
+      // ── Encrypt the KYB doc client-side. Server never sees plaintext. ──
+      const docBytes = new Uint8Array(await kybDocFile.arrayBuffer());
+      const dek = generateDek();
+      const { ciphertext, nonce } = encryptDocument(docBytes, dek);
+      const docHashHex = bytesToHex(kybDocHash(docBytes));
+
+      // Fetch the admin's X25519 public key, wrap the DEK.
+      const adminPubkeyHex = await fetchAdminKybPubkey();
+      const adminPubkey = hexToBytes(adminPubkeyHex);
+      const wrappedDek = await wrapDek(dek, adminPubkey);
+
+      // Best-effort: zero the plaintext DEK after wrap.
+      dek.fill(0);
+
+      setState({ kind: "submitting", phase: "uploading" });
+
+      const submitResult = await submitKyb({
         uen,
+        businessName: merchantName.trim() || undefined,
+        ciphertextB64: bytesToBase64(ciphertext),
+        ciphertextNonceB64: bytesToBase64(nonce),
+        wrappedDekB64: bytesToBase64(wrappedDek),
+        kybDocHashHex: docHashHex,
+        originalMimeType: kybDocFile.type,
         claimer: session.address,
-        signed_at_ms: Date.now(),
-      };
-      const evidenceContent = JSON.stringify(evidenceObject);
-      const evidenceBytes = new TextEncoder().encode(evidenceContent);
-      const evidenceHashHex = toHex(blake2b(evidenceBytes, { dkLen: 32 }));
-
-      const res = await fetch("/api/sponsor/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          uen,
-          claimer: session.address,
-          metadata_blob_id: metadataBlobId,
-          evidence_hash_hex: evidenceHashHex,
-          evidence_content: evidenceContent,
-        }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(err.error ?? `HTTP ${res.status}`);
-      }
-      const sp = (await res.json()) as SponsoredRegister;
-      const bytes = base64ToBytes(sp.tx_bytes_b64);
-      const senderSig = await zkLoginSign(session, bytes);
 
-      const result = await sui.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature: [senderSig, sp.sponsor_signature],
-        options: { showEffects: true },
+      setState({ kind: "submitting", phase: "saving" });
+
+      // Stash the polling token + metadata blob id so the pending page
+      // (and later /finalize) can carry them through without asking the
+      // merchant to re-upload anything.
+      savePendingHandoff({
+        submissionId: submitResult.submissionId,
+        pollingToken: submitResult.pollingToken,
+        walletAddress: session.address,
+        uen,
+        metadataBlobId: metadataBlobId ?? null,
+        submittedAt: submitResult.submittedAt,
       });
-      if (result.effects?.status?.status !== "success") {
-        const raw = result.effects?.status?.error ?? "unknown";
-        throw new Error(mapRegisterAbort(raw, uen));
-      }
-      await sui.waitForTransaction({ digest: result.digest });
-      setState({ kind: "registered", digest: result.digest });
+
+      router.push("/merchant/onboard/pending");
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     }
+  }
+
+  function onKybDocChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) {
+      setKybDocFile(null);
+      setKybDocError(null);
+      return;
+    }
+    if (!KYB_DOC_ALLOWED_MIME.has(file.type)) {
+      setKybDocFile(null);
+      setKybDocError(`Unsupported type ${file.type || "(unknown)"} — use PDF, PNG, JPEG, or WebP.`);
+      return;
+    }
+    if (file.size > KYB_DOC_MAX_BYTES) {
+      setKybDocFile(null);
+      setKybDocError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — max 5 MB.`);
+      return;
+    }
+    setKybDocFile(file);
+    setKybDocError(null);
   }
 
   function onLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -408,6 +437,45 @@ export default function OnboardPage() {
           {logoError && <p className="text-[11px] text-amber-300">{logoError}</p>}
           {logoNotice && <p className="text-[11px] text-amber-300">{logoNotice}</p>}
         </div>
+
+        <div className="relative z-10 space-y-1.5">
+          <label htmlFor="kyb-doc" className="block text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
+            Proof of ownership <span className="normal-case text-[var(--muted-soft)]">(required, ≤5MB)</span>
+          </label>
+          <label
+            htmlFor="kyb-doc"
+            className={`block rounded-xl border-2 border-dashed px-4 py-5 text-center cursor-pointer transition backdrop-blur-md ${
+              kybDocFile
+                ? "border-[var(--accent)]/45 bg-[var(--accent)]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]"
+                : "border-white/15 hover:border-white/30 hover:bg-white/[0.03]"
+            }`}
+          >
+            <UploadIcon />
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              {kybDocFile
+                ? `${kybDocFile.name} (${(kybDocFile.size / 1024 / 1024).toFixed(1)}MB)`
+                : "Tap to upload Bizfile (ACRA) or business letterhead"}
+            </p>
+            <p className="text-[10px] text-[var(--muted-soft)] mt-0.5">
+              {kybDocFile
+                ? "Will be encrypted in your browser before upload"
+                : "PDF, PNG, JPEG, or WebP"}
+            </p>
+          </label>
+          <input
+            id="kyb-doc"
+            type="file"
+            accept="application/pdf,image/png,image/jpeg,image/webp"
+            onChange={onKybDocChange}
+            className="sr-only"
+            disabled={state.kind === "submitting"}
+          />
+          {kybDocError && <p className="text-[11px] text-amber-300">{kybDocError}</p>}
+          <p className="text-[10px] text-[var(--muted-soft)] leading-relaxed">
+            Your document is encrypted on this device before being uploaded.
+            Only Quay&apos;s reviewer can decrypt it.
+          </p>
+        </div>
       </section>
 
       <section className="glass-card-accent rounded-2xl p-4">
@@ -441,11 +509,12 @@ export default function OnboardPage() {
   );
 }
 
-function Stepper({ current }: { current: 1 | 2 | 3 }) {
+function Stepper({ current }: { current: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Scan" },
     { n: 2, label: "Details" },
-    { n: 3, label: "Confirm" },
+    { n: 3, label: "Verify" },
+    { n: 4, label: "Submit" },
   ] as const;
   return (
     <div className="flex items-center gap-2">
@@ -535,46 +604,13 @@ function SubmitFlow({
       </section>
     );
   }
-  if (state.kind === "registered") {
-    return (
-      <section className="space-y-3">
-        <div className="glass-card-success rounded-2xl p-4 space-y-1">
-          <p className="text-sm font-medium text-white inline-flex items-center gap-2">
-            <span className="text-[var(--success)]">
-              <CheckIcon />
-            </span>
-            Business added
-          </p>
-          <p className="text-xs text-[var(--muted)]">
-            Receipt ·{" "}
-            <a
-              href={txUrl(state.digest)}
-              target="_blank"
-              rel="noreferrer"
-              className="font-mono text-[var(--accent)] hover:underline"
-            >
-              {state.digest.slice(0, 10)}…{state.digest.slice(-6)} ↗
-            </a>
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Link
-            href="/merchant/terminal"
-            className="glass-btn-primary text-sm py-2.5 justify-center"
-          >
-            Open terminal →
-          </Link>
-          <Link
-            href="/scan"
-            className="glass-btn-ghost text-sm py-2.5 justify-center"
-          >
-            Try a test payment →
-          </Link>
-        </div>
-      </section>
-    );
-  }
   if (state.kind === "submitting") {
+    const label =
+      state.phase === "encrypting"
+        ? "Encrypting your document…"
+        : state.phase === "uploading"
+        ? "Uploading to Walrus…"
+        : "Saving your submission…";
     return (
       <button
         type="button"
@@ -582,7 +618,7 @@ function SubmitFlow({
         className="w-full rounded-2xl bg-[var(--accent)]/30 border border-[var(--accent)]/40 backdrop-blur-md text-white font-medium py-4 px-5 cursor-wait flex items-center justify-center gap-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.16)]"
       >
         <Spinner />
-        Setting up your business…
+        {label}
       </button>
     );
   }
@@ -593,7 +629,7 @@ function SubmitFlow({
       disabled={!ready}
       className="glass-btn-primary group w-full"
     >
-      <span>Add business</span>
+      <span>Submit for review</span>
       <span className={ready ? "text-white/80 group-hover:text-white transition" : "text-[var(--muted-soft)]"}>
         →
       </span>
@@ -645,24 +681,3 @@ function Spinner() {
   );
 }
 
-function mapRegisterAbort(raw: string, uen: string): string {
-  if (raw.includes("MoveAbort") && raw.includes("register_merchant")) {
-    if (/,\s*1\)/.test(raw)) {
-      return `Someone just registered ${uen} a moment ago. Try a different UEN.`;
-    }
-    if (/,\s*5\)/.test(raw)) return "We couldn't verify your registration. Please try again.";
-    if (/,\s*9\)/.test(raw)) return "Verification expired — please try again.";
-    if (/,\s*6\)/.test(raw)) return "Something went wrong with verification. Please try again.";
-  }
-  return "Couldn't add your business right now. Please try again — contact support if it keeps failing.";
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  if (typeof window !== "undefined" && typeof window.atob === "function") {
-    const s = window.atob(b64);
-    const out = new Uint8Array(s.length);
-    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
-    return out;
-  }
-  return Uint8Array.from(Buffer.from(b64, "base64"));
-}

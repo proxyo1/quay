@@ -1,0 +1,10 @@
+# Bun test configuration.
+#
+# Map Next.js' `server-only` module to a no-op stub during tests so we
+# can unit-test server-only library code (admin-auth, polling-token,
+# kyb-store, etc.) without the package's runtime guard tripping.
+# In application code, server-only still works normally because Next.js
+# resolves it differently.
+
+[test]
+preload = ["./test/setup.ts"]
