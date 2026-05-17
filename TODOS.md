@@ -57,7 +57,11 @@ Generated 2026-05-12 from office-hours design session + hackathon scoping.
 - [ ] Engage Move audit firm (OtterSec / MoveBit / Zellic), 4-6 week lead time, $25-50k
 - [ ] NETS SGQR terms-of-service legal opinion — risk is reduced by using UEN (ACRA-controlled) rather than NETS-controlled keys, but a formal opinion is still prudent before mainnet
 - [ ] Mobile-number PayNow proxy support (proxy type `0`) for sole-proprietor merchants without a UEN
-- [ ] CorpPass federation for automatic UEN ownership verification (replaces manual SGQR-photo + BizFile+ flow)
+- [x] Manual KYB doc review gate before issuer attestation (`/admin/kyb` flow, shipped)
+- [ ] CorpPass federation for automatic UEN ownership verification (replaces the current manual Bizfile review at `/admin/kyb`)
+- [ ] Retroactive KYB review for grandfathered merchants registered before the KYB gate landed — admin tool to flag a wallet "needs KYB" and surface a banner in their terminal until they submit
+- [ ] v1.1: "Remember key on this device for 24h" password-wrapped storage for the admin X25519 key, to avoid re-signing the derive-key prompt on every session once daily review volume warrants it
+- [ ] v2: WebAuthn / Touch ID-derived unlock as an alternative to wallet-signature derivation
 - [ ] Real-merchant pilot: 5+ named SG crypto-friendly merchants signed up
 - [ ] Migrate from Wormhole USDC to Circle CCTP native USDC when available
 - [ ] V2 fiat settlement layer via StraitsX or equivalent (requires PSA MPI license, ~$200-500k)

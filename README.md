@@ -60,7 +60,8 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 | Surface | Status |
 |---|---|
 | `/merchant/login` — Google zkLogin (Enoki prover, testnet) | ✅ |
-| `/merchant/onboard` — claim a UEN, pick receive token (USDC default / SUI), upload logo | ✅ sponsored gas |
+| `/merchant/onboard` — claim a UEN, pick receive token, upload logo, attach KYB proof (Bizfile/letterhead, encrypted in-browser) | ✅ sponsored gas + admin review |
+| `/merchant/onboard/pending` — submission status, polls every 30s, "Complete registration" once approved | ✅ |
 | `/merchant/wallet` — view identity, **change settlement preference any time** | ✅ sponsored gas |
 | `/merchant/terminal` — live PaymentReceipt feed, SGD-prominent + received-token formatted | ✅ 2s refresh |
 | Multi-UEN ownership (one wallet, many sticker locations) | ✅ |
@@ -72,9 +73,14 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 | `payments::payments` Move module (Move 2024) | ✅ V4 on testnet |
 | `MerchantRegistry` shared object | ✅ |
 | `/api/attest` — issuer ed25519 attestations (server-only key) | ✅ |
-| `/api/sponsor/register` — sponsored UEN claims (5/day per address) | ✅ |
+| `/api/kyb/submit` — encrypted KYB doc upload + pending row insert | ✅ |
+| `/api/kyb/status` — polling-token-gated status check (no wallet enumeration) | ✅ |
+| `/api/kyb/finalize` — post-approval: build evidence_content (JCS), sign attestation, return sponsored tx (5/day per address) | ✅ |
+| `/api/admin/*` — wallet-signed admin queue: `challenge`, `auth`, `kyb/list`, `kyb/[id]`, `kyb/[id]/decide` | ✅ |
+| `/admin/setup` — one-time wallet → X25519 pubkey derivation for `ADMIN_KYB_PUBKEY` | ✅ |
+| `/admin/kyb` — admin review queue, in-browser decryption via wallet-signature-derived key | ✅ |
 | `/api/sponsor/update-metadata` — sponsored settlement-token changes (10/day) | ✅ |
-| Walrus integration for logo + receipt blobs | ✅ |
+| Walrus integration for logo + receipt + encrypted KYB blobs | ✅ |
 
 ### Testnet aggregator caveat
 
@@ -88,15 +94,30 @@ The UI degrades gracefully: cross-token payments surface `AggregatorRouteError` 
 
 ## How it works (product walkthrough)
 
-### 1. Merchant onboarding (~90 seconds, 1 signature)
+### 1. Merchant onboarding (two phases, ~2 minutes of merchant time + admin review)
+
+**Phase 1 — Submit (merchant, ~2 minutes):**
 
 1. Sign in at `/merchant/login` with Google → Enoki returns a Groth16 zk-proof binding the Google identity to a deterministic Sui address.
 2. Scan their SGQR sticker (or type UEN manually).
 3. Optionally upload a logo and business name.
 4. Pick **how they want to receive payments**: USDC (default) or SUI.
-5. Tap "Claim UEN" → frontend uploads a v1 profile blob to Walrus (logo + preferred receive token), issuer signs an ed25519 attestation server-side, sponsor wallet co-signs gas, merchant signs as sender via zkLogin, `register_merchant` lands on chain.
+5. **Attach a proof of business ownership** (Bizfile from ACRA, or business letterhead): PDF / PNG / JPEG / WebP, ≤ 5 MB. The browser generates a per-doc AES-256-GCM key, encrypts the doc, wraps the key with the admin's X25519 pubkey via NaCl `crypto_box_seal`, and uploads the ciphertext to Walrus. Plaintext bytes never leave the browser.
+6. Tap "Submit for review" → row inserted in `kyb_submissions` with `status='pending'`, polling-token JWT returned, merchant redirected to `/merchant/onboard/pending` (polls every 30s).
 
-Total wallet balance required: **zero SUI**.
+**Phase 2 — Admin review (~1 business day target):**
+
+7. Admin connects their mnemonic-backed Sui wallet at `/admin/kyb`, signs a challenge → 1h HttpOnly cookie set.
+8. Click a pending row → wallet pops up to sign `"QUAY_KYB_DECRYPT_KEY_V1"` (deterministic ed25519 → HKDF-SHA256 + RFC 7748 clamp → X25519 priv key, in browser memory only). Ciphertext fetched from Walrus, decrypted, doc rendered inline (PDF iframe / image zoom).
+9. Admin clicks **Approve** (or Reject with reason). Row flips to `status='approved'`.
+
+**Phase 3 — Finalize (merchant, 1 signature):**
+
+10. Merchant's pending page polls, sees status flip to "Approved", clicks **Complete registration**.
+11. Server builds canonical `evidence_content` JSON (JCS, RFC 8785) binding UEN + business_name + `kyb_doc_hash_hex` + `kyb_doc_blob_id` + timestamps + claimer address, hashes it to `evidence_hash`, issuer signs an ed25519 attestation, sponsor co-signs gas, returns sponsored tx bytes.
+12. Merchant signs as sender via zkLogin, `register_merchant` lands on chain with `evidence_hash` committing to the KYB doc.
+
+Total wallet balance required: **zero SUI**. The chain commits a 32-byte hash that anyone can verify against the Walrus blob — KYB proof becomes tamper-evident without leaking the document.
 
 ### 2. Settlement-preference change (any time after onboarding)
 
@@ -151,7 +172,8 @@ Same-token payments bypass the aggregator entirely via direct transfer — no ro
 
 - **Issuer**: ed25519 keypair held by Quay-the-company in `.secrets/issuer-testnet.json` (gitignored). Signs `ClaimMessage` attestations server-side via `/api/attest`. Production path: air-gapped hardware key → 2-of-3 multisig → NETS-controlled signer / BizFile+ federation. Rotation is a single `rotate_issuer_pubkey` call, no redeploy.
 - **Sponsor**: separate ed25519 keypair that covers gas for onboarding + settlement-preference updates. Rate-limited per address (5 onboardings/day, 10 metadata-updates/day). Refuses to sign if its own balance falls below 20% of the funding target.
-- **Walrus**: stores merchant profile JSON (logo blob ID + preferred receive token + name) and full payment receipts. Operator audit log records the `(evidence_hash, walrus_blob_id)` mapping in Supabase so the issuer-signed evidence is recoverable.
+- **Walrus**: stores merchant profile JSON (logo blob ID + preferred receive token + name), full payment receipts, **and encrypted KYB documents** (AES-256-GCM ciphertext, plaintext never touches the server). Operator audit log records the `(evidence_hash, walrus_blob_id)` mapping in Supabase so the issuer-signed evidence is recoverable.
+- **KYB admin (`ADMIN_WALLETS`, `ADMIN_KYB_PUBKEY`, `ADMIN_JWT_SECRET`)**: mnemonic-backed Sui wallet whose ed25519 signature over `"QUAY_KYB_DECRYPT_KEY_V1"` deterministically derives the X25519 decryption key. The private key is **never stored** — re-derived in the admin's browser each session. Loss of the wallet seed = inability to decrypt pending docs. See [`SECURITY.md`](SECURITY.md) for the full threat model.
 
 ### Frontend — Next.js 16 + React 19 + Tailwind 4
 
