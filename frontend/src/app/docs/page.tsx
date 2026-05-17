@@ -110,8 +110,11 @@ export default function DocsPage() {
                 token any time from the merchant dashboard.
               </li>
               <li>
-                <strong>90-second onboarding.</strong> Sign in with Google via
-                Enoki zkLogin. No seed phrase, no app install, no hardware.
+                <strong>Two-minute submission, one signature to go live.</strong>{" "}
+                Sign in with Google via Enoki zkLogin, upload a proof of
+                business ownership (Bizfile or letterhead), and a Quay
+                reviewer approves before your UEN lands on chain. No seed
+                phrase, no app install, no hardware.
               </li>
               <li>
                 <strong>No PCI scope.</strong> You never touch a card number.
@@ -167,7 +170,7 @@ export default function DocsPage() {
               <ArchCard
                 name="Enoki zkLogin"
                 role="Auth"
-                body="Google sign-in produces a Sui account without a seed phrase. Merchants onboard in under two minutes."
+                body="Google sign-in produces a Sui account without a seed phrase. Submission takes about two minutes; a Quay reviewer approves the proof of business ownership before the UEN lands on chain."
               />
               <ArchCard
                 name="EMVCo / SGQR"
