@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { formatSgdMinor } from "@/lib/server/cashout-fee";
+import { buildGaslessUsdsuiSendAll } from "@/lib/quay/transfer";
 import { USDSUI } from "@/lib/quay/scallop";
 import { txUrl } from "@/lib/sui-config";
 import { zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
@@ -37,6 +38,13 @@ function formatUsdsui(minor: bigint): string {
   const dollars = minor / BigInt(USDSUI_UNIT);
   const frac = minor % BigInt(USDSUI_UNIT);
   return `${dollars}.${frac.toString().padStart(USDSUI.decimals, "0").slice(0, 2)}`;
+}
+
+/** Full-precision (6dp) USDsui string — round-trips through parseUsdsuiToMinor. */
+function formatUsdsuiExact(minor: bigint): string {
+  const dollars = minor / BigInt(USDSUI_UNIT);
+  const frac = minor % BigInt(USDSUI_UNIT);
+  return `${dollars}.${frac.toString().padStart(USDSUI.decimals, "0")}`;
 }
 
 /** Parse a decimal USDsui string into microunits, or null if invalid. */
@@ -466,42 +474,66 @@ function WithdrawSection({
 }) {
   const sui = useSuiClient();
   const [open, setOpen] = useState(false);
+  // "all" → gasless send_funds of the whole balance (free, no sponsor).
+  // "amount" → sponsored partial transfer (split isn't gasless-allowlisted).
+  const [mode, setMode] = useState<"all" | "amount">("all");
   const [destination, setDestination] = useState("");
   const [amount, setAmount] = useState("");
   const [step, setStep] = useState<WStep>({ k: "idle" });
 
   const amountMinor = parseUsdsuiToMinor(amount);
   const addrValid = /^0x[0-9a-fA-F]{64}$/.test(destination.trim());
-  const amountValid = amountMinor !== null && amountMinor > 0n && amountMinor <= liquidMinor;
-  const canReview = addrValid && amountValid;
+  const isAll = mode === "all";
+  const partialValid = amountMinor !== null && amountMinor > 0n && amountMinor <= liquidMinor;
+  const canReview = addrValid && (isAll ? liquidMinor > 0n : partialValid);
+  // Amount shown on the confirm screen.
+  const sendMinor = isAll ? liquidMinor : (amountMinor ?? 0n);
 
   async function send() {
-    if (amountMinor === null) return;
+    const dest = destination.trim();
     try {
-      setStep({ k: "processing", label: "Preparing…" });
-      const res = await fetch("/api/sponsor/withdraw", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      let txBytes: Uint8Array;
+      let signature: string | string[];
+
+      if (isAll) {
+        // Gasless: build client-side, no sponsor, merchant signs gas=0 alone.
+        setStep({ k: "processing", label: "Preparing…" });
+        const { tx } = await buildGaslessUsdsuiSendAll({
+          sui,
           owner: session.address,
-          destination: destination.trim(),
-          amount_usdsui_minor: amountMinor.toString(),
-        }),
-      });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.error ?? `withdraw failed (${res.status})`);
+          destination: dest,
+        });
+        txBytes = await tx.build({ client: sui });
+        setStep({ k: "processing", label: "Signing…" });
+        signature = await zkLoginSign(session, txBytes);
+      } else {
+        // Sponsored partial transfer (gas on us).
+        if (amountMinor === null) return;
+        setStep({ k: "processing", label: "Preparing…" });
+        const res = await fetch("/api/sponsor/withdraw", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            owner: session.address,
+            destination: dest,
+            amount_usdsui_minor: amountMinor.toString(),
+          }),
+        });
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.error ?? `withdraw failed (${res.status})`);
+        }
+        const sp = (await res.json()) as { tx_bytes_b64: string; sponsor_signature: string };
+        txBytes = base64ToBytes(sp.tx_bytes_b64);
+        setStep({ k: "processing", label: "Signing…" });
+        const senderSig = await zkLoginSign(session, txBytes);
+        signature = [senderSig, sp.sponsor_signature];
       }
-      const sp = (await res.json()) as { tx_bytes_b64: string; sponsor_signature: string };
 
-      setStep({ k: "processing", label: "Signing…" });
-      const txBytes = base64ToBytes(sp.tx_bytes_b64);
-      const senderSig = await zkLoginSign(session, txBytes);
-
-      setStep({ k: "processing", label: "Sending…" });
+      setStep({ k: "processing", label: isAll ? "Sending (gasless)…" : "Sending…" });
       const result = await sui.executeTransactionBlock({
         transactionBlock: txBytes,
-        signature: [senderSig, sp.sponsor_signature],
+        signature,
         options: { showEffects: true },
       });
       if (result.effects?.status?.status !== "success") {
@@ -553,20 +585,51 @@ function WithdrawSection({
           {destination !== "" && !addrValid && (
             <p className="text-[11px] text-[var(--muted)]">Enter a full 0x + 64-hex Sui address.</p>
           )}
-          <label htmlFor="wd-amount" className="block text-[11px] text-[var(--muted)]">Amount (USDsui)</label>
-          <div className="flex items-center gap-2">
-            <input
-              id="wd-amount"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              className="flex-1 min-h-[44px] rounded-lg border border-white/10 bg-white/[0.03] px-3 text-white placeholder:text-[var(--muted-soft)]"
-            />
-            <button type="button" onClick={() => setAmount(formatUsdsui(liquidMinor))} className="glass-chip rounded-lg min-h-[44px]">
-              Max
+
+          {/* Everything = gasless (free). Amount = sponsored partial transfer. */}
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setMode("all")}
+              className={`rounded-xl border px-3 py-2 text-left text-xs backdrop-blur-md transition ${isAll ? "border-[var(--accent)] bg-[var(--accent)]/12 text-white" : "border-white/10 bg-white/[0.03] text-[var(--muted)] hover:border-white/25"}`}
+            >
+              <p className="font-medium">Everything</p>
+              <p className="text-[10px] text-[var(--muted-soft)]">{formatUsdsui(liquidMinor)} USDsui · free</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("amount")}
+              className={`rounded-xl border px-3 py-2 text-left text-xs backdrop-blur-md transition ${!isAll ? "border-[var(--accent)] bg-[var(--accent)]/12 text-white" : "border-white/10 bg-white/[0.03] text-[var(--muted)] hover:border-white/25"}`}
+            >
+              <p className="font-medium">Amount</p>
+              <p className="text-[10px] text-[var(--muted-soft)]">a specific sum</p>
             </button>
           </div>
+
+          {!isAll && (
+            <>
+              <label htmlFor="wd-amount" className="block text-[11px] text-[var(--muted)]">Amount (USDsui)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="wd-amount"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="flex-1 min-h-[44px] rounded-lg border border-white/10 bg-white/[0.03] px-3 text-white placeholder:text-[var(--muted-soft)]"
+                />
+                <button type="button" onClick={() => setAmount(formatUsdsuiExact(liquidMinor))} className="glass-chip rounded-lg min-h-[44px]">
+                  Max
+                </button>
+              </div>
+            </>
+          )}
+
+          <p className="text-[10px] text-[var(--muted-soft)]">
+            {isAll
+              ? "Gasless — no network fee. Sends your full USDsui balance."
+              : "Partial amount — network fees are on us."}
+          </p>
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
@@ -588,9 +651,14 @@ function WithdrawSection({
         <div className="relative z-10 space-y-3">
           <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2">
             <p className="text-[11px] text-[var(--muted)]">Sending</p>
-            <p className="text-sm text-white">{amount} USDsui</p>
+            <p className="text-sm text-white">
+              {formatUsdsui(sendMinor)} USDsui{isAll ? " (everything)" : ""}
+            </p>
             <p className="text-[11px] text-[var(--muted)] mt-2">To</p>
             <p className="font-mono text-xs text-white break-all">{destination.trim()}</p>
+            <p className="text-[10px] text-[var(--muted-soft)] mt-2">
+              {isAll ? "Gasless transfer — no network fee." : "Sponsored — network fees on us."}
+            </p>
           </div>
           <p className="text-[11px] text-[var(--muted)]">
             On-chain transfers are final — double-check this address. Funds sent to the wrong
