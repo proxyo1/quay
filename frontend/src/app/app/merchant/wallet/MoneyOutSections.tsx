@@ -127,6 +127,7 @@ interface RecipientField {
   type: string;
   required: boolean;
   example?: string;
+  valuesAllowed?: Array<{ key: string; name: string }> | null;
 }
 interface RecipientType {
   type: string;
@@ -191,10 +192,20 @@ function CashOutSection({
       const types: RecipientType[] = (quote.recipient_schema ?? []).map((t) => ({
         type: t.type,
         title: t.title,
-        fields: t.fields.flatMap((f) => f.group),
+        // Only the fields Wise actually requires — drops optional ones
+        // (e.g. PayNow's email) so the form stays minimal.
+        fields: t.fields.flatMap((f) => f.group).filter((f) => f.required),
       }));
+      // Pre-fill select fields (e.g. legalType) with their first allowed
+      // value so the merchant only touches what matters (name + PayNow id).
+      const initial: Record<string, string> = {};
+      for (const f of types[0]?.fields ?? []) {
+        if (f.type === "select" && f.valuesAllowed?.length) {
+          initial[f.key] = f.valuesAllowed[0].key;
+        }
+      }
       setRecipientType(types[0]?.type ?? "");
-      setDetails({});
+      setDetails(initial);
       setStep({ k: "review", quote, types });
     } catch (e) {
       setStep({ k: "error", message: e instanceof Error ? e.message : "quote failed" });
@@ -361,13 +372,28 @@ function CashOutSection({
                       {f.name}
                       {f.required ? " *" : ""}
                     </label>
-                    <input
-                      id={`r-${f.key}`}
-                      value={details[f.key] ?? ""}
-                      onChange={(e) => setDetails((d) => ({ ...d, [f.key]: e.target.value }))}
-                      placeholder={f.example ?? ""}
-                      className="w-full min-h-[44px] rounded-lg border border-white/10 bg-white/[0.03] px-3 text-white placeholder:text-[var(--muted-soft)]"
-                    />
+                    {f.type === "select" && f.valuesAllowed?.length ? (
+                      <select
+                        id={`r-${f.key}`}
+                        value={details[f.key] ?? f.valuesAllowed[0].key}
+                        onChange={(e) => setDetails((d) => ({ ...d, [f.key]: e.target.value }))}
+                        className="w-full min-h-[44px] rounded-lg border border-white/10 bg-white/[0.03] px-3 text-white"
+                      >
+                        {f.valuesAllowed.map((v) => (
+                          <option key={v.key} value={v.key} className="bg-black">
+                            {v.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        id={`r-${f.key}`}
+                        value={details[f.key] ?? ""}
+                        onChange={(e) => setDetails((d) => ({ ...d, [f.key]: e.target.value }))}
+                        placeholder={f.example ?? ""}
+                        className="w-full min-h-[44px] rounded-lg border border-white/10 bg-white/[0.03] px-3 text-white placeholder:text-[var(--muted-soft)]"
+                      />
+                    )}
                   </div>
                 ))}
             </div>
