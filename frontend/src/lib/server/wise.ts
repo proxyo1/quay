@@ -129,6 +129,8 @@ export interface WiseAccountRequirement {
       required: boolean;
       example?: string;
       validationRegexp?: string;
+      /** Present for `type: "select"` fields (e.g. legalType Person/Business). */
+      valuesAllowed?: Array<{ key: string; name: string }> | null;
     }>;
   }>;
 }

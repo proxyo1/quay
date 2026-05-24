@@ -101,7 +101,10 @@ export async function POST(req: Request) {
   try {
     const profileId = await getPersonalProfileId();
     const wiseQuote = await createSgdQuote(profileId, quote.netSgdMinor);
-    recipientSchema = await getAccountRequirements(wiseQuote.id);
+    const all = await getAccountRequirements(wiseQuote.id);
+    // PayNow only (Wise's `singapore_paynow` type). We deliberately don't
+    // offer the local-bank or email payout types for cash-out.
+    recipientSchema = all.filter((r) => /paynow/i.test(r.type));
   } catch {
     recipientSchema = null;
   }

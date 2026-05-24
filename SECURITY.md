@@ -79,10 +79,16 @@ issues for un-patched vulnerabilities.
 | `pay<T>` slippage from off-chain Pyth quote | UI shows the rate the user accepted; on-chain settlement uses whatever Coin the wallet sends | Day 5.5+ Cetus on-chain swap with `amount_limit` slippage cap |
 | Phishing site impersonation | None — single deploy at quay.com (when mainnet) | DNSSEC + HSTS + Tag 59 strict allowlist on rendered names (AD29) |
 | Mobile-number PayNow gap | Not supported in V0 | `PAYNOW_MOBILE_V1` namespace via the domain-tag scheme |
-| Merchant cash-out custody | **Custodial demo.** `/api/cashout/*` briefly holds the merchant's USDsui in a Quay treasury (`.secrets/treasury-mainnet.json`) between the on-chain transfer and a **Wise sandbox** SGD payout funded from a Quay float. Pinned to `WISE_ENV=sandbox`; gated off by the `cashout_enabled` feature flag. No real money moves. | V2 non-custodial licensed leg (StraitsX PayNow settlement or Bridge/Stripe issuer redemption); delete the demo (see TODOS). |
+| Merchant cash-out custody | **Custodial demo.** `/api/cashout/*` briefly holds the merchant's USDsui in a Quay treasury (`.secrets/treasury-mainnet.json`) between the on-chain transfer and a Wise PayNow SGD payout funded from a Quay float. Defaults to `WISE_ENV=sandbox` (no real money) and the `cashout_enabled` flag is off by default; **live (`WISE_ENV=live`) is a deliberate config flip** intended only for controlled own-funds payouts, bounded by a per-tx cap (`CASHOUT_MAX_SGD_MINOR`, default S$50) + 10/day per-address limit. | V2 non-custodial licensed leg (StraitsX PayNow settlement or Bridge/Stripe issuer redemption); delete the demo (see TODOS). |
 
-The cash-out flow is the only custodial path in quay and exists solely as a
-labeled sandbox demo of the merchant USDsui→SGD experience. It does not
+The cash-out flow is the only custodial path in quay. Code defaults are
+inert — sandbox payouts, flag off — so the repo ships moving no real money;
+going live is an explicit operator decision (`WISE_ENV=live` + a live Wise
+token + flipping `cashout_enabled`), and is intended only for an operator
+cashing out their **own** funds to their **own** account. Paying third-party
+merchants for real is the licensed V2 path, not this. Guards on the live
+path: a per-transaction SGD cap (`CASHOUT_MAX_SGD_MINOR`), a 10/day
+per-address limit, and the `cashout_enabled` kill switch. It does not
 displace the non-custody model: payments, refunds, settlement-preference, and
 the **withdraw-to-address** flow (`/api/sponsor/withdraw`) are all fully
 non-custodial. Cash-out verifies the on-chain receipt before any payout, is
