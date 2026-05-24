@@ -2,7 +2,11 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 
-import { computeCashoutQuote, QUAY_FEE_BPS } from "@/lib/server/cashout-fee";
+import {
+  computeCashoutQuote,
+  FX_RATE_MAX_AGE_SECONDS,
+  QUAY_FEE_BPS,
+} from "@/lib/server/cashout-fee";
 import { getFeatureFlag } from "@/lib/server/feature-flags";
 import { treasuryAddress } from "@/lib/server/treasury";
 import {
@@ -11,7 +15,7 @@ import {
   getPersonalProfileId,
   type WiseAccountRequirement,
 } from "@/lib/server/wise";
-import { fetchLatestPrices, isStale, PYTH_FEEDS } from "@/lib/pyth";
+import { fetchLatestPrices, priceAgeSeconds, PYTH_FEEDS } from "@/lib/pyth";
 
 export const runtime = "nodejs";
 
@@ -57,7 +61,7 @@ export async function POST(req: Request) {
   try {
     const prices = await fetchLatestPrices([PYTH_FEEDS.USD_SGD]);
     const p = prices.get(PYTH_FEEDS.USD_SGD);
-    if (!p || !(p.price > 0) || isStale(p)) {
+    if (!p || !(p.price > 0) || priceAgeSeconds(p) > FX_RATE_MAX_AGE_SECONDS) {
       return NextResponse.json({ error: "exchange rate unavailable, try again" }, { status: 503 });
     }
     rate = p.price;

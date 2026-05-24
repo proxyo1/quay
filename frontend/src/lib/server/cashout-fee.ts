@@ -14,6 +14,18 @@
 export const QUAY_FEE_BPS = 25; // 0.25%
 export const USDSUI_DECIMALS = 6;
 
+/**
+ * Max age we accept for the Pyth USD/SGD rate, in seconds.
+ *
+ * FX feeds do NOT update on weekends/holidays (markets are closed), so the
+ * crypto-grade 60s staleness gate wrongly rejects a perfectly good Friday
+ * close every weekend ("exchange rate unavailable"). 8 days comfortably
+ * covers a long weekend + public holidays while still rejecting a truly
+ * dead feed. The rate barely moves, and Quay carries the tiny drift (it
+ * also keeps the 25 bps), so a slightly-old FX print is fine to quote on.
+ */
+export const FX_RATE_MAX_AGE_SECONDS = 8 * 24 * 60 * 60;
+
 export interface CashoutQuote {
   amountUsdsuiMinor: bigint;
   /** Pyth FX.USD/SGD: SGD per 1 USD. */

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { computeCashoutQuote, formatSgdMinor, QUAY_FEE_BPS } from "../cashout-fee";
+import {
+  computeCashoutQuote,
+  formatSgdMinor,
+  FX_RATE_MAX_AGE_SECONDS,
+  QUAY_FEE_BPS,
+} from "../cashout-fee";
 
 describe("computeCashoutQuote", () => {
   test("100 USDsui at USD/SGD=1.345, 25bps fee", () => {
@@ -61,5 +66,16 @@ describe("formatSgdMinor", () => {
     expect(formatSgdMinor(100n)).toBe("1.00");
     expect(formatSgdMinor(0n)).toBe("0.00");
     expect(formatSgdMinor(135000n)).toBe("1350.00");
+  });
+});
+
+describe("FX_RATE_MAX_AGE_SECONDS", () => {
+  // FX feeds don't tick on weekends; the gate must tolerate a Friday close
+  // read on a Sunday (the "exchange rate unavailable" bug) plus holidays.
+  test("covers a long weekend + holidays (>= 4 days)", () => {
+    expect(FX_RATE_MAX_AGE_SECONDS).toBeGreaterThanOrEqual(4 * 24 * 60 * 60);
+  });
+  test("a 44h-stale weekend feed is within bound", () => {
+    expect(44 * 60 * 60).toBeLessThan(FX_RATE_MAX_AGE_SECONDS);
   });
 });
