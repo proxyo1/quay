@@ -63,6 +63,8 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 | `/merchant/onboard` — claim a UEN, pick receive token, upload logo, attach KYB proof (Bizfile/letterhead, encrypted in-browser) | ✅ sponsored gas + admin review |
 | `/merchant/onboard/pending` — submission status, polls every 30s, "Complete registration" once approved | ✅ |
 | `/merchant/wallet` — view identity, **change settlement preference any time** | ✅ sponsored gas |
+| `/merchant/wallet` — **withdraw USDsui to any address** (non-custodial, sponsored gas) | ✅ |
+| `/merchant/wallet` — **cash out USDsui → SGD** to a bank/PayNow | ⚠️ manual Wise *sandbox* demo, custodial-by-treasury, feature-flagged off; real non-custodial leg is V2 (see SECURITY.md + TODOS) |
 | `/merchant/terminal` — live PaymentReceipt feed, SGD-prominent + received-token formatted | ✅ 2s refresh |
 | Multi-UEN ownership (one wallet, many sticker locations) | ✅ |
 

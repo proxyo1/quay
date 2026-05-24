@@ -19,6 +19,8 @@ import {
 } from "@/lib/walrus/profileSchema";
 import { useZkLoginSession, zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
 
+import { MoneyOutSections } from "./MoneyOutSections";
+
 function receiveLabel(token: SupportedReceiveToken): string {
   const opt = RECEIVE_TOKEN_OPTIONS.find((o) => o.type === token);
   return opt?.label ?? token;
@@ -65,6 +67,8 @@ export default function WalletPage() {
           device and everything&apos;s right where you left it.
         </p>
       </header>
+
+      <MoneyOutSections session={session} />
 
       <SettlementPreferenceSection session={session} />
 
