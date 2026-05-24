@@ -98,10 +98,13 @@ Default merchant payout is **USDsui**, not USDC. Use USDsui in copy and defaults
 Two money-out paths added on the wallet page (`MoneyOutSections.tsx`), both reusing the
 sponsored dual-sign PTB pattern:
 
-- **Withdraw USDsui to an address** — fully non-custodial. `/api/sponsor/withdraw` →
-  `buildSponsoredUsdsuiTransfer` (`src/lib/quay/transfer.ts`, which merges the merchant's
-  fragmented USDsui coins before splitting — the single-largest-coin pay path is insufficient
-  for accumulated receipts).
+- **Withdraw USDsui to an address** — fully non-custodial, two modes (both in `src/lib/quay/transfer.ts`):
+  - *Withdraw everything (default)* → **gasless**: `buildGaslessUsdsuiSendAll` emits one
+    `0x2::coin::send_funds` per coin, gas=0, merchant zkLogin-signs alone (no sponsor, no
+    server round-trip, no SUI). Uses Sui's protocol gasless stablecoin transfers (mainnet
+    v125; USDsui allowlisted). Verified by `scripts/gasless-withdraw-spike.ts`.
+  - *Partial amount* → sponsored `/api/sponsor/withdraw` → `buildSponsoredUsdsuiTransfer`
+    (merges the merchant's fragmented coins then splits; gasless can't split).
 - **Cash out USDsui → SGD** — a deliberately throwaway, **custodial demo** (the only custodial
   path in the app). `/api/cashout/{quote,initiate,confirm}` send USDsui to a treasury
   (`src/lib/server/treasury.ts`, key in `.secrets/treasury-mainnet.json`), then pay SGD via

@@ -63,7 +63,7 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 | `/merchant/onboard` — claim a UEN, pick receive token, upload logo, attach KYB proof (Bizfile/letterhead, encrypted in-browser) | ✅ sponsored gas + admin review |
 | `/merchant/onboard/pending` — submission status, polls every 30s, "Complete registration" once approved | ✅ |
 | `/merchant/wallet` — view identity, **change settlement preference any time** | ✅ sponsored gas |
-| `/merchant/wallet` — **withdraw USDsui to any address** (non-custodial, sponsored gas) | ✅ |
+| `/merchant/wallet` — **withdraw USDsui to any address** (non-custodial) | ✅ gasless for the full balance (`0x2::coin::send_funds`); sponsored gas for partial amounts |
 | `/merchant/wallet` — **cash out USDsui → SGD** via PayNow | ⚠️ manual Wise demo, custodial-by-treasury, `cashout_enabled`-gated. Sandbox by default; runs live (`WISE_ENV=live`) only for controlled own-funds payouts, bounded by a per-tx + daily cap. Real non-custodial leg is V2 (see SECURITY.md + TODOS) |
 | `/merchant/terminal` — live PaymentReceipt feed, SGD-prominent + received-token formatted | ✅ 2s refresh |
 | Multi-UEN ownership (one wallet, many sticker locations) | ✅ |
@@ -372,7 +372,7 @@ The on-chain primitive supports all three without redeploy — only the issuer k
 | **LP-mode inventory market-making** | 📋 V0.5 | Aggregator referral covers V0 revenue with $0 capital. Inventory mode adds spread capture once volume justifies $10k–$50k seed. |
 | **Mobile-number PayNow** (proxy type `0`) | 📋 V0.5 | ~70% of SG hawkers use mobile-number PayNow rather than UEN. Domain-tag namespacing (`PAYNOW_MOBILE_V1`) is already designed in; needs frontend parser + a new attestation flow. |
 | **SuiNS optional name attach** | 📋 V0.5 | Address truncation works for V0; SuiNS lookup adds a human-readable label in the terminal feed. |
-| **Gasless stablecoin retail path** | 📋 V0.5 | Protocol-level via [`0x2::balance::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers). Dual-path with `payments::pay<T>` retained for the receipted path. |
+| **Gasless stablecoin transfers** | ✅ partial (withdraw) | Live on mainnet (v125, 2026-05-20), USDsui allowlisted. Withdraw-everything ships gasless via [`0x2::coin::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers) (zero fee, no SUI). Remaining: a no-receipt gasless quick-pay. `payments::pay<T>` stays sponsored+receipted — a custom event disqualifies gasless. |
 | **DeepBook rate-lock** (post-only limit orders for B2B) | 🤔 If demand | Cetus Aggregator's `minOut` already protects retail slippage. Rate-lock only makes sense for high-value SGD payments where precision matters. Revisit if Quay serves B2B. |
 | **NETS-controlled issuer signer** | 📋 V1 | Replace centralized issuance with NETS as the trust root, or self-attestation via BizFile+. |
 
