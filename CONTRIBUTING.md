@@ -32,15 +32,20 @@ output.
 
 Sorted by **how much it advances the demo or unblocks mainnet**:
 
-1. **Gasless stablecoin retail path** — Sui ships a protocol-level
-   gasless mechanism via [`0x2::balance::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers)
-   (testnet today, mainnet "in the future"). It's tightly scoped: only
-   allowlisted stablecoins (USDC, USDsui, USDY, AUSD, FDUSD, BUCK, YSLD),
-   only certain balance/coin ops, no object writes. Wire a
-   `buildGaslessTransferTx` for sub-$10 retail tickets where the rich
-   `PaymentReceipt` event isn't required. Keep `payments::pay<T>` for
-   GST-reportable receipted payments. Dual-path frontend; merchant
-   terminal subscribes to both event types.
+1. **Gasless quick-pay (no-receipt retail path)** — Sui's protocol-level
+   gasless stablecoin transfers are **live on mainnet** (v125, 2026-05-20)
+   via [`0x2::coin::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers);
+   USDsui is allowlisted. **Withdraw-everything already uses it**
+   (`buildGaslessUsdsuiSendAll`, see `src/lib/quay/transfer.ts` +
+   `scripts/gasless-withdraw-spike.ts`). The remaining piece is a gasless
+   *payment* path for sub-$10 retail tickets where the rich `PaymentReceipt`
+   isn't required — because any custom moveCall (the receipt event)
+   disqualifies a PTB from gasless, so this must be a separate code path
+   from `payments::pay<T>`, which stays for GST-reportable receipted
+   payments. Dual-path frontend; merchant terminal subscribes to both.
+   Note the constraint: gasless allows no object writes / no split, so a
+   gasless pay sends whole coins (or relies on the payer holding an exact
+   coin).
 2. **Cetus swap-and-pay PTB** — Move contract is `Coin<T>`-generic; the
    missing piece is the frontend PTB that pulls a SUI→USDsui swap from
    a Cetus pool right before the `pay` call. See
