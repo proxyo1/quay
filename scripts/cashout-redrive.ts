@@ -17,7 +17,18 @@
  *   cd scripts && bun run cashout-redrive.ts --execute  # re-drive payouts
  */
 
+import { createHash } from "node:crypto";
+
 const EXECUTE = process.argv.includes("--execute");
+
+/** Deterministic UUID from the Sui digest. MUST match frontend wise.ts. */
+function digestToCustomerTxId(digest: string): string {
+  const b = createHash("sha256").update(digest).digest().subarray(0, 16);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = b.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const WISE_TOKEN = process.env.WISE_API_TOKEN;
@@ -95,7 +106,10 @@ async function payOut(r: CashoutRow): Promise<string> {
   const transfer = await wise<{ id: number }>("POST", "/v1/transfers", {
     targetAccount: acct.id,
     quoteUuid: quote.id,
-    customerTransactionId: r.sui_digest, // idempotent: one payout per transfer
+    // Wise needs a UUID; derive it deterministically from the digest — MUST
+    // match frontend digestToCustomerTxId so a re-drive hits the same Wise
+    // transfer the app route would create (one payout per on-chain transfer).
+    customerTransactionId: digestToCustomerTxId(r.sui_digest!),
     details: { reference: "Quay cash-out" },
   });
   await wise(

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 /**
  * Wise (TransferWise) payout client — SANDBOX by default.
  *
@@ -74,7 +76,20 @@ async function wiseRequest<T>(
     /* keep raw text */
   }
   if (!res.ok) {
-    throw new WiseError(`Wise ${method} ${path} -> ${res.status}`, res.status, parsed);
+    // Include a short body summary in the message so logs + stored failure
+    // reasons are actionable (e.g. the offending field on a 422).
+    const summary = (() => {
+      try {
+        return JSON.stringify(parsed).slice(0, 300);
+      } catch {
+        return "";
+      }
+    })();
+    throw new WiseError(
+      `Wise ${method} ${path} -> ${res.status}: ${summary}`,
+      res.status,
+      parsed,
+    );
   }
   return parsed as T;
 }
@@ -166,11 +181,26 @@ export async function createRecipient(input: CreateRecipientInput): Promise<numb
   return acct.id;
 }
 
+/**
+ * Wise requires `customerTransactionId` to be a UUID; our natural
+ * idempotency key is the Sui tx digest (base58, not a UUID). Derive a
+ * deterministic UUID from the digest so the same on-chain transfer always
+ * maps to the same Wise transfer — a retry or re-drive hits the existing
+ * transfer instead of creating a duplicate payout.
+ */
+export function digestToCustomerTxId(digest: string): string {
+  const b = createHash("sha256").update(digest).digest().subarray(0, 16);
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // variant
+  const h = b.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
 export interface CreateTransferInput {
   profileId: number;
   quoteId: string;
   targetAccountId: number;
-  /** Idempotency key — we pass the Sui tx digest so a retry never double-pays. */
+  /** Sui tx digest — UUID-ified for Wise so a retry never double-pays. */
   customerTransactionId: string;
   reference?: string;
 }
@@ -180,7 +210,7 @@ export async function createTransfer(input: CreateTransferInput): Promise<{ id: 
   return wiseRequest<{ id: number }>("POST", "/v1/transfers", {
     targetAccount: input.targetAccountId,
     quoteUuid: input.quoteId,
-    customerTransactionId: input.customerTransactionId,
+    customerTransactionId: digestToCustomerTxId(input.customerTransactionId),
     details: { reference: (input.reference ?? "Quay cash-out").slice(0, 35) },
   });
 }
