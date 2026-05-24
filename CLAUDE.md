@@ -93,6 +93,25 @@ Default merchant payout is **USDsui**, not USDC. Use USDsui in copy and defaults
   `SUI_NETWORK` is currently `"mainnet"`. Flip network by restoring the matching
   `scripts/deploy-testnet.v{N}.json` block and switching this constant.
 
+### Merchant cash-out + withdraw (`/app/merchant/wallet`)
+
+Two money-out paths added on the wallet page (`MoneyOutSections.tsx`), both reusing the
+sponsored dual-sign PTB pattern:
+
+- **Withdraw USDsui to an address** — fully non-custodial. `/api/sponsor/withdraw` →
+  `buildSponsoredUsdsuiTransfer` (`src/lib/quay/transfer.ts`, which merges the merchant's
+  fragmented USDsui coins before splitting — the single-largest-coin pay path is insufficient
+  for accumulated receipts).
+- **Cash out USDsui → SGD** — a deliberately throwaway, **custodial demo** (the only custodial
+  path in the app). `/api/cashout/{quote,initiate,confirm}` send USDsui to a treasury
+  (`src/lib/server/treasury.ts`, key in `.secrets/treasury-mainnet.json`), then pay SGD via
+  Wise PayNow (`src/lib/server/wise.ts`) out of a pre-funded float. State machine in the
+  `cashout_requests` table (`src/lib/server/cashout-store.ts`); 25 bps fee + FX math in
+  `cashout-fee.ts`. Gated by the `cashout_enabled` feature flag (off by default). `WISE_ENV`
+  defaults to `sandbox`; `live` is a deliberate flip bounded by `CASHOUT_MAX_SGD_MINOR` +
+  a 10/day cap. Stuck payouts are recoverable via `scripts/cashout-redrive.ts`. Slated for
+  deletion when the licensed V2 settlement leg lands (see TODOS) — do not build on it.
+
 ### Trust boundary
 
 The issuer ed25519 key (`.secrets/issuer-testnet.json`, gitignored) is the root of trust — whoever
