@@ -75,6 +75,47 @@ async function collectUsdsuiCoins(
   return { totalMinor, coinObjectIds };
 }
 
+/**
+ * Gasless "send all USDsui" via `0x2::coin::send_funds` (Sui protocol-level
+ * gasless stablecoin transfers, mainnet v125). Emits one `send_funds` per
+ * USDsui coin the owner holds — every input coin is consumed — to
+ * `destination`, with gas zeroed. The protocol covers gas, so there's no
+ * sponsor and the merchant needs no SUI. The caller zkLogin-signs the
+ * returned tx and submits it with that single signature (no co-sign).
+ *
+ * All-or-nothing: `send_funds` takes a whole `Coin` by value and `split`
+ * isn't in the gasless allowlist, so this withdraws the entire balance.
+ * Partial amounts must use the sponsored path. Verified on mainnet via
+ * scripts/gasless-withdraw-spike.ts (recipient receives a normal spendable
+ * Coin, no redemption step).
+ */
+export async function buildGaslessUsdsuiSendAll(input: {
+  sui: SuiClient;
+  owner: string;
+  destination: string;
+}): Promise<{ tx: Transaction; totalMinor: bigint; coinCount: number }> {
+  const { totalMinor, coinObjectIds } = await collectUsdsuiCoins(input.sui, input.owner);
+  if (coinObjectIds.length === 0 || totalMinor === 0n) {
+    throw new InsufficientUsdsuiError(0n, 1n);
+  }
+  const tx = new Transaction();
+  for (const id of coinObjectIds) {
+    tx.moveCall({
+      target: "0x2::coin::send_funds",
+      typeArguments: [USDSUI.coinType],
+      arguments: [tx.object(id), tx.pure.address(input.destination)],
+    });
+  }
+  tx.setSender(input.owner);
+  // Gasless: no gas coin, zero budget/price — the protocol recognizes the
+  // qualifying PTB (allowlisted coin ops on an allowlisted stablecoin) and
+  // covers the cost.
+  tx.setGasPayment([]);
+  tx.setGasBudget(0n);
+  tx.setGasPrice(0n);
+  return { tx, totalMinor, coinCount: coinObjectIds.length };
+}
+
 export async function buildSponsoredUsdsuiTransfer(
   input: BuildSponsoredUsdsuiTransferInput,
 ): Promise<Transaction> {
