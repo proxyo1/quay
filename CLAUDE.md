@@ -15,7 +15,7 @@ to **Sui mainnet** with testnet artifacts archived.
 Three independent subprojects, no root package.json:
 
 - `move/quay/` — the `quay::payments` Move 2024 contract. Single source file
-  `sources/payments.move` (~340 LOC), tests in `tests/payments_tests.move`.
+  `sources/payments.move` (~520 LOC), tests in `tests/payments_tests.move` (24 tests).
 - `frontend/` — Next.js 16 + React 19 + Tailwind 4 PWA. The whole app *and* the API live here.
 - `scripts/` — Bun deploy + smoke-test scripts (`day0`..`day13`, `wise-*`). One-shot ops tooling,
   not application code.
@@ -66,6 +66,10 @@ One shared `MerchantRegistry` object. `pay<T>` and `refund<T>` are generic over 
 same contract handles SUI, USDC, USDsui, and future stables / swap outputs with no redeploy.
 Key invariants enforced on-chain (see SECURITY.md threat model):
 - `register_merchant` requires an issuer ed25519 attestation over a BCS-encoded `ClaimMessage`.
+  The off-chain BCS shape (`frontend/src/lib/server/kyb-attestation.ts`, `bcs.struct("ClaimMessage", …)`:
+  domain_tag `b"QUAY_CLAIM_V1"`, chain_id, uen, claimer, nonce, expires_at_ms, evidence_hash) **must stay
+  byte-for-byte in sync with the Move `ClaimMessage` struct** — reorder a field or change a type on one
+  side and every attestation silently fails ed25519 verification (`E_INVALID_ATTESTATION`).
 - Attestations are replay-resistant (32-byte nonce consumed in `used_nonces`), cross-network-safe
   (the message includes `chain_id` — testnet attestation can't replay on mainnet), and expiry-bound.
 - `pay<T>` emits `PaymentReceipt` in the *same* PTB as the coin transfer.
@@ -115,12 +119,46 @@ sponsored dual-sign PTB pattern:
   a 10/day cap. Stuck payouts are recoverable via `scripts/cashout-redrive.ts`. Slated for
   deletion when the licensed V2 settlement leg lands (see TODOS) — do not build on it.
 
+### Merchant yield routing (Scallop)
+
+Opt-in from the wallet (`/api/sponsor/{toggle-yield,earn-move}`): when a merchant enables it,
+the `pay<T>` PTB mints the settled USDsui into Scallop's lending reserve, so the merchant holds
+`Coin<SCALLOP_USDSUI>` (the wrapped sCoin) instead of `Coin<USDsui>`. `pay<T>` is type-generic,
+so this is a PTB/frontend change, not a Move change. All Scallop logic lives in
+`src/lib/quay/scallop.ts` — **no `@scallop-io` SDK** (deliberately; it's too heavy for the four
+PTB calls we need). Non-obvious facts, all load-bearing:
+
+- **`TYPE_PACKAGE` vs `CALL_PACKAGE`.** Scallop upgrades its package opaquely. Type identifiers
+  (e.g. `${TYPE_PACKAGE}::reserve::MarketCoin<T>`) stay pinned to the original publish ID forever;
+  the *call target* is the latest upgrade. Never collapse the two. The live call package is read
+  from Supabase `feature_flags.metadata.last_seen_package` (with `DEFAULT_CALL_PACKAGE` as fallback);
+  same pattern for the separate sCoin-converter package.
+- **Use the OLD main market** (`MARKET_OBJECT`) — it's the only one that lists USDsui. A second
+  market exists but doesn't carry USDsui.
+- **Gated by the `yield_routing.scallop.usdsui` feature flag** (off until Vercel env is configured).
+  Every payment is additionally gated on a 30s-cached `preflightScallopHealthy` (AllowAll whitelist
+  + supply-cap headroom).
+- **`/api/cron/scallop-monitor`** (weekly) auto-flips the flag `enabled=false` on hard anomalies
+  (whitelist→RejectAll, reserve delisted, supply cap full) but treats package upgrades as a soft
+  observation (records the new call package, doesn't flip). `/api/cron/scallop-cost-basis-indexer`
+  (daily) tracks cost basis for the redeem-side fee.
+- **Live supply APY** for the wallet's "Earn interest" card comes from `/api/scallop/apy` (cached
+  server proxy of Scallop's public market endpoint, matched by `coinType`) — it's *gross* APY, not
+  net of the cost-basis fee.
+
 ### Trust boundary
 
 The issuer ed25519 key (`.secrets/issuer-testnet.json`, gitignored) is the root of trust — whoever
 holds it can mint arbitrary merchant attestations. It is single-key in V0 (multisig is the
 documented V1 migration). It must only ever be touched server-side via `/api/attest` and
 `/api/kyb/finalize`. Never move issuer signing into client code.
+
+Both server keys (issuer, sponsor) load with the same precedence: `QUAY_<KEY>_SECRET_KEY_HEX` env →
+`QUAY_<KEY>_SECRET_KEY_BECH32` env → `.secrets/<key>-testnet.json` file (`issuer.ts`, `sponsor.ts`).
+Use the env-hex path in production; the `.secrets` files are the local-dev fallback produced by
+`day2-deploy`/`day7-create-sponsor`. Other server config (Google/Enoki OAuth, Supabase, `ADMIN_WALLETS`,
+`ADMIN_KYB_PUBKEY`, `ADMIN_JWT_SECRET`, `CRON_SECRET`, Wise/cashout) lives in `frontend/.env.local` —
+there is no committed `.env.example`, so read the consuming module to learn the exact var names.
 
 ### Onboarding flow (two-phase, KYB-gated)
 
@@ -139,3 +177,10 @@ submits the sponsored `register_merchant` tx.
 - Keep the README's "Why not just off-ramp?" section; it's the demo's answer to the top skeptic
   question.
 - In docs/copy, write bare section numbers, not `§ NN` decoration.
+- Import the Sui RPC client as `import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc"`
+  (the alias, every file does this — nothing imports the conventional `SuiClient` from `@mysten/sui/client`).
+- Walrus blobs are versioned: merchant profiles carry `v: PROFILE_SCHEMA_VERSION` and receipts a
+  `schema_version` const. Readers fall back to a legacy shape on an unknown version rather than throwing,
+  so **bump the constant** when you change a blob schema and keep the legacy read path working.
+- `AD##` tags in `payments.move` and server comments (e.g. AD19, AD24) index design/threat-model decisions;
+  grep the tag and check SECURITY.md before changing the logic it guards.
