@@ -26,6 +26,26 @@ export const USDSUI_DECIMALS = 6;
  */
 export const FX_RATE_MAX_AGE_SECONDS = 8 * 24 * 60 * 60;
 
+/**
+ * Per-cash-out hard cap on the net SGD payout (cents). Safety rail for the
+ * live (real-money) path: a fat-fingered amount or a bug can never move more
+ * than this in one transaction. Default S$50; override with the
+ * CASHOUT_MAX_SGD_MINOR env var (server-only — clients never enforce it).
+ */
+export const DEFAULT_CASHOUT_MAX_SGD_MINOR = 5000n; // S$50.00
+
+/** Resolve the per-cash-out SGD cap from env, falling back to the default. */
+export function cashoutCapMinor(): bigint {
+  const raw = process.env.CASHOUT_MAX_SGD_MINOR;
+  if (!raw) return DEFAULT_CASHOUT_MAX_SGD_MINOR;
+  try {
+    const v = BigInt(raw);
+    return v > 0n ? v : DEFAULT_CASHOUT_MAX_SGD_MINOR;
+  } catch {
+    return DEFAULT_CASHOUT_MAX_SGD_MINOR;
+  }
+}
+
 export interface CashoutQuote {
   amountUsdsuiMinor: bigint;
   /** Pyth FX.USD/SGD: SGD per 1 USD. */

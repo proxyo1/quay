@@ -3,7 +3,9 @@ import "server-only";
 import { NextResponse } from "next/server";
 
 import {
+  cashoutCapMinor,
   computeCashoutQuote,
+  formatSgdMinor,
   FX_RATE_MAX_AGE_SECONDS,
   QUAY_FEE_BPS,
 } from "@/lib/server/cashout-fee";
@@ -76,6 +78,18 @@ export async function POST(req: Request) {
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "could not quote" },
+      { status: 400 },
+    );
+  }
+
+  // Per-transaction safety cap (live-money rail) — surface early so the UI
+  // shows the limit on "Continue" rather than at sign time.
+  const capMinor = cashoutCapMinor();
+  if (quote.netSgdMinor > capMinor) {
+    return NextResponse.json(
+      {
+        error: `cash-out of S$${formatSgdMinor(quote.netSgdMinor)} exceeds the per-transaction limit of S$${formatSgdMinor(capMinor)}`,
+      },
       { status: 400 },
     );
   }
