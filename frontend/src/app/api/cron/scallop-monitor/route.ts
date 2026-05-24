@@ -16,6 +16,7 @@ import {
   USDSUI,
   readMarketState,
   resetPreflightCache,
+  resolveProtocolPackage,
   type MarketState,
 } from "@/lib/quay/scallop";
 
@@ -74,6 +75,7 @@ interface Anomaly {
     | "reserve_removed"
     | "supply_cap_full"
     | "package_upgraded"
+    | "package_unresolved"
     | "utilization_drift";
   /** True if this should flip the global flag off. */
   hard: boolean;
@@ -239,6 +241,18 @@ export async function GET(req: Request) {
       after: currentPackage,
     });
   }
+  // Discovery couldn't validate a package with mint+redeem (e.g. the latest
+  // MintEvent came through a facade/wrapper). We keep the known-good baseline
+  // rather than corrupt routing — this is what the 2026-05-18 incident needed.
+  if (currentPackage === null && baselinePackage) {
+    anomalies.push({
+      kind: "package_unresolved",
+      hard: false,
+      message:
+        "Could not resolve a Scallop protocol package exposing mint+redeem; kept last known-good package",
+      before: baselinePackage,
+    });
+  }
   if (
     baselineUtilization !== null &&
     Math.abs(state.utilization - baselineUtilization) > 0.05
@@ -336,13 +350,19 @@ export async function GET(req: Request) {
 }
 
 /**
- * Discovers the current Scallop protocol package by looking up the most
- * recent `MintEvent` and reading its `packageId`. Scallop upgrades the
- * package opaquely; the event type stays pinned to the lineage root
- * (`TYPE_PACKAGE`) but the emitting package is the live one.
+ * Discovers the current Scallop protocol package.
  *
- * Returns `null` if no recent events are found (shouldn't happen on a
- * live market but we keep the cron robust).
+ * Starting point: the most recent `${TYPE_PACKAGE}::mint::MintEvent`'s
+ * `packageId`. But that id can be a facade/wrapper package rather than the
+ * callable protocol package — on 2026-05-18 it was `0xd54c9437…`, which has
+ * only a `scallop` module and no `mint`/`redeem`, and recording it broke
+ * every redeem/mint PTB ("No module found with module name redeem").
+ *
+ * `resolveProtocolPackage` therefore validates the candidate exposes
+ * `mint`+`redeem`, and if not, follows its linkage table to the real
+ * protocol package (`TYPE_PACKAGE -> upgraded_id`). Returns `null` when no
+ * valid package can be resolved — the caller then keeps the known-good
+ * baseline instead of corrupting routing.
  */
 async function discoverCurrentPackage(
   sui: SuiClient,
@@ -352,6 +372,6 @@ async function discoverCurrentPackage(
     limit: 1,
     order: "descending",
   });
-  const ev = res.data[0];
-  return ev?.packageId ?? null;
+  const candidate = res.data[0]?.packageId ?? null;
+  return resolveProtocolPackage(sui, candidate);
 }

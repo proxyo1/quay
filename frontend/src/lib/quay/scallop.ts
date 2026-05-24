@@ -480,3 +480,106 @@ export function resetPreflightCache(): void {
 function stripLeading0x(typeTag: string): string {
   return typeTag.startsWith("0x") ? typeTag.slice(2) : typeTag;
 }
+
+// ─── Package resolution (upgrade-aware, validated) ──────────────────────
+//
+// The scallop-monitor cron used to record whatever package emitted the
+// latest MintEvent. On 2026-05-18 that handed it the Scallop *facade*
+// package (0xd54c9437… — only a `scallop` module, no `mint`/`redeem`),
+// which then broke every redeem/mint PTB with "No module found with module
+// name redeem". These helpers validate a candidate package actually exposes
+// the protocol modules, and recover the real package via the linkage table
+// when handed a facade.
+
+/** Module names the callable protocol package must expose. */
+export const PROTOCOL_MODULES = ["mint", "redeem"] as const;
+
+/** True if `pkg` is a Move package exposing all of `required` module names. */
+export async function packageHasModules(
+  sui: SuiClient,
+  pkg: string,
+  required: readonly string[],
+): Promise<boolean> {
+  try {
+    const mods = await sui.getNormalizedMoveModulesByPackage({ package: pkg });
+    const names = new Set(Object.keys(mods));
+    return required.every((m) => names.has(m));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Follow a package's linkage table to the current upgraded id for a lineage
+ * root. Scallop's facade package links `TYPE_PACKAGE -> upgraded_id`, which
+ * is how we recover the callable protocol package when discovery hands us
+ * the facade. Returns null if there's no such linkage entry.
+ */
+export async function upgradedIdFromLinkage(
+  sui: SuiClient,
+  pkg: string,
+  lineageRoot: string,
+): Promise<string | null> {
+  try {
+    const obj = await sui.getObject({ id: pkg, options: { showBcs: true } });
+    const bcs = obj.data?.bcs as
+      | {
+          dataType?: string;
+          linkageTable?: Record<
+            string,
+            { upgradedId?: string; upgraded_id?: string }
+          >;
+        }
+      | undefined;
+    if (!bcs || bcs.dataType !== "package" || !bcs.linkageTable) return null;
+    const target = stripLeading0x(lineageRoot).toLowerCase();
+    for (const [root, info] of Object.entries(bcs.linkageTable)) {
+      if (stripLeading0x(root).toLowerCase() === target) {
+        return info.upgradedId ?? info.upgraded_id ?? null;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the current callable Scallop protocol package (the one with
+ * `mint`+`redeem`), validating before returning so we never route to a
+ * facade/wrapper that lacks those modules.
+ *
+ *   1. candidate itself has mint+redeem  -> use it (genuine upgrade case)
+ *   2. else follow candidate's linkage to TYPE_PACKAGE and validate that
+ *      (facade case — recovers the real protocol package)
+ *   3. else null  -> caller keeps its known-good baseline
+ */
+export async function resolveProtocolPackage(
+  sui: SuiClient,
+  candidate: string | null,
+): Promise<string | null> {
+  if (!candidate) return null;
+  if (await packageHasModules(sui, candidate, PROTOCOL_MODULES)) return candidate;
+  const linked = await upgradedIdFromLinkage(sui, candidate, TYPE_PACKAGE);
+  if (linked && (await packageHasModules(sui, linked, PROTOCOL_MODULES))) {
+    return linked;
+  }
+  return null;
+}
+
+/**
+ * Route guard: return `candidate` only if it exposes `requiredModule`,
+ * else fall back to `DEFAULT_CALL_PACKAGE`. Cheap (one RPC) defense against
+ * a bad `last_seen_package` regardless of how it was written. Callers are
+ * the rare, rate-limited toggle/earn paths, so the extra RPC is negligible.
+ */
+export async function safeCallPackage(
+  sui: SuiClient,
+  candidate: string,
+  requiredModule: string,
+): Promise<string> {
+  if (candidate === DEFAULT_CALL_PACKAGE) return candidate;
+  return (await packageHasModules(sui, candidate, [requiredModule]))
+    ? candidate
+    : DEFAULT_CALL_PACKAGE;
+}

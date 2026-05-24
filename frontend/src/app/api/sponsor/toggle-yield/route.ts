@@ -20,6 +20,7 @@ import {
   getPoolCash,
   getSharePrice,
   preflightScallopHealthy,
+  safeCallPackage,
 } from "@/lib/quay/scallop";
 import {
   computeRedeemFee,
@@ -275,10 +276,14 @@ export async function POST(req: Request) {
   // to turn yield ON, refuse — we'd otherwise mint into a paused market.
   // For turning OFF we still let it through: stuck sUSDsui must always
   // be redeemable when possible.
-  const callPackage =
+  const rawCallPackage =
     typeof flag.metadata.last_seen_package === "string"
       ? flag.metadata.last_seen_package
       : DEFAULT_CALL_PACKAGE;
+  // Defensive: never route to a package missing the protocol modules,
+  // whatever wrote last_seen_package (cron false-positive, manual edit).
+  // `redeem` is the canary — the protocol package has it, a facade doesn't.
+  const callPackage = await safeCallPackage(sui, rawCallPackage, "redeem");
   if (body.new_yield_enabled) {
     const healthy = await preflightScallopHealthy(sui, USDSUI);
     if (!healthy) {

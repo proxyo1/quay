@@ -20,6 +20,7 @@ import {
   getPoolCash,
   getSharePrice,
   preflightScallopHealthy,
+  safeCallPackage,
 } from "@/lib/quay/scallop";
 import {
   computeRedeemFee,
@@ -158,10 +159,13 @@ export async function POST(req: Request) {
       { status: 503 },
     );
   }
-  const callPackage =
+  const rawCallPackage =
     typeof flag.metadata.last_seen_package === "string"
       ? flag.metadata.last_seen_package
       : DEFAULT_CALL_PACKAGE;
+  // Defensive: never route to a package missing the protocol modules,
+  // whatever wrote last_seen_package. `mint` is the canary here.
+  const callPackage = await safeCallPackage(sui, rawCallPackage, "mint");
 
   // Rate limit
   if (process.env.NODE_ENV !== "development") {
