@@ -7,7 +7,9 @@ import {
 import { NextResponse } from "next/server";
 
 import {
+  cashoutCapMinor,
   computeCashoutQuote,
+  formatSgdMinor,
   FX_RATE_MAX_AGE_SECONDS,
   QUAY_FEE_BPS,
 } from "@/lib/server/cashout-fee";
@@ -108,6 +110,18 @@ export async function POST(req: Request) {
     quote = computeCashoutQuote(amountMinor, rate, QUAY_FEE_BPS);
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "could not quote" }, { status: 400 });
+  }
+
+  // Per-transaction safety cap (live-money rail). Reject before locking the
+  // quote or building the transfer so nothing moves above the limit.
+  const capMinor = cashoutCapMinor();
+  if (quote.netSgdMinor > capMinor) {
+    return NextResponse.json(
+      {
+        error: `cash-out of S$${formatSgdMinor(quote.netSgdMinor)} exceeds the per-transaction limit of S$${formatSgdMinor(capMinor)}`,
+      },
+      { status: 400 },
+    );
   }
 
   let sponsor;

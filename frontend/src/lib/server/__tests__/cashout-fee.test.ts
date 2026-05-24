@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import {
+  cashoutCapMinor,
   computeCashoutQuote,
+  DEFAULT_CASHOUT_MAX_SGD_MINOR,
   formatSgdMinor,
   FX_RATE_MAX_AGE_SECONDS,
   QUAY_FEE_BPS,
@@ -77,5 +79,31 @@ describe("FX_RATE_MAX_AGE_SECONDS", () => {
   });
   test("a 44h-stale weekend feed is within bound", () => {
     expect(44 * 60 * 60).toBeLessThan(FX_RATE_MAX_AGE_SECONDS);
+  });
+});
+
+describe("cashoutCapMinor", () => {
+  const prev = process.env.CASHOUT_MAX_SGD_MINOR;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.CASHOUT_MAX_SGD_MINOR;
+    else process.env.CASHOUT_MAX_SGD_MINOR = prev;
+  });
+
+  test("default is a small safety cap (S$50)", () => {
+    expect(DEFAULT_CASHOUT_MAX_SGD_MINOR).toBe(5000n);
+  });
+  test("falls back to default when env unset", () => {
+    delete process.env.CASHOUT_MAX_SGD_MINOR;
+    expect(cashoutCapMinor()).toBe(DEFAULT_CASHOUT_MAX_SGD_MINOR);
+  });
+  test("honors a valid env override", () => {
+    process.env.CASHOUT_MAX_SGD_MINOR = "1000";
+    expect(cashoutCapMinor()).toBe(1000n);
+  });
+  test("falls back on garbage / non-positive env", () => {
+    process.env.CASHOUT_MAX_SGD_MINOR = "nope";
+    expect(cashoutCapMinor()).toBe(DEFAULT_CASHOUT_MAX_SGD_MINOR);
+    process.env.CASHOUT_MAX_SGD_MINOR = "0";
+    expect(cashoutCapMinor()).toBe(DEFAULT_CASHOUT_MAX_SGD_MINOR);
   });
 });
