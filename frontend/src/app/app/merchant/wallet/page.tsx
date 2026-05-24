@@ -483,6 +483,28 @@ function YieldRoutingToggle(props: {
   const sui = useSuiClient();
   const [state, setState] = useState<YieldToggleState>({ kind: "idle" });
   const enabled = props.currentYieldRouting?.enabled === true;
+
+  // Live USDsui supply APY from Scallop (via our cached server route). When
+  // unavailable we fall back to a generic range rather than a wrong number.
+  const apyQ = useQuery({
+    queryKey: ["scallop-usdsui-apy"],
+    queryFn: async () => {
+      const r = await fetch("/api/scallop/apy");
+      if (!r.ok) throw new Error(`apy HTTP ${r.status}`);
+      return (await r.json()) as {
+        supply_apy: number;
+        supply_apr: number | null;
+        updated_at: string | null;
+      };
+    },
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+  const apyPct =
+    apyQ.data && Number.isFinite(apyQ.data.supply_apy)
+      ? (apyQ.data.supply_apy * 100).toFixed(2)
+      : null;
   const inFlight =
     state.kind !== "idle" &&
     state.kind !== "error" &&
@@ -575,8 +597,13 @@ function YieldRoutingToggle(props: {
           </p>
           <p className="text-[11px] text-[var(--muted-soft)] mt-0.5 leading-relaxed">
             Turn this on and your incoming balance starts earning interest
-            automatically — typically 3–7% per year. Cash out any time, same
-            account.
+            automatically —{" "}
+            {apyPct
+              ? `currently ${apyPct}% APY on USDsui`
+              : apyQ.isLoading
+                ? "fetching the current rate…"
+                : "typically 3–7% per year"}{" "}
+            via Scallop. Cash out any time, same account.
           </p>
         </div>
         <span
