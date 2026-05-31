@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  turbopack: {
+    // Avoid picking ~/package-lock.json when multiple lockfiles exist.
+    root: process.cwd(),
+  },
 };
 
 export default nextConfig;

@@ -140,6 +140,17 @@ Total wallet balance required: **zero SUI** (sponsor pays, 10/day per address).
 5. Pre-signature trust receipt shows: *"you pay up to X · merchant receives Y · routed via Cetus Aggregator (≤1% slippage)"* OR *"direct transfer (no routing fee)"*.
 6. Tap pay → one signature → `payments::pay<MerchantPreferredToken>` lands → terminal feed updates within 2 seconds. If the merchant has yield enabled, the payment routes into their Scallop USDsui position in the same PTB.
 
+### 4. Cash out USDsui → SGD via Wise PayNow (⚠️ custodial demo, off by default)
+
+The only custodial path in the app, and a deliberately throwaway one — a hackathon-scope bridge to fiat that the licensed V2 settlement leg will replace and delete. Gated behind the `cashout_enabled` feature flag (off by default) with `WISE_ENV=sandbox`; the `live` flip is bounded by a per-payout cap (`CASHOUT_MAX_SGD_MINOR`, default S$50) and a 10/day limit.
+
+1. From `/app/merchant/wallet`, the merchant picks *Cash out USDsui → SGD* and enters an amount. `/api/cashout/quote` previews the SGD they'd receive — USDsui is 1:1 USD, converted at the live Pyth USD/SGD rate, minus a **25 bps FX fee** — and returns the Wise recipient-field schema so the UI renders the right PayNow form.
+2. The merchant fills in their PayNow recipient details and confirms. `/api/cashout/initiate` re-fetches the rate and **locks the quote** (the locked net-SGD figure is shown before signing), then builds a sponsored `buildSponsoredUsdsuiTransfer` PTB moving the USDsui to the treasury (`.secrets/treasury-mainnet.json`).
+3. The merchant zkLogin-signs; the sponsor co-signs gas; the dual-signed tx lands the USDsui in the treasury. Total merchant SUI required: **zero**.
+4. `/api/cashout/confirm` verifies the on-chain transfer, then fires the Wise PayNow SGD payout out of a pre-funded float. The `cashout_requests` row walks `signed → received → paying → paid_out`. If the payout fails *after* funds land in treasury, the row is marked `failed` (never a silent loss) and recovered with [`scripts/cashout-redrive.ts`](scripts/cashout-redrive.ts).
+
+The 25 bps spread is Quay's fee: it holds 100% of the USDsui and disburses 99.75% of its SGD worth. Quote math is pure and unit-tested in [`frontend/src/lib/server/cashout-fee.ts`](frontend/src/lib/server/cashout-fee.ts).
+
 ---
 
 ## Architecture

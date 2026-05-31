@@ -130,6 +130,16 @@ export default function DocsPage() {
                 dashboard. Toggle off any time.
               </li>
               <li>
+                <strong>Cash out to SGD.</strong>{" "}
+                <span className="text-[var(--muted-soft)]">(Beta)</span> Send
+                USDsui straight to your bank as SGD over PayNow via Wise — the
+                fiat exit, no exchange account needed. The payment rail stays
+                non-custodial; this optional cash-out is the one leg that routes
+                through a Quay treasury, since paying out fiat requires briefly
+                holding the funds. Off by default while we finish the licensed,
+                non-custodial settlement leg.
+              </li>
+              <li>
                 <strong>GST-ready receipts.</strong> Every transaction emits
                 an on-chain event with UEN, SGD-equivalent at Pyth quote
                 time, token settled, and tx digest. Export to CSV for your
@@ -188,9 +198,12 @@ export default function DocsPage() {
           <Section id="security" eyebrow="06" title="Security model">
             <ul className="docs-list">
               <li>
-                <strong>Non-custodial.</strong> Quay&apos;s contracts cannot
-                hold shopper or merchant funds. The settle PTB transfers the
-                output of the swap straight to the merchant in the same call.
+                <strong>Non-custodial payment rail.</strong> The settle PTB
+                transfers the output of the swap straight to the merchant in the
+                same call — Quay&apos;s contracts never hold shopper or merchant
+                funds in the payment path. The one exception is the optional SGD
+                cash-out, which routes through a Quay treasury by design; every
+                other flow is non-custodial.
               </li>
               <li>
                 <strong>Atomic-or-revert.</strong> Swap and transfer share a
@@ -255,8 +268,10 @@ export default function DocsPage() {
                 accounts who&apos;d rather not install a wallet at all.
               </li>
               <li>
-                <strong>Merchant payout schedules</strong> — auto-sweep into
-                a treasury wallet, an off-ramp partner, or a yield strategy.
+                <strong>Licensed SGD settlement.</strong> Replace the beta Wise
+                cash-out with a fully non-custodial PayNow payout through a
+                licensed partner — plus payout schedules that auto-sweep into a
+                treasury wallet, an off-ramp partner, or a yield strategy.
               </li>
               <li>
                 <strong>Refunds.</strong> Merchant-signed reverse PTB against
@@ -283,8 +298,12 @@ export default function DocsPage() {
               a="Yes, from the merchant dashboard. The change is an on-chain update to their merchant record and applies to the next payment."
             />
             <FAQ
+              q="How does a merchant turn USDsui into actual SGD?"
+              a="From the dashboard, a merchant can cash out USDsui to their bank as SGD over PayNow via Wise (beta, off by default). USDsui converts at the live Pyth USD/SGD rate minus a 25 bps fee, and the SGD lands in their PayNow-linked account. Unlike the payment rail, cash-out routes through a Quay-operated treasury — the one custodial step — because settling fiat requires briefly holding the funds. The licensed, fully non-custodial version is on the roadmap."
+            />
+            <FAQ
               q="Is this regulated payment service activity in Singapore?"
-              a="Quay is non-custodial — funds move directly from shopper to merchant in a single transaction. We're working through the regulatory picture with counsel and will publish more as that solidifies. Nothing on this page is legal advice."
+              a="The payment rail is non-custodial — funds move directly from shopper to merchant in a single transaction, and Quay never holds them. The optional SGD cash-out is the one exception: it routes through a Quay treasury so we can pay out fiat. We're working through the regulatory picture with counsel and will publish more as that solidifies. Nothing on this page is legal advice."
             />
             <FAQ
               q="Does the merchant need to change their QR sticker?"
