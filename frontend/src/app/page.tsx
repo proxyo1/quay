@@ -1,8 +1,10 @@
 import Link from "next/link";
 
+import { HeroVideoDialog } from "@/components/HeroVideoDialog";
 import { PhoneDemo } from "@/components/PhoneDemo";
 
 const APP_URL = "https://app.quay.cash";
+const PITCH_VIDEO_ID = "jQwb1_GypZM";
 
 export default function MarketingHome() {
   return (
@@ -10,6 +12,7 @@ export default function MarketingHome() {
       <Header />
       <main className="relative">
         <Hero />
+        <PitchVideo />
         <PhoneDemo />
         <Steps />
         <TwoSided />
@@ -70,6 +73,23 @@ function Hero() {
         <span className="mono-label">Sui Overflow 2026</span>
       </div>
       <HeroPartners />
+    </section>
+  );
+}
+
+function PitchVideo() {
+  return (
+    <section className="demo-video-section">
+      <SectionMark mark="▶" label="Watch the pitch" centered />
+      <div className="demo-video-wrap">
+        <HeroVideoDialog
+          animationStyle="from-center"
+          videoSrc={`https://www.youtube.com/embed/${PITCH_VIDEO_ID}`}
+          thumbnailSrc={`https://img.youtube.com/vi/${PITCH_VIDEO_ID}/maxresdefault.jpg`}
+          thumbnailFallbackSrc={`https://img.youtube.com/vi/${PITCH_VIDEO_ID}/hqdefault.jpg`}
+          thumbnailAlt="Quay — the QR rail, on-chain"
+        />
+      </div>
     </section>
   );
 }
@@ -257,10 +277,9 @@ function Roadmap() {
   const milestones: Milestone[] = [
     { num: "01", name: "SGQR pay-in", state: "live" },
     { num: "02", name: "Merchant yield", state: "live" },
-    { num: "03", name: "UEN verification", state: "now" },
-    { num: "04", name: "Fiat off-ramp", state: "planned" },
-    { num: "05", name: "Switchable settlement", state: "planned" },
-    { num: "06", name: "Regional expansion", state: "planned" },
+    { num: "03", name: "UEN verification", state: "live" },
+    { num: "04", name: "Fiat off-ramp", state: "live" },
+    { num: "05", name: "Regional expansion", state: "planned" },
   ];
   const total = milestones.length;
   // The accent "completed" fill on the track extends to the last live OR now stop.
