@@ -130,26 +130,6 @@ export default function MerchantHome() {
         </section>
       )}
 
-      <section className="glass-card rounded-2xl p-4 space-y-2">
-        <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]">
-          Coming soon
-        </p>
-        <ul className="text-xs text-[var(--muted)] space-y-1.5 leading-relaxed">
-          <li className="flex gap-2">
-            <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            PayNow with mobile numbers (UEN-only for now).
-          </li>
-          <li className="flex gap-2">
-            <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            Manual SGQR photo review before approval.
-          </li>
-          <li className="flex gap-2">
-            <span className="text-[var(--muted-soft)] shrink-0">·</span>
-            Mainnet launch (currently in beta).
-          </li>
-        </ul>
-      </section>
-
       <footer className="text-[11px] text-[var(--muted-soft)] pt-4 border-t border-white/5">
         Powered by Sui · Walrus · Pyth
       </footer>
