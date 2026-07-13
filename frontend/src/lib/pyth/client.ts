@@ -98,8 +98,11 @@ export function priceAgeSeconds(p: PythPrice, nowMs = Date.now()): number {
   return Math.max(0, Math.floor(nowMs / 1000) - p.publishTime);
 }
 
-/** Heuristic: a Pyth price is "stale" if it hasn't updated in N seconds. */
-export const STALE_THRESHOLD_SECONDS = 60;
+/** Heuristic: a Pyth price is "stale" if it hasn't updated in N seconds.
+ *  TEMP (Demo Day): widened 60s → 96h so the weekend-stale USD/SGD FX feed
+ *  (forex closes Fri–Sun) doesn't disable the Pay button during the live
+ *  Sunday-morning demo. Revert to 60 after Demo Day. */
+export const STALE_THRESHOLD_SECONDS = 60 * 60 * 96;
 export function isStale(p: PythPrice, nowMs = Date.now()): boolean {
   return priceAgeSeconds(p, nowMs) > STALE_THRESHOLD_SECONDS;
 }
