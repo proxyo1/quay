@@ -60,9 +60,19 @@ const EVENT_NODE_FIELDS = `
   contents { type { repr } json }
 `;
 
+/**
+ * Sui's GraphQL rejects any page over 50 with a validation error, so a caller
+ * asking for more must page rather than ask louder. Five pages did ask louder
+ * — history, merchant history, verify, the merchant profile and post-signin,
+ * at 100 or 200 — and every one of them failed outright with
+ * "Page size is too large: 100 > 50", which surfaced as a permanent spinner.
+ */
+const MAX_PAGE_SIZE = 50;
+
 const EVENTS_BY_TYPE = `
-  query EventsByType($type: String!, $last: Int!) {
-    events(last: $last, filter: { type: $type }) {
+  query EventsByType($type: String!, $last: Int!, $before: String) {
+    events(last: $last, before: $before, filter: { type: $type }) {
+      pageInfo { hasPreviousPage startCursor }
       nodes { ${EVENT_NODE_FIELDS} }
     }
   }
@@ -120,16 +130,48 @@ function toQuayEvent(n: GraphQLEventNode): QuayEvent {
  * GraphQL paginates from the end with `last`, which is what "newest N" means
  * here; the result is reversed so callers keep the descending order the old
  * `order: "descending"` gave them.
+ *
+ * Walks backwards in pages of at most `MAX_PAGE_SIZE`, so `limit` is a request
+ * for how many events the caller wants rather than a page size they have to
+ * know the server's cap for. Each page arrives oldest-first and every
+ * subsequent page is older still, hence the prepend and the single reverse at
+ * the end.
  */
+interface EventsByTypeResponse {
+  events?: {
+    pageInfo?: { hasPreviousPage: boolean; startCursor: string | null };
+    nodes?: GraphQLEventNode[];
+  };
+}
+
 export async function queryEventsByType(
   eventType: string,
   limit = 50,
 ): Promise<QuayEvent[]> {
-  const data = await graphql<{ events?: { nodes?: GraphQLEventNode[] } }>(
-    EVENTS_BY_TYPE,
-    { type: eventType, last: limit },
-  );
-  return (data.events?.nodes ?? []).map(toQuayEvent).reverse();
+  const collected: GraphQLEventNode[] = [];
+  let before: string | null = null;
+
+  while (collected.length < limit) {
+    const data: EventsByTypeResponse = await graphql<EventsByTypeResponse>(
+      EVENTS_BY_TYPE,
+      {
+        type: eventType,
+        last: Math.min(MAX_PAGE_SIZE, limit - collected.length),
+        before,
+      },
+    );
+
+    const nodes = data.events?.nodes ?? [];
+    // An empty page with hasPreviousPage still set would otherwise spin here.
+    if (nodes.length === 0) break;
+    collected.unshift(...nodes);
+
+    const pageInfo = data.events?.pageInfo;
+    if (!pageInfo?.hasPreviousPage || !pageInfo.startCursor) break;
+    before = pageInfo.startCursor;
+  }
+
+  return collected.map(toQuayEvent).reverse();
 }
 
 export interface EventPage {
@@ -153,7 +195,11 @@ export async function queryEventsPageAscending(
       pageInfo?: { hasNextPage: boolean; endCursor: string | null };
       nodes?: GraphQLEventNode[];
     };
-  }>(EVENTS_PAGE, { type: eventType, first, after });
+  }>(EVENTS_PAGE, {
+    type: eventType,
+    first: Math.min(first, MAX_PAGE_SIZE),
+    after,
+  });
   return {
     events: (data.events?.nodes ?? []).map(toQuayEvent),
     endCursor: data.events?.pageInfo?.endCursor ?? null,
