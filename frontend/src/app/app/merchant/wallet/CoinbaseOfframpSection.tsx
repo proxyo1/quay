@@ -47,7 +47,7 @@ interface SessionResponse {
   request_id: string;
   uen?: string;
   offramp_token: string;
-  offramp_url: string;
+  offramp_url?: string;
   sell_amount_usdc_minor: string;
   estimated_sgd_minor: string;
   coinbase_fee_sgd_minor: string;
@@ -203,12 +203,28 @@ export function CoinbaseOfframpSection({
         usdcMinor: String(body.sell_amount_usdc_minor ?? "0"),
       });
     } else if (status === "created" || status === "committed" || status === "sent") {
+      // Resume, do NOT ask the merchant to sign in again.
+      //
+      // This component only renders when a valid zkLogin session exists, so an
+      // open row never implies a lost key. Routing it to `sessionLost` produced
+      // a loop: the card said "sign in", signing in remounted the component,
+      // and it said it again — with a committed order sitting unsendable the
+      // whole time.
       setStep({
-        k: "sessionLost",
-        requestId: String(body.request_id),
-        deadlineMs,
+        k: "waitingCoinbase",
+        session: {
+          request_id: String(body.request_id),
+          offramp_token: "",
+          sell_amount_usdc_minor: String(body.sell_amount_usdc_minor ?? "0"),
+          estimated_sgd_minor: String(body.estimated_sgd_minor ?? "0"),
+          coinbase_fee_sgd_minor: String(body.coinbase_fee_sgd_minor ?? "0"),
+          swap: { expected_in_usdsui_minor: "0", max_in_usdsui_minor: "0", venues: [] },
+          redeem: { required: false },
+        },
+        ready: null,
       });
     }
+    void deadlineMs;
   }, []);
 
   // Flag discovery is a 404 from the server, never a client-side flag read.
@@ -341,7 +357,10 @@ export function CoinbaseOfframpSection({
         const res = await fetch("/api/offramp/coinbase/prepare", {
           method: "POST",
           headers: authHeaders(plan.offramp_token),
-          body: JSON.stringify({ request_id: plan.request_id }),
+          body: JSON.stringify({
+            request_id: plan.request_id,
+            owner: session.address,
+          }),
         });
         if (cancelled) return;
         if (res.status === 202) return; // not committed yet
@@ -364,7 +383,7 @@ export function CoinbaseOfframpSection({
       cancelled = true;
       clearInterval(id);
     };
-  }, [step, authHeaders]);
+  }, [step, authHeaders, session.address]);
 
   /**
    * Abandon an open order. Releases the per-owner in-flight lock straight away
@@ -376,7 +395,11 @@ export function CoinbaseOfframpSection({
       await fetch("/api/offramp/coinbase/status", {
         method: "POST",
         headers: authHeaders(plan.offramp_token),
-        body: JSON.stringify({ request_id: plan.request_id, action: "cancel" }),
+        body: JSON.stringify({
+          request_id: plan.request_id,
+          owner: session.address,
+          action: "cancel",
+        }),
       });
     } catch {
       /* the TTL will collect it regardless */
@@ -409,7 +432,11 @@ export function CoinbaseOfframpSection({
       await fetch("/api/offramp/coinbase/status", {
         method: "POST",
         headers: authHeaders(plan.offramp_token),
-        body: JSON.stringify({ request_id: plan.request_id, sui_digest: tx.digest }),
+        body: JSON.stringify({
+          request_id: plan.request_id,
+          owner: session.address,
+          sui_digest: tx.digest,
+        }),
       });
 
       setStep({ k: "settled", sgdMinor: plan.estimated_sgd_minor });
@@ -525,14 +552,16 @@ export function CoinbaseOfframpSection({
             </span>
           </div>
           {/* Popup blockers are silent, so always offer a focusable way through. */}
-          <a
-            href={step.session.offramp_url}
-            target="_blank"
-            rel="noreferrer"
-            className="glass-chip w-full min-h-[44px] flex items-center justify-center"
-          >
-            Reopen Coinbase
-          </a>
+          {step.session.offramp_url && (
+            <a
+              href={step.session.offramp_url}
+              target="_blank"
+              rel="noreferrer"
+              className="glass-chip w-full min-h-[44px] flex items-center justify-center"
+            >
+              Reopen Coinbase
+            </a>
+          )}
           <button
             type="button"
             onClick={() => cancelCashOut(step.session)}
