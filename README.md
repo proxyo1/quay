@@ -71,6 +71,7 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 | `/app/merchant/wallet` — **withdraw USDsui to any address** (non-custodial) | ✅ gasless for the full balance (`0x2::coin::send_funds`); sponsored gas for partial amounts |
 | `/app/merchant/wallet` — **opt into Scallop USDsui yield** on idle balances | ✅ sponsored toggle; payments auto-route into the yield position |
 | `/app/merchant/wallet` — **cash out USDsui → SGD** via PayNow | ⚠️ manual Wise demo (personal Wise within hackathon scope), custodial-by-treasury, `cashout_enabled`-gated, `WISE_ENV=sandbox` by default. Real non-custodial leg is V2 (see SECURITY.md + TODOS) |
+| `/app/merchant/wallet` — **cash out USDsui → SGD** via Coinbase | ✅ non-custodial (merchant's own Coinbase account), `coinbase_offramp_enabled`-gated OFF. Pays into a Coinbase *balance*, not a bank — not parity with the Wise demo |
 | `/app/merchant/terminal` — live PaymentReceipt feed, SGD-prominent + received-token formatted | ✅ 2s refresh |
 | `/app/merchant/history` — incoming-payment history keyed off the zkLogin session | ✅ |
 | Multi-UEN ownership (one wallet, many sticker locations) | ✅ |
@@ -92,6 +93,7 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 | `/api/sponsor/withdraw` — sponsored partial USDsui withdrawals | ✅ |
 | `/api/sponsor/toggle-yield` + `/api/sponsor/earn-move` — sponsored Scallop yield opt-in/out | ✅ |
 | `/api/cashout/{quote,initiate,confirm}` — custodial Wise PayNow demo (gated) | ⚠️ demo only |
+| `/api/offramp/coinbase/{session,prepare,status}` — non-custodial Coinbase offramp (gated) | ✅ non-custodial |
 | `/api/receipts` — receipt lookup for history/verify surfaces | ✅ |
 | `/api/cron/scallop-monitor` (weekly) + `/api/cron/scallop-cost-basis-indexer` (daily) | ✅ Vercel cron |
 | Walrus integration for logo + receipt + encrypted KYB blobs | ✅ |

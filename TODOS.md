@@ -65,10 +65,46 @@ Generated 2026-05-12 from office-hours design session + hackathon scoping.
 - [ ] Real-merchant pilot: 5+ named SG crypto-friendly merchants signed up
 - [ ] Migrate from Wormhole USDC to Circle CCTP native USDC when available
 - [ ] V2 fiat settlement layer (the real, non-custodial merchant USDsui→SGD off-ramp). Two candidate leg-1 partners, both regulated: (a) **StraitsX** — MAS-licensed, shipping stablecoin-native PayNow merchant settlement (XSGD redemption); (b) **Bridge/Stripe** — USDsui's own issuer, with global fiat payout rails (redeem at par through the issuer). Either replaces the manual demo below. Requires a PSA license (SPI SGD 100k / MPI SGD 250k capital) or a licensed partner. Pairs with the counsel/PSA-DPT-SP opinion item above.
-- [ ] **DELETE the manual Wise cash-out demo when V2 lands.** The demo is deliberately throwaway and custodial-by-treasury: remove `frontend/src/lib/server/{treasury,wise,cashout-store,cashout-fee}.ts`, `frontend/src/app/api/cashout/*`, `.secrets/treasury-mainnet.json`, the `cashout_requests` table + `cashout_enabled` flag, `scripts/cashout-redrive.ts`, and the cash-out half of `MoneyOutSections.tsx`. Keep the non-custodial withdraw-to-address (gasless `buildGaslessUsdsuiSendAll` + `/api/sponsor/withdraw` for partial + WithdrawSection) — that stays.
+- [ ] **Coinbase CDP Offramp follow-ups** (rail shipped 2026-08-11, flag `coinbase_offramp_enabled` OFF).
+  Phase 0 passed against production: SG supported, SGD payable, USDC sellable from Sui.
+  Outstanding before the flag can go on:
+  - [ ] One capped live run (`COINBASE_OFFRAMP_MAX_SGD_MINOR` low). **There is no offramp sandbox**,
+    so this is real money against production Coinbase — no way around it.
+  - [ ] Register the `redirectUrl` on the CDP domain allowlist (Payments → Onramp & Offramp).
+    A non-allowlisted URL is silently dropped while the order still completes.
+  - [ ] Confirm whether offramp needs separate production approval; the quickstart lists only
+    account + secret key + allowlist, which is not the same as confirmation.
+  - [ ] **`from_address` semantics unverified** — does Coinbase validate the transaction *sender*
+    or the *gas payer*? Quay's sponsored PTB has `sender = merchant`, `gasOwner = sponsor`, so the
+    two differ. The capped live run settles this.
+  - [ ] The hourly reconcile cron needs a paid Vercel tier (Hobby is daily-only).
+  - [ ] Swap-back path for stranded USDC. After a post-send cancellation the merchant holds USDC,
+    which is not a receive token; `StrandedUsdcCard` surfaces the balance but there is no one-tap
+    conversion, so recovery is currently a support action.
+  - [ ] **Abandon-before-send is unrecoverable by construction** and will stay that way: signing is
+    client-only, so no server or cron can fill an order the merchant walked away from. Mitigated by
+    the surviving-tab design and up-front warning only.
+- [ ] **Fee stack: Coinbase is ~4x the Wise leg.** Measured 2026-08-11 — Coinbase charged S$0.13 on a
+  S$12.80 gross sale (~101 bps) against the Wise demo's 25 bps, before the 10% Scallop performance fee
+  on interest and the Cetus route cost, and the merchant still moves SGD to their bank by hand. The
+  rail's win is non-custody and outliving the Wise demo, not merchant economics. Decide whether that
+  trade holds before promoting it over the Wise path.
+- [ ] **Evaluate Bridge/Stripe as the offramp target.** Bridge issues USDsui and would redeem at par —
+  removing the swap leg entirely and ending in a bank account rather than a Coinbase balance. Coinbase
+  was chosen for speed of validation (self-serve, viability provable with one authenticated curl)
+  rather than merchant outcome. Pairs with the V2 settlement item below.
+- [ ] Counsel opinion: does non-custody actually resolve the DPT licensing question for this rail?
+- [ ] **DELETE the manual Wise cash-out demo when V2 lands.** The demo is deliberately throwaway and custodial-by-treasury: remove `frontend/src/lib/server/{treasury,wise,cashout-store,cashout-fee}.ts`, `frontend/src/app/api/cashout/*`, `.secrets/treasury-mainnet.json`, the `cashout_requests` table + `cashout_enabled` flag, `scripts/cashout-redrive.ts`, and the cash-out half of `MoneyOutSections.tsx`. Keep the non-custodial withdraw-to-address (gasless `buildGaslessUsdsuiSendAll` + `/api/sponsor/withdraw` for partial + WithdrawSection) — that stays. **Note:** the Coinbase rail is NOT parity and does not unblock this deletion — it pays into a Coinbase balance, not a bank, and requires each merchant to hold a KYC'd Coinbase SG account.
 - [ ] Apply for Sui Foundation grant ($25-100k plausible with hackathon validation)
 
 ### Operational
+- [ ] **`/api/cashout/*` and `/api/sponsor/*` have no authentication** — `owner` is client-supplied and
+  regex-validated only. Pre-existing; the Coinbase routes deliberately do not reproduce it (they gate on
+  on-chain registry membership, see `lib/server/coinbase-auth.ts`). Retrofit that gate to the older routes.
+- [ ] **`scripts/` still use the retired JSON-RPC transport** and are broken. The app moved to gRPC +
+  GraphQL on 2026-08-11; the day0..day13 and wise-* one-shot tooling did not.
+- [ ] No route-level or component-level test infrastructure. Logic is pushed into `lib/` and unit-tested
+  there instead; routes and components are verified by hand.
 - [ ] Replace dev-key issuer attestation with multisig or DAO control
 - [ ] Self-attestation V1 design (remove quay as attestation issuer)
 - [ ] Bug bounty program post-mainnet (Immunefi tier-1, ~$10k initial)
