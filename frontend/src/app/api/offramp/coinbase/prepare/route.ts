@@ -11,7 +11,6 @@ import {
 import {
   CoinbaseOfframpError,
   getUserTransactions,
-  isAwaitingCommit,
   isCoinbaseConfigured,
   selectDepositTransaction,
 } from "@/lib/server/coinbase-offramp";
@@ -37,12 +36,11 @@ export const runtime = "nodejs";
 /**
  * Build the sponsored swap-and-send transaction for a committed order.
  *
- * Called once the merchant has committed the order inside the widget.
- *
- * A deposit address alone does not mean that happened — Coinbase issues
- * `to_address` at quote time, so a record with one appears within seconds of
- * `session` whether or not the widget was ever opened. `isAwaitingCommit`
- * carries the detail and the incident that established it.
+ * Called once the merchant has committed the order inside the widget — which
+ * Quay cannot verify. Coinbase issues `to_address` at quote time and a
+ * committed order is indistinguishable from an untouched one on the API, so
+ * this route confirms only that the address belongs to a live order that is
+ * this merchant's and current. See the note above `selectDepositTransaction`.
  *
  * Re-quotes rather than reusing the session's quote: minutes may have passed
  * inside the widget, and the swap is exact-out, so a thinner route now needs
@@ -130,7 +128,8 @@ export async function POST(req: Request) {
   //   - the list is the merchant's whole history, so the entry must be bound to
   //     THIS order (`selectDepositTransaction`);
   //   - a deposit address alone is not a commitment, because Coinbase issues
-  //     one at quote time (`isAwaitingCommit`).
+  //     one at quote time — and no API field distinguishes the two, so the
+  //     merchant's own confirmation in the widget is the only signal there is.
   let tx;
   try {
     const transactions = await getUserTransactions(row.partner_user_ref);
@@ -148,7 +147,7 @@ export async function POST(req: Request) {
     throw e;
   }
 
-  if (!tx?.toAddress || isAwaitingCommit(tx)) {
+  if (!tx?.toAddress) {
     return NextResponse.json(
       { ready: false, reason: "waiting for you to confirm the order on Coinbase" },
       { status: 202 },

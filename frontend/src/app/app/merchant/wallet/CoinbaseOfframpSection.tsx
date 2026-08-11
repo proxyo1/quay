@@ -22,9 +22,14 @@ import { getSuiClient } from "@/lib/sui-client";
  *  - **A blocked popup must never be silent.** `window.open` returns null when
  *    blocked, and that return used to be ignored: the card advanced to
  *    "waiting", then to "one tap to finish", for a merchant who had seen no
- *    widget at all. Combined with `prepare` reading a quote-time deposit
- *    address as a commitment, that sent real USDC against an order Coinbase
- *    never had. Both halves are now fixed; this is the client half.
+ *    widget at all, and real USDC went to an order Coinbase never had.
+ *  - **The merchant IS the commitment signal.** Coinbase exposes no field
+ *    separating a confirmed order from an untouched one — a live committed
+ *    order still reads `TRANSACTION_STATUS_STARTED` with no deadline, exactly
+ *    like one nobody opened. A server-side gate on those fields blocked a real
+ *    cash-out. So the send screen states the precondition instead of the server
+ *    checking it, and the blocked-popup state above is what makes that claim
+ *    meaningful.
  *  - **The signature is never auto-fired.** When Coinbase confirms, the card
  *    primes a large button and waits for a tap. A wallet prompt appearing in an
  *    unattended tab trains merchants to dismiss prompts, which is precisely the
@@ -675,11 +680,23 @@ export function CoinbaseOfframpSection({
 
       {step.k === "waitingCoinbase" && step.ready && (
         <div className="relative z-10 space-y-3">
-          <p className="text-sm text-white">Coinbase is ready — one tap to finish.</p>
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 flex flex-wrap items-center justify-between gap-1 text-xs">
-            <span className="text-[var(--muted)]">Expires in</span>
-            <Countdown deadlineMs={step.ready.deadline_at_ms} />
-          </div>
+          <p className="text-sm text-white">Ready to send.</p>
+          {/* Quay cannot verify the commitment — Coinbase exposes no field that
+              distinguishes a confirmed order from an untouched one. So the
+              precondition is stated rather than checked. Sending against an
+              unconfirmed order deposits USDC with no sale behind it. */}
+          <p className="text-xs text-[var(--muted)] leading-relaxed">
+            Only continue if you pressed <span className="text-white">Cash out
+            now</span> in the Coinbase window. If you didn&apos;t, go back and
+            finish there first — sending early leaves your USDC sitting in
+            Coinbase unsold.
+          </p>
+          {step.ready.deadline_at_ms !== null && (
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 flex flex-wrap items-center justify-between gap-1 text-xs">
+              <span className="text-[var(--muted)]">Expires in</span>
+              <Countdown deadlineMs={step.ready.deadline_at_ms} />
+            </div>
+          )}
           <button
             type="button"
             onClick={() => submitSend(step.session, step.ready!)}

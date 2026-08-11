@@ -599,32 +599,26 @@ export function selectDepositTransaction(
 }
 
 /**
- * True while a transaction record exists but the merchant has not committed
- * the order inside the widget.
+ * **There is no way to tell a committed order from an uncommitted one.**
  *
- * **Coinbase issues `to_address` at quote time, not at commit time.** This was
- * assumed the other way round and it cost a real cash-out: a merchant whose
- * popup was blocked never saw the widget, yet a transaction record appeared
- * four seconds after the quote, carrying a deposit address. The app read that
- * as "committed", offered "one tap to finish", and sent USDC to a deposit
- * address belonging to an order Coinbase had no commitment for. The funds
- * credited the merchant's Coinbase balance as an ordinary deposit, the order
- * sat in `TRANSACTION_STATUS_STARTED` with an empty `tx_hash`, and no SGD was
- * ever paid.
+ * This was a gate (`isAwaitingCommit`) that refused to hand out a send while a
+ * record still looked untouched — created/STARTED with no deadline. It was
+ * inferred from broken cases only, and the first genuinely committed order
+ * proved it wrong: pressing "Cash out now" leaves `status` at
+ * `TRANSACTION_STATUS_STARTED`, adds no deadline, and produces a record
+ * structurally identical to one from a merchant who never opened the widget.
+ * Only `updated_at` advances, and it advances on uncommitted orders too. The
+ * gate blocked a real cash-out.
  *
- * The signal used here is the quote-time fingerprint observed live: still in
- * the created/STARTED family AND carrying no deadline. Deliberately narrow —
- * a committed order has never been observed, so anything stricter risks
- * refusing to send on an order that is genuinely ready, which strands the
- * merchant just as badly in the other direction. Tighten this once a
- * successful order shows which field actually flips.
+ * So Quay cannot verify the commitment and must not pretend to. What replaces
+ * it is the merchant: `selectDepositTransaction` guarantees the deposit address
+ * belongs to a live order that is theirs and current, the blocked-popup state
+ * guarantees they actually reached the widget, and the send screen states the
+ * precondition plainly before they tap. That is weaker than a server-side
+ * check, and it is what the API supports.
+ *
+ * Re-add a check here the moment Coinbase exposes a commitment signal.
  */
-export function isAwaitingCommit(tx: {
-  status: OfframpTransactionStatus;
-  deadlineMs: number | null;
-}): boolean {
-  return tx.status === "created" && tx.deadlineMs === null;
-}
 
 /**
  * Parse a deadline from whatever field the API supplies. Returns null rather
