@@ -13,9 +13,11 @@ import {
   CoinbaseOfframpError,
   buildOfframpUrl,
   createSellQuote,
+  cashoutCurrency,
   createSessionToken,
   getCashoutLimits,
   isCoinbaseConfigured,
+  minUsdsuiForCashout,
 } from "@/lib/server/coinbase-offramp";
 import {
   OfframpStoreError,
@@ -23,7 +25,7 @@ import {
   insertCreated,
 } from "@/lib/server/coinbase-offramp-store";
 import { checkAndIncrementSponsorUsage } from "@/lib/server/sponsor";
-import { coinbaseOfframpCapMinor, formatSgdMinor } from "@/lib/money";
+import { coinbaseOfframpCapMinor, formatFiatMinor } from "@/lib/money";
 import { readBalanceSheet, USDSUI } from "@/lib/quay/scallop";
 import { planRedeemFromBalanceSheet } from "@/lib/quay/scallop-redeem";
 import { usdsuiSpendableMinor } from "@/lib/quay/transfer";
@@ -51,7 +53,7 @@ export const runtime = "nodejs";
  * is shared with every other user and can move underneath us.
  *
  * Rate limited per address and flag-gated. There is no offramp sandbox, so the
- * flag is off by default and the SGD cap is a real safety rail.
+ * flag is off by default and the payout cap is a real safety rail.
  */
 
 const DAILY_CAP = 5;
@@ -125,25 +127,26 @@ export async function POST(req: Request) {
 
   // Cheap pre-check BEFORE the rate limit is consumed.
   //
-  // Coinbase enforces its minimum in SGD, which we cannot know until the quote
-  // comes back — by which point a daily slot is already spent. A merchant
-  // fumbling the amount two or three times would lock themselves out for a
-  // day over something we could see coming. USDsui and USDC are both 1:1 USD,
-  // so a deliberately conservative floor rate turns the SGD minimum into a
-  // USDsui one. Advisory only: it errs toward letting a marginal amount
-  // through, and the Coinbase quote remains the authority.
-  const limits = await getCashoutLimits({});
+  // Coinbase enforces its minimum in the payout currency, which we cannot know
+  // until the quote comes back — by which point a daily slot is already spent.
+  // A merchant fumbling the amount two or three times would lock themselves out
+  // for a day over something we could see coming. USDsui and USDC are both 1:1
+  // USD, so a conservative rate turns the fiat minimum into a USDsui one.
+  // Advisory only: it errs toward letting a marginal amount through, and the
+  // Coinbase quote remains the authority.
+  const currency = cashoutCurrency();
+  const limits = await getCashoutLimits({ currency });
   if (limits) {
-    const CONSERVATIVE_SGD_PER_USD = 140n; // 1.40, hundredths
-    const minUsdsuiMinor = (limits.minMinor * 1_000_000n * 100n) / (CONSERVATIVE_SGD_PER_USD * 100n);
-    if (amountMinor < minUsdsuiMinor) {
+    const minUsdsuiMinor = minUsdsuiForCashout(limits.minMinor, currency);
+    if (minUsdsuiMinor !== null && amountMinor < minUsdsuiMinor) {
       return NextResponse.json(
         {
           error:
-            `Coinbase's minimum cash-out is S$${formatSgdMinor(limits.minMinor)}. ` +
-            `Try a larger amount.`,
+            `Coinbase's minimum cash-out is ` +
+            `${formatFiatMinor(limits.minMinor, currency)}. Try a larger amount.`,
           min_sgd_minor: limits.minMinor.toString(),
           max_sgd_minor: limits.maxMinor.toString(),
+          cashout_currency: currency,
         },
         { status: 400 },
       );
@@ -274,6 +277,7 @@ export async function POST(req: Request) {
       partnerUserRef,
       redirectUrl,
       sessionToken,
+      cashoutCurrency: currency,
     });
   } catch (e) {
     if (e instanceof CoinbaseOfframpError) {
@@ -287,16 +291,19 @@ export async function POST(req: Request) {
       // A rejected *amount* is the merchant's problem to fix, not an outage,
       // so it is a 400 with Coinbase's own published limits rather than a 502.
       if (e.status === 400) {
-        const limits = await getCashoutLimits({});
+        const limits = await getCashoutLimits({ currency });
         return NextResponse.json(
           {
             error: limits
-              ? `Coinbase pays out between S$${formatSgdMinor(limits.minMinor)} and ` +
-                `S$${formatSgdMinor(limits.maxMinor)} per cash-out. Try a larger amount.`
+              ? `Coinbase pays out between ` +
+                `${formatFiatMinor(limits.minMinor, currency)} and ` +
+                `${formatFiatMinor(limits.maxMinor, currency)} per cash-out. ` +
+                `Try a larger amount.`
               : "Coinbase rejected this amount",
             detail,
             min_sgd_minor: limits?.minMinor.toString() ?? null,
             max_sgd_minor: limits?.maxMinor.toString() ?? null,
+            cashout_currency: currency,
           },
           { status: 400 },
         );
@@ -309,14 +316,19 @@ export async function POST(req: Request) {
     throw e;
   }
 
-  // Hard SGD cap. No sandbox exists, so every run is real money.
+  // Hard payout cap. No sandbox exists, so every run is real money.
+  //
+  // `COINBASE_OFFRAMP_MAX_SGD_MINOR` keeps its name for continuity with the
+  // deployed env, but the value is read in whatever `cashoutCurrency()` is —
+  // re-check it when changing currency, since 5000 minor units is S$50 or $50.
   const capMinor = coinbaseOfframpCapMinor();
   if (quote.cashoutTotalSgdMinor > capMinor) {
     return NextResponse.json(
       {
         error:
-          `cash-out of S$${formatSgdMinor(quote.cashoutTotalSgdMinor)} exceeds ` +
-          `the per-transaction limit of S$${formatSgdMinor(capMinor)}`,
+          `cash-out of ${formatFiatMinor(quote.cashoutTotalSgdMinor, currency)} ` +
+          `exceeds the per-transaction limit of ` +
+          `${formatFiatMinor(capMinor, currency)}`,
       },
       { status: 400 },
     );
@@ -358,6 +370,9 @@ export async function POST(req: Request) {
     presetCryptoAmount: sellAmountUsdc,
     partnerUserId: partnerUserRef,
     redirectUrl,
+    // Must match the quote: a widget priced in another currency would show the
+    // merchant a different payout than the one they were quoted.
+    cashoutCurrency: currency,
     returnedOfframpUrl: quote.returnedOfframpUrl,
   });
 
@@ -372,6 +387,12 @@ export async function POST(req: Request) {
     /** Quay's estimate. Coinbase's own number is authoritative after commit. */
     estimated_sgd_minor: quote.cashoutTotalSgdMinor.toString(),
     coinbase_fee_sgd_minor: quote.coinbaseFeeSgdMinor.toString(),
+    /**
+     * Payout currency for the two amounts above. The `_sgd_` field and column
+     * names predate the currency being configurable and are kept for wire and
+     * schema continuity — the units are this currency, not necessarily SGD.
+     */
+    cashout_currency: currency,
     swap: {
       expected_in_usdsui_minor: swapQuote.expectedAmountIn.toString(),
       max_in_usdsui_minor: swapQuote.maxAmountIn.toString(),

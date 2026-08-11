@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { formatSgdMinor, formatUsdsuiExact, parseUsdsuiToMinor } from "@/lib/money";
+import { formatFiatMinor, formatUsdsuiExact, parseUsdsuiToMinor } from "@/lib/money";
 import { zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
 import { getSuiClient } from "@/lib/sui-client";
 
@@ -30,10 +30,13 @@ import { getSuiClient } from "@/lib/sui-client";
  *    unattended tab trains merchants to dismiss prompts, which is precisely the
  *    habit not to build in a payments app. The merchant's tap is the only
  *    remaining step, so almost no clock is burned.
- *  - **Copy never implies bank settlement.** Coinbase pays SGD into the
- *    merchant's Coinbase balance; moving it to a bank is a separate thing they
- *    do in Coinbase. The Wise section's "on its way to your bank" is correct
- *    there and wrong here.
+ *  - **Copy never implies bank settlement.** Coinbase pays the merchant's
+ *    Coinbase balance; moving it to a bank is a separate thing they do in
+ *    Coinbase. The Wise section's "on its way to your bank" is correct there
+ *    and wrong here.
+ *  - **The payout currency is server-configured**, so no amount or sentence
+ *    here may hardcode SGD. It arrives as `cashout_currency` on the session and
+ *    status responses.
  */
 
 type Step =
@@ -46,7 +49,7 @@ type Step =
   | { k: "waitingCoinbase"; session: SessionResponse; ready: PrepareReady | null }
   | { k: "sendSigning" }
   | { k: "sending" }
-  | { k: "settled"; sgdMinor: string }
+  | { k: "settled"; sgdMinor: string; currency: string }
   | { k: "expired"; amountMinor: string }
   | { k: "unmatched"; usdcMinor: string }
   | { k: "sessionLost"; requestId: string; deadlineMs: number | null }
@@ -60,6 +63,8 @@ interface SessionResponse {
   sell_amount_usdc_minor: string;
   estimated_sgd_minor: string;
   coinbase_fee_sgd_minor: string;
+  /** Payout currency for the two amounts above; server-configured. */
+  cashout_currency?: string;
   swap: { expected_in_usdsui_minor: string; max_in_usdsui_minor: string; venues: string[] };
   redeem: {
     required: boolean;
@@ -159,9 +164,15 @@ function StepMarker({ n }: { n: 1 | 2 }) {
   );
 }
 
-const DISCLOSURE =
+/**
+ * Used only until the server states the payout currency. It is configurable
+ * (`COINBASE_CASHOUT_CURRENCY`), so nothing here may hardcode SGD in an amount.
+ */
+const DEFAULT_CURRENCY = "SGD";
+
+const disclosureFor = (currency: string) =>
   "You're selling to your own Coinbase account. Coinbase does the identity " +
-  "check and pays SGD into that account — moving it to your bank is a " +
+  `check and pays ${currency} into that account — moving it to your bank is a ` +
   "separate step you do in Coinbase. Quay never holds your funds. " +
   "Network fees are on us.";
 
@@ -179,6 +190,8 @@ export function CoinbaseOfframpSection({
   const [available, setAvailable] = useState(true);
   const [amount, setAmount] = useState("");
   const [step, setStep] = useState<Step>({ k: "form" });
+  // Server-configured payout currency, learned from the first response.
+  const [currency, setCurrency] = useState(DEFAULT_CURRENCY);
   const windowRef = useRef<Window | null>(null);
 
   // Max sellable is liquid PLUS what can come out of Scallop — capping at
@@ -200,10 +213,18 @@ export function CoinbaseOfframpSection({
    * re-login, which is what `sessionLost` routes to.
    */
   const rehydrate = useCallback((body: Record<string, unknown>) => {
+    // Adopt the server's payout currency before any amount is rendered.
+    if (typeof body.cashout_currency === "string" && body.cashout_currency) {
+      setCurrency(body.cashout_currency);
+    }
     const status = body.status as string;
     const deadlineMs = (body.deadline_at_ms as number | null) ?? null;
     if (status === "settled") {
-      setStep({ k: "settled", sgdMinor: String(body.estimated_sgd_minor ?? "0") });
+      setStep({
+        k: "settled",
+        sgdMinor: String(body.estimated_sgd_minor ?? "0"),
+        currency: String(body.cashout_currency ?? DEFAULT_CURRENCY),
+      });
     } else if (status === "expired") {
       setStep({ k: "expired", amountMinor: String(body.amount_usdsui_minor ?? "0") });
     } else if (status === "unmatched") {
@@ -283,6 +304,7 @@ export function CoinbaseOfframpSection({
         return;
       }
       const plan = body as SessionResponse;
+      if (plan.cashout_currency) setCurrency(plan.cashout_currency);
       if (plan.redeem.required) {
         setStep({ k: "redeemConfirm", plan });
       } else {
@@ -454,7 +476,11 @@ export function CoinbaseOfframpSection({
         }),
       });
 
-      setStep({ k: "settled", sgdMinor: plan.estimated_sgd_minor });
+      setStep({
+        k: "settled",
+        sgdMinor: plan.estimated_sgd_minor,
+        currency: plan.cashout_currency ?? DEFAULT_CURRENCY,
+      });
       onDone();
     } catch (e) {
       setStep({ k: "error", message: e instanceof Error ? e.message : String(e) });
@@ -476,7 +502,7 @@ export function CoinbaseOfframpSection({
       {step.k === "form" && (
         <div className="relative z-10 space-y-3">
           <p className="text-sm text-[var(--muted)] leading-relaxed">
-            Sell USDsui into your own Coinbase account and get paid in SGD.
+            Sell USDsui into your own Coinbase account and get paid in {currency}.
           </p>
           <input
             inputMode="decimal"
@@ -641,8 +667,8 @@ export function CoinbaseOfframpSection({
             Cancel this cash-out
           </button>
           <p className="text-[10px] text-[var(--muted)] border-t border-white/5 pt-2 leading-relaxed">
-            Coinbase pays SGD into your own Coinbase account. Moving it to your
-            bank is a separate step you do there.
+            Coinbase pays {currency} into your own Coinbase account. Moving it
+            to your bank is a separate step you do there.
           </p>
         </div>
       )}
@@ -674,7 +700,8 @@ export function CoinbaseOfframpSection({
       {step.k === "settled" && (
         <div className="relative z-10 space-y-2">
           <p className="text-sm text-white">
-            S${formatSgdMinor(BigInt(step.sgdMinor || "0"))} is in your Coinbase account.
+            {formatFiatMinor(BigInt(step.sgdMinor || "0"), step.currency)} is in
+            your Coinbase account.
           </p>
           <p className="text-xs text-[var(--muted)]">
             Move it to your bank from Coinbase whenever you like.
@@ -704,8 +731,9 @@ export function CoinbaseOfframpSection({
           <p className="text-sm text-white">Coinbase didn&apos;t complete the sale</p>
           <p className="text-xs text-[var(--muted)] leading-relaxed">
             We delivered {formatUsdc(step.usdcMinor)} USDC to Coinbase, but the
-            sale to SGD never went through. The USDC is almost certainly sitting
-            in your Coinbase account — check there and sell it to SGD yourself.
+            sale to {currency} never went through. The USDC is almost certainly
+            sitting in your Coinbase account — check there and sell it to{" "}
+            {currency} yourself.
             If Coinbase sent it back to your wallet instead, it appears as a
             USDC balance at the top of this page.
           </p>
@@ -748,7 +776,7 @@ export function CoinbaseOfframpSection({
 
       {step.k === "form" && (
         <p className="relative z-10 text-[10px] text-[var(--muted)] border-t border-white/5 pt-2 leading-relaxed">
-          {DISCLOSURE}
+          {disclosureFor(currency)}
         </p>
       )}
     </section>

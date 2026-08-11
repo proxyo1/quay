@@ -9,6 +9,7 @@ import {
 } from "@/lib/server/coinbase-auth";
 import {
   CoinbaseOfframpError,
+  cashoutCurrency,
   getUserTransactions,
   isCoinbaseConfigured,
 } from "@/lib/server/coinbase-offramp";
@@ -260,6 +261,11 @@ function serialize(row: OfframpRow) {
     sell_amount_usdc_minor: row.sell_amount_usdc_minor,
     estimated_sgd_minor: row.cashout_total_sgd_minor,
     coinbase_fee_sgd_minor: row.coinbase_fee_sgd_minor,
+    // The row predates the currency being configurable and has no column for
+    // it, so this reports the server's current setting. Flipping the env
+    // mid-flight therefore relabels an in-flight row — display only, and the
+    // stored amounts are whatever Coinbase quoted.
+    cashout_currency: cashoutCurrency(),
     to_address: row.to_address,
     sui_digest: row.sui_digest,
     deadline_at: row.deadline_at,

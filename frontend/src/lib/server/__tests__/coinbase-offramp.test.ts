@@ -1,10 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import {
   buildOfframpUrl,
+  cashoutCurrency,
   decimalToMinor,
   isAwaitingCommit,
   mapTransactionStatus,
+  minUsdsuiForCashout,
   parseDeadlineMs,
   selectDepositTransaction,
   type OfframpTransaction,
@@ -60,6 +62,52 @@ describe("isAwaitingCommit", () => {
     for (const status of ["pending", "success", "failed", "unknown"] as const) {
       expect(isAwaitingCommit({ status, deadlineMs: null })).toBe(false);
     }
+  });
+});
+
+describe("cashoutCurrency", () => {
+  const saved = process.env.COINBASE_CASHOUT_CURRENCY;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.COINBASE_CASHOUT_CURRENCY;
+    else process.env.COINBASE_CASHOUT_CURRENCY = saved;
+  });
+
+  test("defaults to SGD", () => {
+    delete process.env.COINBASE_CASHOUT_CURRENCY;
+    expect(cashoutCurrency()).toBe("SGD");
+  });
+
+  test("USD is selectable — the point of the knob", () => {
+    // SGD's floor (S$7) exceeds a pending-review app's US$5 test cap, leaving
+    // no valid amount. USD's floor is $2, so the rail becomes testable at all.
+    process.env.COINBASE_CASHOUT_CURRENCY = "usd";
+    expect(cashoutCurrency()).toBe("USD");
+  });
+
+  test("junk falls back to SGD rather than reaching Coinbase", () => {
+    for (const raw of ["", "  ", "dollars", "US", "USDD", "U$D"]) {
+      process.env.COINBASE_CASHOUT_CURRENCY = raw;
+      expect(cashoutCurrency()).toBe("SGD");
+    }
+  });
+});
+
+describe("minUsdsuiForCashout", () => {
+  test("converts a fiat floor into a USDsui one", () => {
+    // S$7.00 at the conservative 1.40 ceiling → 5.00 USDsui.
+    expect(minUsdsuiForCashout(700n, "SGD")).toBe(5_000_000n);
+  });
+
+  test("errs low so the quote, not this, is the gate", () => {
+    // $2.00 must not compute to more than 2 USDsui, or a valid amount is
+    // refused before Coinbase ever sees it.
+    const min = minUsdsuiForCashout(200n, "USD");
+    expect(min).not.toBeNull();
+    expect(min!).toBeLessThan(2_000_000n);
+  });
+
+  test("an unknown currency skips the pre-check instead of guessing", () => {
+    expect(minUsdsuiForCashout(700n, "AED")).toBeNull();
   });
 });
 

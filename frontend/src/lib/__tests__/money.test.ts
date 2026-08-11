@@ -4,6 +4,7 @@ import {
   DEFAULT_CASHOUT_MAX_SGD_MINOR,
   cashoutCapMinor,
   coinbaseOfframpCapMinor,
+  formatFiatMinor,
   formatSgdMinor,
   formatUsdsuiExact,
   formatUsdsuiMinor,
@@ -122,5 +123,24 @@ describe("payout caps", () => {
         expect(cashoutCapMinor()).toBe(DEFAULT_CASHOUT_MAX_SGD_MINOR);
       });
     }
+  });
+});
+
+describe("formatFiatMinor", () => {
+  test("renders the payout currency's own symbol", () => {
+    // The payout currency is configurable, so an amount must never be labelled
+    // S$ just because SGD is the default.
+    expect(formatFiatMinor(367n, "SGD")).toBe("S$3.67");
+    expect(formatFiatMinor(367n, "USD")).toBe("$3.67");
+    expect(formatFiatMinor(367n, "EUR")).toBe("€3.67");
+    expect(formatFiatMinor(367n, "GBP")).toBe("£3.67");
+  });
+
+  test("accepts a lowercase code", () => {
+    expect(formatFiatMinor(700n, "usd")).toBe("$7.00");
+  });
+
+  test("an unknown currency shows its code, never a guessed symbol", () => {
+    expect(formatFiatMinor(1234n, "AED")).toBe("AED 12.34");
   });
 });

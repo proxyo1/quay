@@ -209,6 +209,61 @@ export async function getSellOptions(country: string): Promise<SellOptions> {
   return cdpRequest("GET", "/onramp/v1/sell/options", { query: { country } });
 }
 
+/**
+ * The fiat currency Coinbase pays the merchant in. `COINBASE_CASHOUT_CURRENCY`,
+ * defaulting to SGD.
+ *
+ * Configurable because **SGD's minimum can exceed what an app is allowed to
+ * transact.** A CDP app pending full-access review is capped at US$5 per test
+ * transaction while Coinbase's SGD floor is S$7 (~US$5.47), so the valid range
+ * for a SG merchant is empty and the rail cannot be exercised at all. Every
+ * other currency SG offers has a floor near US$2 — USD is min $2 / max $1M —
+ * so a single env var is the difference between testable and not.
+ *
+ * SG is the corridor either way; this changes only the payout leg, and the
+ * merchant is paid into the matching balance in their own Coinbase account.
+ */
+export function cashoutCurrency(): string {
+  const raw = process.env.COINBASE_CASHOUT_CURRENCY?.trim().toUpperCase();
+  return raw && /^[A-Z]{3}$/.test(raw) ? raw : "SGD";
+}
+
+/**
+ * Fiat-per-USD ceilings used to turn Coinbase's fiat minimum into a USDsui one.
+ *
+ * Each is set **above** the plausible market rate on purpose: a higher rate
+ * yields a lower USDsui minimum, so the pre-check errs toward letting a
+ * marginal amount reach the quote — which is the real gate and returns an exact
+ * reason. Getting one wrong costs a clearer error message, never a lost send.
+ *
+ * A currency missing here skips the pre-check entirely rather than guessing.
+ */
+const CONSERVATIVE_RATE_PER_USD: Record<string, bigint> = {
+  SGD: 140n, // ~1.28 live
+  USD: 105n,
+  EUR: 100n, // ~0.92 live
+  GBP: 85n, //  ~0.79 live
+  AUD: 165n, // ~1.55 live
+  CAD: 145n, // ~1.38 live
+  BRL: 600n, // ~5.50 live
+};
+
+/**
+ * Smallest USDsui worth quoting for, or null when the currency is unknown.
+ *
+ * Advisory: the Coinbase quote remains the authority, and a null here just
+ * means the merchant learns the minimum from Coinbase instead of from us.
+ */
+export function minUsdsuiForCashout(
+  minFiatMinor: bigint,
+  currency: string,
+): bigint | null {
+  const rate = CONSERVATIVE_RATE_PER_USD[currency.toUpperCase()];
+  if (!rate) return null;
+  // minFiatMinor is hundredths; USDsui is 6dp. Multiply before dividing.
+  return (minFiatMinor * 1_000_000n) / rate;
+}
+
 export interface CashoutLimits {
   /** Minimum payout, in fiat minor units (SGD cents). */
   minMinor: bigint;
@@ -217,8 +272,10 @@ export interface CashoutLimits {
 }
 
 /**
- * Published payout limits for a payment method, e.g. SGD/FIAT_WALLET is
- * min S$3.00 / max S$1,281,100.
+ * Published payout limits for a payment method. SGD/FIAT_WALLET read
+ * min S$3.00 / max S$1,281,100 when this was written and min S$7.00 /
+ * max S$1,279,900 a few months later — hence the live fetch. The max drifts
+ * with FX, and the min is Coinbase policy that moves without notice.
  *
  * Worth fetching rather than hardcoding: a sale under the minimum is rejected
  * by `/sell/quote` with a generic `ERROR_CODE_INVALID_REQUEST`, which is far
@@ -237,7 +294,7 @@ export async function getCashoutLimits(input: {
   paymentMethod?: string;
 }): Promise<CashoutLimits | null> {
   const country = input.country ?? "SG";
-  const currency = input.currency ?? "SGD";
+  const currency = input.currency ?? cashoutCurrency();
   const method = input.paymentMethod ?? "FIAT_WALLET";
   const key = `${country}:${currency}:${method}`;
 
@@ -291,9 +348,9 @@ export async function createSessionToken(input: {
 
 export interface SellQuote {
   quoteId: string;
-  /** SGD the merchant nets, minor units (cents). */
+  /** Fiat the merchant nets, minor units (hundredths of `cashoutCurrency()`). */
   cashoutTotalSgdMinor: bigint;
-  /** Coinbase's fee, SGD minor units. */
+  /** Coinbase's fee, same minor units. */
   coinbaseFeeSgdMinor: bigint;
   /** USDC being sold, 6dp minor units. */
   sellAmountUsdcMinor: bigint;
@@ -338,7 +395,7 @@ export async function createSellQuote(input: {
       sell_currency: "USDC",
       sell_network: "sui",
       sell_amount: input.sellAmountUsdc,
-      cashout_currency: input.cashoutCurrency ?? "SGD",
+      cashout_currency: input.cashoutCurrency ?? cashoutCurrency(),
       // SG offers only CRYPTO_ACCOUNT and FIAT_WALLET; FIAT_WALLET is the
       // "pay me in my Coinbase balance" option.
       payment_method: input.paymentMethod ?? "FIAT_WALLET",
@@ -380,6 +437,8 @@ export function buildOfframpUrl(input: {
   presetCryptoAmount: string;
   partnerUserId: string;
   redirectUrl: string;
+  /** Payout currency; must match the quote or the widget prices differently. */
+  cashoutCurrency?: string;
   returnedOfframpUrl?: string | null;
 }): string {
   if (input.returnedOfframpUrl) return input.returnedOfframpUrl;
@@ -389,7 +448,7 @@ export function buildOfframpUrl(input: {
   u.searchParams.set("quoteId", input.quoteId);
   u.searchParams.set("defaultAsset", "USDC");
   u.searchParams.set("defaultNetwork", "sui");
-  u.searchParams.set("defaultCashoutCurrency", "SGD");
+  u.searchParams.set("defaultCashoutCurrency", input.cashoutCurrency ?? cashoutCurrency());
   u.searchParams.set("presetCryptoAmount", input.presetCryptoAmount);
   u.searchParams.set("disableEdit", "true");
   u.searchParams.set("partnerUserId", input.partnerUserId);

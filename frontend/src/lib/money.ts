@@ -24,6 +24,36 @@ export function formatSgdMinor(minor: bigint): string {
   return `${negative ? "-" : ""}${dollars}.${cents.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Symbols for the fiat currencies Coinbase will pay a SG merchant in.
+ *
+ * A currency absent here still formats, as `"AED 12.34"` — an unfamiliar code
+ * beside the number beats a wrong symbol beside it.
+ */
+const FIAT_SYMBOLS: Record<string, string> = {
+  SGD: "S$",
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  AUD: "A$",
+  CAD: "C$",
+  BRL: "R$",
+};
+
+/**
+ * Format a payout amount with its currency: `(367n, "SGD")` → `"S$3.67"`.
+ *
+ * The payout currency is configurable (see `cashoutCurrency` in
+ * `server/coinbase-offramp.ts`), so display must follow the amount rather than
+ * assume SGD. Minor units are hundredths for every currency here.
+ */
+export function formatFiatMinor(minor: bigint, currency: string): string {
+  const code = currency.toUpperCase();
+  const symbol = FIAT_SYMBOLS[code];
+  const amount = formatSgdMinor(minor);
+  return symbol ? `${symbol}${amount}` : `${code} ${amount}`;
+}
+
 /** USDsui is a 6-decimal token; its minor unit is a microunit. */
 export const USDSUI_DECIMALS = 6;
 
