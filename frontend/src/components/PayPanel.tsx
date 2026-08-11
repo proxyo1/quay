@@ -317,8 +317,19 @@ export function PayPanel({
       //     pass it in. If the user has zero balance of that token, bail
       //     before constructing the PTB.
       let payerCoinSource: "gas" | { objectId: string };
+      // Gas coins to pin explicitly, SUI path only. See below.
+      let suiGasCoins: Array<{ objectId: string; version: string; digest: string }> = [];
       if (payerCoinType === COIN_TYPES.SUI) {
         payerCoinSource = "gas";
+        const suiCoins = await sui.listCoins({
+          owner: account.address,
+          coinType: COIN_TYPES.SUI,
+        });
+        suiGasCoins = suiCoins.objects.map((c) => ({
+          objectId: c.objectId,
+          version: c.version,
+          digest: c.digest,
+        }));
       } else {
         const coins = await sui.listCoins({
           owner: account.address,
@@ -345,6 +356,26 @@ export function PayPanel({
         memo: memo.trim() || undefined,
         quoteMetadata: v1Bytes,
       });
+      // Pin the gas coins ourselves when paying from SUI.
+      //
+      // A SUI payment splits from `tx.gas`, which is correct and is the only
+      // way a single-coin wallet can pay at all. But OKX then refuses with "No
+      // valid gas coins found" — with one Coin<SUI> object, its gas selection
+      // appears to exclude the coin the transaction already references and is
+      // left with nothing. Verified against a wallet holding exactly one SUI
+      // coin: paying from SUI failed while WAL, which passes an explicit object
+      // id and never touches tx.gas, went through.
+      //
+      // Naming the gas payment removes the wallet's selection step entirely.
+      // Only the SUI path is touched, so the token paths that work today are
+      // unaffected. Versions are pinned at this moment, so a concurrent
+      // transaction on the same coins invalidates this one — the merchant
+      // retries, which is the same contract every owned-object PTB has.
+      if (payerCoinType === COIN_TYPES.SUI && suiGasCoins.length > 0) {
+        built.tx.setSender(account.address);
+        built.tx.setGasPayment(suiGasCoins);
+      }
+
       setPay({ kind: "submitting", phase: "awaiting-signature" });
       const result = await signAndExecute({ transaction: built.tx });
       await sui.waitForTransaction({ digest: result.digest });
