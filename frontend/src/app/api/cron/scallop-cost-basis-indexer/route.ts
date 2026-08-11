@@ -1,17 +1,14 @@
 import "server-only";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { NextResponse } from "next/server";
 
+import { queryEventsPageAscending } from "@/lib/quay/events";
 import { findMintEventForTx } from "@/lib/quay/indexer";
 import { isYieldRoutedTokenType } from "@/lib/quay/indexer";
 import { recordCostBasis } from "@/lib/server/yield-cost-basis";
 import { getSupabaseClient } from "@/lib/server/supabase";
 import { QUAY } from "@/lib/sui-config";
-import { SUI_NETWORK } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 export const runtime = "nodejs";
 
@@ -48,10 +45,16 @@ export const runtime = "nodejs";
 const FEATURE_FLAG_NAME = "yield_routing.scallop.usdsui";
 const MAX_EVENTS_PER_TICK = 200;
 
-interface CursorJson {
-  txDigest: string;
-  eventSeq: string;
-}
+/**
+ * GraphQL pagination cursor — an opaque string, unlike the JSON-RPC
+ * `{ txDigest, eventSeq }` pair this used to persist. A stored legacy cursor
+ * no longer parses and is treated as "no cursor", so the first tick after the
+ * transport change rescans from the start of history. That is safe:
+ * `recordCostBasis` upserts on the tx digest, so a rescan re-derives identical
+ * rows and reports them as `rows_skipped_dup`, and MAX_EVENTS_PER_TICK keeps
+ * each tick bounded while it catches back up.
+ */
+type CursorJson = string;
 
 interface IndexerResponse {
   ok: boolean;
@@ -82,10 +85,7 @@ export async function GET(req: Request) {
   }
 
   const checkedAt = new Date().toISOString();
-  const sui = new SuiClient({
-    network: SUI_NETWORK,
-    url: getFullnodeUrl(SUI_NETWORK),
-  });
+  const sui = getSuiClient();
 
   const supabase = getSupabaseClient();
   if (!supabase) {
@@ -137,18 +137,15 @@ export async function GET(req: Request) {
   let advancedCursor: CursorJson | null = startCursor;
 
   while (eventsScanned < MAX_EVENTS_PER_TICK) {
-    const page = await sui.queryEvents({
-      query: {
-        MoveEventType: `${QUAY.packageId}::payments::PaymentReceipt`,
-      },
-      cursor: cursor ?? null,
-      limit: Math.min(50, MAX_EVENTS_PER_TICK - eventsScanned),
-      order: "ascending",
-    });
+    const page = await queryEventsPageAscending(
+      `${QUAY.packageId}::payments::PaymentReceipt`,
+      Math.min(50, MAX_EVENTS_PER_TICK - eventsScanned),
+      cursor,
+    );
 
-    if (!page.data || page.data.length === 0) break;
+    if (page.events.length === 0) break;
 
-    for (const ev of page.data) {
+    for (const ev of page.events) {
       eventsScanned += 1;
       const parsed = ev.parsedJson as
         | { token_type?: { name?: string }; merchant?: string; amount?: string }
@@ -161,7 +158,8 @@ export async function GET(req: Request) {
       yieldRoutedFound += 1;
 
       // Recover the underlying USDsui amount via the same-tx MintEvent.
-      const mint = await findMintEventForTx(sui, ev.id.txDigest);
+      if (!ev.txDigest) continue;
+      const mint = await findMintEventForTx(sui, ev.txDigest);
       if (!mint) {
         // Anomaly — a yield-routed PaymentReceipt without a sibling
         // MintEvent. Log via the response and move on; the row would
@@ -171,7 +169,7 @@ export async function GET(req: Request) {
       }
 
       const res = await recordCostBasis({
-        txDigest: ev.id.txDigest,
+        txDigest: ev.txDigest,
         merchantAddress: ensureHexPrefix(merchant),
         mintShareMinor: BigInt(mint.mint_amount),
         mintUnderlyingMinor: BigInt(mint.deposit_amount),
@@ -179,17 +177,11 @@ export async function GET(req: Request) {
       if (res.written) rowsWritten += 1;
       else rowsSkippedDup += 1; // Upsert ignored on dup PK — counted as skip.
 
-      advancedCursor = {
-        txDigest: ev.id.txDigest,
-        eventSeq: ev.id.eventSeq,
-      };
+      advancedCursor = page.endCursor;
     }
 
-    if (!page.hasNextPage || !page.nextCursor) break;
-    cursor = {
-      txDigest: page.nextCursor.txDigest,
-      eventSeq: page.nextCursor.eventSeq,
-    };
+    if (!page.hasNextPage || !page.endCursor) break;
+    cursor = page.endCursor;
     // Advance the persisted cursor to the page boundary even if no
     // yield-routed rows existed in this page — keeps the cron from
     // re-scanning historical empty windows.
@@ -197,11 +189,7 @@ export async function GET(req: Request) {
   }
 
   // Persist cursor.
-  if (
-    advancedCursor &&
-    (advancedCursor.txDigest !== startCursor?.txDigest ||
-      advancedCursor.eventSeq !== startCursor?.eventSeq)
-  ) {
+  if (advancedCursor && advancedCursor !== startCursor) {
     const newMetadata = {
       ...metadata,
       cost_basis_cursor: advancedCursor,
@@ -240,12 +228,8 @@ export async function GET(req: Request) {
 }
 
 function parseCursor(raw: unknown): CursorJson | null {
-  if (!raw || typeof raw !== "object") return null;
-  const r = raw as Record<string, unknown>;
-  if (typeof r.txDigest !== "string" || typeof r.eventSeq !== "string") {
-    return null;
-  }
-  return { txDigest: r.txDigest, eventSeq: r.eventSeq };
+  // Legacy `{ txDigest, eventSeq }` objects deliberately fall through to null.
+  return typeof raw === "string" && raw.length > 0 ? raw : null;
 }
 
 function ensureHexPrefix(addr: string): string {

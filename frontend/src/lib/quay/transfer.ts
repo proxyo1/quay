@@ -1,7 +1,7 @@
-import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 
 import { USDSUI } from "./scallop";
+import type { SuiClient } from "@/lib/sui-client";
 
 /**
  * Shared builder for a sponsored USDsui transfer (D4). Used by both
@@ -60,17 +60,17 @@ async function collectUsdsuiCoins(
   const coinObjectIds: string[] = [];
   // Page through every USDsui coin object the merchant owns.
   for (;;) {
-    const page = await sui.getCoins({
+    const page = await sui.listCoins({
       owner,
       coinType: USDSUI.coinType,
       cursor: cursor ?? null,
     });
-    for (const c of page.data) {
-      coinObjectIds.push(c.coinObjectId);
+    for (const c of page.objects) {
+      coinObjectIds.push(c.objectId);
       totalMinor += BigInt(c.balance);
     }
-    if (!page.hasNextPage || !page.nextCursor) break;
-    cursor = page.nextCursor;
+    if (!page.hasNextPage || !page.cursor) break;
+    cursor = page.cursor;
   }
   return { totalMinor, coinObjectIds };
 }

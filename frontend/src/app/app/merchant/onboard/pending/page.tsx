@@ -1,6 +1,5 @@
 "use client";
 
-import { useSuiClient } from "@mysten/dapp-kit";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -14,6 +13,7 @@ import {
 } from "@/lib/kyb/handoff";
 import { txUrl } from "@/lib/sui-config";
 import { useZkLoginSession, zkLoginSign } from "@/lib/zklogin";
+import { getSuiClient } from "@/lib/sui-client";
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -26,7 +26,7 @@ type FinalizeState =
 export default function PendingPage() {
   const { session, hydrated, expired, signOut } = useZkLoginSession();
   const router = useRouter();
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   const [handoff, setHandoff] = useState<KybPendingHandoff | null>(null);
   const [status, setStatus] = useState<KybStatusResponse | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
@@ -71,13 +71,14 @@ export default function PendingPage() {
       const bytes = base64ToBytes(finalized.txBytesB64);
       setFinalize({ kind: "running", phase: "submitting" });
       const senderSig = await zkLoginSign(session, bytes);
-      const result = await sui.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature: [senderSig, finalized.sponsorSignature],
-        options: { showEffects: true },
+      const resultRes = await sui.executeTransaction({
+        transaction: bytes,
+        signatures: [senderSig, finalized.sponsorSignature],
+        include: { effects: true },
       });
-      if (result.effects?.status?.status !== "success") {
-        const raw = result.effects?.status?.error ?? "unknown";
+      const result = resultRes.Transaction;
+      if (!result?.status?.success) {
+        const raw = result?.status?.error?.message ?? "unknown";
         throw new Error(humanizeRegisterAbort(raw, handoff.uen));
       }
       setFinalize({ kind: "running", phase: "waiting" });

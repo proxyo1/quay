@@ -10,9 +10,9 @@
     "test": "bun test src/lib"
   },
   "dependencies": {
-    "@cetusprotocol/aggregator-sdk": "^1.5.3",
+    "@cetusprotocol/aggregator-sdk": "^1.6.8",
     "@mysten/dapp-kit": "^1.0.6",
-    "@mysten/sui": "^2.16.2",
+    "@mysten/sui": "^2.23.2",
     "@mysten/walrus": "^1.1.7",
     "@noble/ciphers": "^2.2.0",
     "@noble/hashes": "^2.2.0",

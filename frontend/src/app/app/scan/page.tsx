@@ -4,8 +4,7 @@ import {
   ConnectButton,
   useCurrentAccount,
   useDisconnectWallet,
-  useSuiClient,
-} from "@mysten/dapp-kit";
+  } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -23,6 +22,7 @@ import {
 } from "@/lib/sgqr";
 import { QUAY, objectUrl } from "@/lib/sui-config";
 import { LEGACY_RECEIVE_TOKEN, type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
+import { getSuiClient } from "@/lib/sui-client";
 
 type Source = "scan" | "manual";
 
@@ -51,7 +51,7 @@ type Lookup =
 
 export default function ScanPage() {
   const account = useCurrentAccount();
-  const sui = useSuiClient();
+  const sui = getSuiClient();
 
   const [uen, setUen] = useState("");
   const [scanOpen, setScanOpen] = useState(false);

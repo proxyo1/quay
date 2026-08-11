@@ -1,6 +1,5 @@
 "use client";
 
-import { useSuiClient } from "@mysten/dapp-kit";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { use as usePromise } from "react";
@@ -8,6 +7,8 @@ import { use as usePromise } from "react";
 import { deriveUenHash, lookupUen, type UenLookupResult } from "@/lib/quay";
 import { QUAY } from "@/lib/sui-config";
 import { getBlobUrl } from "@/lib/walrus/client";
+import { getSuiClient } from "@/lib/sui-client";
+import { queryEventsByType } from "@/lib/quay/events";
 
 /**
  * Public merchant page (Phase 6, D13 + D17 + D18).
@@ -45,7 +46,7 @@ export default function MerchantPage({
 }) {
   const { uen: uenParam } = usePromise(params);
   const uen = decodeURIComponent(uenParam).toUpperCase();
-  const sui = useSuiClient();
+  const sui = getSuiClient();
 
   const entryQuery = useQuery<UenLookupResult>({
     queryKey: ["public-merchant", uen],
@@ -62,14 +63,13 @@ export default function MerchantPage({
       const uenHashBytes = Array.from(deriveUenHash(uen));
       const since = Date.now() - ACTIVITY_WINDOW_MS;
 
-      const events = await sui.queryEvents({
-        query: { MoveEventType: `${QUAY.packageId}::payments::PaymentReceipt` },
-        order: "descending",
-        limit: 200,
-      });
+      const events = await queryEventsByType(
+        `${QUAY.packageId}::payments::PaymentReceipt`,
+        200,
+      );
       let count = 0;
       let lastSeenMs: number | null = null;
-      for (const ev of events.data) {
+      for (const ev of events) {
         const p = ev.parsedJson as PaymentReceiptEvent | undefined;
         if (!p) continue;
         if (p.merchant !== entry.owner) continue;

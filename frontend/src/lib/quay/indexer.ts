@@ -1,6 +1,7 @@
-import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
 
+import { eventsForTransaction } from "@/lib/quay/events";
 import { TYPE_PACKAGE, USDSUI, getSharePrice } from "@/lib/quay/scallop";
+import type { SuiClient } from "@/lib/sui-client";
 
 /**
  * Receipt reconciliation: derives the underlying USDsui amount a merchant
@@ -84,27 +85,24 @@ interface MintEventParsed {
  * receipt and return its parsed fields. Returns `null` when the tx has
  * no MintEvent or the RPC call fails.
  *
- * One RPC roundtrip per call (`queryEvents` filtered by `Transaction`).
+ * One roundtrip per call (the transaction is asked for its own events).
  * Callers processing batches of receipts should map+await with bounded
  * concurrency rather than calling this serially.
+ *
+ * Returns `null` for a digest the node has pruned — transaction history is
+ * not retained indefinitely, so an old receipt simply cannot be reconciled
+ * this way and the caller falls back to its other paths.
  */
 export async function findMintEventForTx(
   client: SuiClient,
   txDigest: string,
 ): Promise<MintEventParsed | null> {
-  let events;
-  try {
-    events = await client.queryEvents({
-      query: { Transaction: txDigest },
-    });
-  } catch {
-    return null;
-  }
+  const events = await eventsForTransaction(client, txDigest);
   // The event type is pinned to the lineage root regardless of which
   // upgraded package emitted it (Move keeps event identities stable
   // across upgrades).
   const target = `${TYPE_PACKAGE}::mint::MintEvent`;
-  const found = events.data.find((e: { type: string }) => e.type === target);
+  const found = events.find((e) => e.type === target);
   if (!found?.parsedJson) return null;
   const p = found.parsedJson as MintEventParsed;
   if (!p.deposit_amount || !p.mint_amount) return null;

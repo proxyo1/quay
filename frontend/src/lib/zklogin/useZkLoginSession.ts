@@ -1,12 +1,8 @@
 "use client";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { useCallback, useEffect, useState } from "react";
 
-import { SUI_NETWORK } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 import { clearSession, loadSession, type ZkLoginSession } from "./session";
 
@@ -44,13 +40,10 @@ export function useZkLoginSession() {
 
     const checkExpiry = async (s: ZkLoginSession) => {
       try {
-        const sui = new SuiClient({
-          network: SUI_NETWORK,
-          url: getFullnodeUrl(SUI_NETWORK),
-        });
-        const state = await sui.getLatestSuiSystemState();
+        const sui = getSuiClient();
+        const { systemState } = await sui.core.getCurrentSystemState();
         if (cancelled) return;
-        const currentEpoch = Number(state.epoch);
+        const currentEpoch = Number(systemState.epoch);
         if (currentEpoch > s.maxEpoch) {
           clearSession();
           setSession(null);

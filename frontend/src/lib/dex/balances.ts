@@ -14,8 +14,8 @@
  * for 30 s — balances change infrequently, metadata is effectively static.
  */
 
-import { useSuiClient } from "@mysten/dapp-kit";
 import { useQuery } from "@tanstack/react-query";
+import { getSuiClient } from "@/lib/sui-client";
 
 export interface UserBalance {
   /** Sui Move type, e.g. `0x2::sui::SUI`. */
@@ -34,32 +34,32 @@ export interface UserBalance {
  * tokens float to the top of the picker.
  */
 export function useUserBalances(address: string | undefined) {
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   return useQuery<UserBalance[]>({
     queryKey: ["wallet-balances", address],
     enabled: !!address,
     staleTime: 30_000,
     queryFn: async () => {
       if (!address) return [];
-      const balances = await sui.getAllBalances({ owner: address });
+      const { balances } = await sui.listBalances({ owner: address });
       // Filter dust-free balances first to avoid metadata calls on zero-balance entries.
-      const nonZero = balances.filter((b) => BigInt(b.totalBalance) > 0n);
+      const nonZero = balances.filter((b) => BigInt(b.balance) > 0n);
       const enriched = await Promise.all(
         nonZero.map(async (b): Promise<UserBalance> => {
           let symbol = shortenType(b.coinType);
           let decimals = 0;
           try {
-            const meta = await sui.getCoinMetadata({ coinType: b.coinType });
-            if (meta) {
-              if (meta.symbol) symbol = meta.symbol;
-              if (typeof meta.decimals === "number") decimals = meta.decimals;
+            const { coinMetadata } = await sui.getCoinMetadata({ coinType: b.coinType });
+            if (coinMetadata) {
+              if (coinMetadata.symbol) symbol = coinMetadata.symbol;
+              if (typeof coinMetadata.decimals === "number") decimals = coinMetadata.decimals;
             }
           } catch {
             // No metadata published — fall back to the type tail + raw integer.
           }
           return {
             coinType: b.coinType,
-            balance: BigInt(b.totalBalance),
+            balance: BigInt(b.balance),
             symbol,
             decimals,
           };

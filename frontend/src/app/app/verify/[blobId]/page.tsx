@@ -1,6 +1,5 @@
 "use client";
 
-import { useSuiClient } from "@mysten/dapp-kit";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { use as usePromise } from "react";
@@ -13,6 +12,7 @@ import {
   WalrusNotFoundError,
 } from "@/lib/walrus/client";
 import type { Receipt } from "@/lib/receipts/builder";
+import { queryEventsByType } from "@/lib/quay/events";
 
 /**
  * Public receipt verifier dApp (Phase 5, D12 + D14 + D16).
@@ -54,7 +54,6 @@ export default function VerifyPage({
   params: Promise<{ blobId: string }>;
 }) {
   const { blobId } = usePromise(params);
-  const sui = useSuiClient();
 
   const query = useQuery<Verdict>({
     queryKey: ["verify-receipt", blobId],
@@ -90,12 +89,11 @@ export default function VerifyPage({
       // 3. Cross-reference on-chain. Query recent PaymentReceipt events for
       //    the same merchant, then filter by (payer, amount, ~timestamp).
       try {
-        const events = await sui.queryEvents({
-          query: { MoveEventType: `${QUAY.packageId}::payments::PaymentReceipt` },
-          order: "descending",
-          limit: 200,
-        });
-        const match = events.data.find((ev) => {
+        const events = await queryEventsByType(
+          `${QUAY.packageId}::payments::PaymentReceipt`,
+          200,
+        );
+        const match = events.find((ev) => {
           const p = ev.parsedJson as PaymentReceiptEvent | undefined;
           if (!p) return false;
           if (p.merchant !== receipt.merchant) return false;
@@ -109,7 +107,7 @@ export default function VerifyPage({
           return {
             kind: "verified",
             receipt,
-            tx: { digest: match.id.txDigest, timestampMs: Number(p.timestamp_ms) },
+            tx: { digest: match.txDigest ?? "", timestampMs: Number(p.timestamp_ms) },
           } as const;
         }
         return { kind: "orphaned", receipt } as const;

@@ -1,6 +1,12 @@
 import { blake2b } from "@noble/hashes/blake2.js";
-import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
 
+import type { SuiClient } from "@/lib/sui-client";
+import {
+  isNotFoundError,
+  MerchantEntryBcs,
+  MerchantRegistryBcs,
+  vectorU8FieldName,
+} from "@/lib/quay/move-bcs";
 import { fetchBlob, WalrusFetchError } from "@/lib/walrus/client";
 import {
   LEGACY_RECEIVE_TOKEN,
@@ -38,15 +44,13 @@ export async function getEntriesTableId(
 ): Promise<string> {
   const cached = tableIdCache.get(registryId);
   if (cached) return cached;
-  const obj = await sui.getObject({ id: registryId, options: { showContent: true } });
-  const content = obj.data?.content;
-  if (!content || content.dataType !== "moveObject") {
-    throw new Error(`registry ${registryId} not found or not a Move object`);
+  const obj = await sui.getObject({ objectId: registryId, include: { content: true } });
+  const content = obj.object?.content;
+  if (!content) {
+    throw new Error(`registry ${registryId} not found or has no content`);
   }
-  const fields = content.fields as {
-    entries?: { fields?: { id?: { id?: string } } };
-  };
-  const tableId = fields.entries?.fields?.id?.id;
+  const registry = MerchantRegistryBcs.parse(content);
+  const tableId = registry.entries.id;
   if (typeof tableId !== "string") {
     throw new Error(`registry ${registryId} has no entries table`);
   }
@@ -89,56 +93,126 @@ export async function lookupUen(
   const tableId = await getEntriesTableId(sui, registryId);
   const hash = deriveUenHash(uen);
   try {
-    const field = await sui.getDynamicFieldObject({
+    const field = await sui.getDynamicField({
       parentId: tableId,
-      name: { type: "vector<u8>", value: Array.from(hash) },
+      name: vectorU8FieldName(hash),
     });
-    if (!field.data) return { claimed: false };
-    const content = field.data.content;
-    if (!content || content.dataType !== "moveObject") return { claimed: false };
-    const value = (content.fields as { value?: { fields?: Record<string, unknown> } })
-      .value?.fields;
-    const owner = value?.sui_address;
+    const valueBytes = field.dynamicField?.value?.bcs;
+    if (!valueBytes) return { claimed: false };
+
+    // BCS gives typed fields directly, so none of the old
+    // "number[] or string?" defensiveness is needed.
+    const entry = MerchantEntryBcs.parse(valueBytes);
+    const owner = entry.sui_address;
     if (typeof owner !== "string") return { claimed: false };
-
-    const metadataBlobId =
-      typeof value?.metadata_uri === "string" ? (value.metadata_uri as string) : null;
-
-    // uen_raw comes back as either number[] (BCS-decoded) or string.
-    const uenRawRaw = value?.uen_raw;
-    let uenRaw: string | null = null;
-    if (Array.isArray(uenRawRaw)) {
-      uenRaw = new TextDecoder().decode(new Uint8Array(uenRawRaw as number[]));
-    } else if (typeof uenRawRaw === "string") {
-      uenRaw = uenRawRaw;
-    }
-
-    const evidenceHashRaw = value?.evidence_hash;
-    let evidenceHashHex = "";
-    if (Array.isArray(evidenceHashRaw)) {
-      evidenceHashHex = toHex(Uint8Array.from(evidenceHashRaw as number[]));
-    } else if (typeof evidenceHashRaw === "string") {
-      evidenceHashHex = evidenceHashRaw;
-    }
 
     return {
       claimed: true,
       owner,
-      uenRaw,
-      metadataBlobId,
-      evidenceHashHex,
+      uenRaw: new TextDecoder().decode(Uint8Array.from(entry.uen_raw)),
+      metadataBlobId: entry.metadata_uri ?? null,
+      evidenceHashHex: toHex(Uint8Array.from(entry.evidence_hash)),
     };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("notExists") || msg.includes("does not exist")) {
-      return { claimed: false };
-    }
+    // An absent dynamic field means the UEN is unclaimed. gRPC reports that as
+    // an object-not-found throw rather than an empty result.
+    if (isNotFoundError(e)) return { claimed: false };
     throw e;
   }
 }
 
 function toHex(b: Uint8Array): string {
   return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/** One registered UEN owned by an address, as the terminal and wallet show it. */
+export interface OwnedMerchantEntry {
+  uen: string;
+  metadataBlobId: string | null;
+  /** Digest of the registration tx, when the event carried one. */
+  digest: string | null;
+  /** Registration time in epoch millis. */
+  timestamp: number;
+}
+
+/**
+ * Every UEN registered to `owner`, newest first.
+ *
+ * Shared by `/app/merchant/terminal` and `/app/merchant/wallet`, which
+ * previously carried near-identical copies of this — including two separate
+ * hand-rolled decoders for `uen_raw`.
+ *
+ * This enumerates the registry table rather than replaying
+ * `MerchantRegistered` events, and that distinction is load-bearing: Sui's
+ * GraphQL endpoint retains only a recent window of event history. Mainnet
+ * registrations from May 2026 return **zero** event rows today, so the
+ * event-based version silently told long-standing merchants they had no UENs.
+ * The table is current state and cannot age out.
+ *
+ * Cost is one paginated scan of the table. That is fine at the registry's
+ * present size and is the same read the terminal already did per merchant; if
+ * the registry ever grows past a few thousand entries this wants an index
+ * (an owner → uen_hash table on chain, or a server-side cache) rather than a
+ * bigger `maxEntries`.
+ */
+export async function listOwnedMerchantEntries(
+  sui: SuiClient,
+  registryId: string,
+  packageId: string,
+  owner: string,
+  maxEntries = 1000,
+): Promise<OwnedMerchantEntry[]> {
+  void packageId; // retained for call-site symmetry; no longer needed
+  const tableId = await getEntriesTableId(sui, registryId);
+
+  const rows: OwnedMerchantEntry[] = [];
+  // Annotated because `cursor` is reassigned from `page.cursor` below, which
+  // would otherwise make `page` circularly inferred.
+  let cursor: string | null = null;
+  let scanned = 0;
+
+  while (scanned < maxEntries) {
+    const page: Awaited<ReturnType<typeof sui.listDynamicFields<{ value: true }>>> =
+      await sui.listDynamicFields({
+        parentId: tableId,
+        limit: Math.min(50, maxEntries - scanned),
+        cursor,
+        include: { value: true },
+      });
+    for (const field of page.dynamicFields) {
+      scanned += 1;
+      const raw = field.value?.bcs;
+      if (!raw) continue;
+      let entry;
+      try {
+        entry = MerchantEntryBcs.parse(raw);
+      } catch {
+        continue; // not a MerchantEntry — skip rather than fail the whole list
+      }
+      if (entry.sui_address !== owner) continue;
+      const uen = new TextDecoder().decode(Uint8Array.from(entry.uen_raw));
+      if (!uen) continue;
+      rows.push({
+        uen,
+        metadataBlobId: entry.metadata_uri ?? null,
+        // The registration digest lived on the event, which no longer
+        // survives; callers must tolerate a null digest.
+        digest: null,
+        timestamp: Number(entry.claimed_at_ms),
+      });
+    }
+    if (!page.hasNextPage || !page.cursor) break;
+    cursor = page.cursor;
+  }
+
+  return rows.sort((a, b) => b.timestamp - a.timestamp);
+}
+
+/** Shape of the `MerchantRegistered` event payload. */
+export interface MerchantRegisteredEvent {
+  uen_hash: unknown;
+  sui_address: string;
+  timestamp_ms?: string;
 }
 
 // ─── Merchant profile fetch ─────────────────────────────────────────────

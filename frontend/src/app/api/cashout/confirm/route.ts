@@ -1,9 +1,5 @@
 import "server-only";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { NextResponse } from "next/server";
 
 import {
@@ -24,7 +20,7 @@ import {
   getPersonalProfileId,
 } from "@/lib/server/wise";
 import { USDSUI } from "@/lib/quay/scallop";
-import { SUI_NETWORK } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 export const runtime = "nodejs";
 
@@ -38,41 +34,50 @@ export const runtime = "nodejs";
 
 const MAX_SIGNED_AGE_MS = 60 * 60 * 1000; // bound float exposure
 
-const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
+const sui = getSuiClient();
 
 interface ConfirmRequest {
   cashout_id: string;
   digest: string;
 }
 
-interface BalanceChange {
-  owner: { AddressOwner?: string } | string;
-  coinType: string;
-  amount: string;
-}
-
-/** On-chain proof that the merchant's USDsui actually reached the treasury. */
+/**
+ * On-chain proof that the merchant's USDsui actually reached the treasury.
+ *
+ * Fullnodes prune transaction history, so a digest older than the retention
+ * window returns "not found" rather than a failed verification. That is fine
+ * here — `MAX_SIGNED_AGE_MS` already bounds this to the last hour — but it
+ * means callers must not treat a lookup failure as proof of a bad payment.
+ */
 async function verifyOnChain(
   digest: string,
   owner: string,
   treasury: string,
   amountMinor: bigint,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const tx = await sui.getTransactionBlock({
+  const res = await sui.getTransaction({
     digest,
-    options: { showBalanceChanges: true, showEffects: true, showInput: true },
+    include: { balanceChanges: true, effects: true, transaction: true },
   });
-  const status = tx.effects?.status?.status;
-  if (status !== "success") return { ok: false, reason: `tx status ${status ?? "unknown"}` };
+  const tx = res.Transaction;
+  if (!tx) return { ok: false, reason: "transaction not found" };
 
-  const sender = tx.transaction?.data?.sender;
-  if (sender !== owner) return { ok: false, reason: "tx sender does not match cash-out owner" };
+  if (!tx.status?.success) {
+    return { ok: false, reason: `tx failed: ${tx.status?.error?.message ?? "unknown"}` };
+  }
 
-  const changes = (tx.balanceChanges ?? []) as BalanceChange[];
-  const credit = changes.find((c) => {
-    const addr = typeof c.owner === "object" ? c.owner.AddressOwner : undefined;
-    return addr === treasury && c.coinType === USDSUI.coinType && BigInt(c.amount) >= amountMinor;
-  });
+  if (tx.transaction?.sender !== owner) {
+    return { ok: false, reason: "tx sender does not match cash-out owner" };
+  }
+
+  // gRPC flattens the recipient to `address`; JSON-RPC nested it under
+  // `owner.AddressOwner`.
+  const credit = (tx.balanceChanges ?? []).find(
+    (c) =>
+      c.address === treasury &&
+      c.coinType === USDSUI.coinType &&
+      BigInt(c.amount) >= amountMinor,
+  );
   if (!credit) return { ok: false, reason: "no matching USDsui credit to treasury" };
   return { ok: true };
 }

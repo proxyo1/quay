@@ -177,8 +177,19 @@ submits the sponsored `register_merchant` tx.
 - Keep the README's "Why not just off-ramp?" section; it's the demo's answer to the top skeptic
   question.
 - In docs/copy, write bare section numbers, not `§ NN` decoration.
-- Import the Sui RPC client as `import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc"`
-  (the alias, every file does this — nothing imports the conventional `SuiClient` from `@mysten/sui/client`).
+- Never construct a Sui client directly. Get it from `@/lib/sui-client` — `getSuiClient()` for a
+  client, `import type { SuiClient }` for the parameter type. It is a `SuiGrpcClient`; the endpoint
+  comes from `NEXT_PUBLIC_SUI_GRPC_URL`. **JSON-RPC is dead** — Sui retired it on the public
+  fullnodes (mainnet and testnet), so `getJsonRpcFullnodeUrl` points at a host that answers every
+  method with `-32601`. `scripts/` have not been ported and are broken for that reason.
+- Event history comes from GraphQL (`lib/quay/events.ts`), because gRPC has no event query at all.
+  Sui's GraphQL retains only a **recent window** of events, so never derive current state by
+  replaying history — read the on-chain object or table instead. Move `vector<u8>` fields arrive
+  base64 from GraphQL where JSON-RPC gave `number[]`; run them through `bytesFromEventField`.
+- gRPC returns Move struct contents as raw **BCS**, not a parsed `fields` bag. Decoders live in
+  `lib/quay/move-bcs.ts` (Quay's structs) and `lib/quay/scallop.ts` (Scallop's). BCS is positional:
+  a wrong field order decodes to garbage silently rather than throwing, so validate against mainnet
+  (`bun run src/lib/__tests__/grpc-smoke.ts`) after touching one.
 - Walrus blobs are versioned: merchant profiles carry `v: PROFILE_SCHEMA_VERSION` and receipts a
   `schema_version` const. Readers fall back to a legacy shape on an unknown version rather than throwing,
   so **bump the constant** when you change a blob schema and keep the legacy read path working.

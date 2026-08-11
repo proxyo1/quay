@@ -19,8 +19,8 @@
  */
 
 import { AggregatorClient, Env as CetusEnv } from "@cetusprotocol/aggregator-sdk";
-import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
 
+import type { SuiClient } from "@/lib/sui-client";
 import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
 
 // ─── Network ────────────────────────────────────────────────────────────

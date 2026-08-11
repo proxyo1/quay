@@ -1,8 +1,11 @@
-import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
+import { bcs } from "@mysten/sui/bcs";
 import type {
   Transaction,
   TransactionObjectArgument,
 } from "@mysten/sui/transactions";
+
+import type { SuiClient } from "@/lib/sui-client";
+import { isNotFoundError } from "@/lib/quay/move-bcs";
 
 /**
  * Thin Scallop client for the yield-routing feature.
@@ -243,22 +246,35 @@ export interface BalanceSheet {
   readonly marketCoinSupply: bigint;
 }
 
-interface SuiMoveStructField<T> {
-  readonly type: string;
-  readonly fields: T;
-}
+// ─── BCS schemas for Scallop's dynamic-field keys and values ────────────
+//
+// gRPC hands back raw BCS for dynamic fields instead of the pre-parsed JSON
+// `fields` bag JSON-RPC used to return, so these third-party struct layouts
+// have to be spelled out. Each one was verified against mainnet: the decoded
+// balance sheet yields a share price of ~1.03, which is the tell that the
+// field order is right — a mis-ordered struct produces absurd ratios rather
+// than an error.
 
-interface BalanceSheetFields {
-  readonly cash: string;
-  readonly debt: string;
-  readonly revenue: string;
-  readonly market_coin_supply: string;
-}
+/** `0x1::type_name::TypeName` — a single `ascii::String`, so BCS is a string. */
+const TypeNameBcs = bcs.struct("TypeName", { name: bcs.string() });
 
-interface BalanceSheetWrapper {
-  readonly id: { readonly id: string };
-  readonly name: SuiMoveStructField<{ readonly name: string }>;
-  readonly value: SuiMoveStructField<BalanceSheetFields>;
+/** `<pkg>::reserve::BalanceSheet`. Field order matters; see note above. */
+const BalanceSheetBcs = bcs.struct("BalanceSheet", {
+  cash: bcs.u64(),
+  debt: bcs.u64(),
+  revenue: bcs.u64(),
+  market_coin_supply: bcs.u64(),
+});
+
+/** `<pkg>::market_dynamic_keys::SupplyLimitKey` — wraps a TypeName. */
+const SupplyLimitKeyBcs = bcs.struct("SupplyLimitKey", { type: TypeNameBcs });
+
+/** Dynamic-field name for a reserve keyed by coin type. */
+function typeNameFieldName(coinType: string): { type: string; bcs: Uint8Array } {
+  return {
+    type: "0x1::type_name::TypeName",
+    bcs: TypeNameBcs.serialize({ name: stripLeading0x(coinType) }).toBytes(),
+  };
 }
 
 /**
@@ -275,18 +291,20 @@ export async function readBalanceSheet(
   client: SuiClient,
   coinType: string,
 ): Promise<BalanceSheet | null> {
-  const r = await client.getDynamicFieldObject({
-    parentId: BALANCE_SHEETS_TABLE_ID,
-    name: {
-      type: "0x1::type_name::TypeName",
-      value: { name: stripLeading0x(coinType) },
-    },
-  });
-  const content = r.data?.content;
-  if (!content || content.dataType !== "moveObject") return null;
-  const wrapper = content.fields as unknown as BalanceSheetWrapper;
-  const v = wrapper.value?.fields;
-  if (!v) return null;
+  let raw: Uint8Array | undefined;
+  try {
+    const r = await client.getDynamicField({
+      parentId: BALANCE_SHEETS_TABLE_ID,
+      name: typeNameFieldName(coinType),
+    });
+    raw = r.dynamicField?.value?.bcs;
+  } catch (e) {
+    // An unlisted asset has no reserve; that is a `null`, not an outage.
+    if (isNotFoundError(e)) return null;
+    throw e;
+  }
+  if (!raw) return null;
+  const v = BalanceSheetBcs.parse(raw);
   return {
     cash: BigInt(v.cash),
     debt: BigInt(v.debt),
@@ -379,39 +397,42 @@ const ALLOWALL_KEY_TYPE =
 
 /** Verifies the `AllowAllKey` dynamic field is set on the Market UID. */
 async function isAllowAllSet(client: SuiClient): Promise<boolean> {
-  const r = await client.getDynamicFieldObject({
-    parentId: MARKET_OBJECT,
-    name: { type: ALLOWALL_KEY_TYPE, value: { dummy_field: false } },
-  });
-  return r.data?.content?.dataType === "moveObject";
+  try {
+    const r = await client.getDynamicField({
+      parentId: MARKET_OBJECT,
+      // `AllowAllKey { dummy_field: bool }` — BCS is the bare bool.
+      name: { type: ALLOWALL_KEY_TYPE, bcs: bcs.bool().serialize(false).toBytes() },
+    });
+    return Boolean(r.dynamicField?.value?.bcs);
+  } catch (e) {
+    // Absent key = the market is NOT in AllowAll mode. Fail closed: this
+    // gates whether zkLogin addresses may mint at all.
+    if (isNotFoundError(e)) return false;
+    throw e;
+  }
 }
 
 const SUPPLY_LIMIT_KEY_TYPE =
   "0x6e641f0dca8aedab3101d047e96439178f16301bf0b57fe8745086ff1195eb3e::market_dynamic_keys::SupplyLimitKey";
 
-interface SupplyLimitWrapper {
-  readonly value: string;
-}
-
 async function readSupplyLimit(
   client: SuiClient,
   coinType: string,
 ): Promise<bigint> {
-  const r = await client.getDynamicFieldObject({
+  const r = await client.getDynamicField({
     parentId: MARKET_OBJECT,
     name: {
       type: SUPPLY_LIMIT_KEY_TYPE,
-      value: {
+      bcs: SupplyLimitKeyBcs.serialize({
         type: { name: stripLeading0x(coinType) },
-      },
+      }).toBytes(),
     },
   });
-  const content = r.data?.content;
-  if (!content || content.dataType !== "moveObject") {
+  const raw = r.dynamicField?.value?.bcs;
+  if (!raw) {
     throw new Error(`SupplyLimitKey not found for ${coinType}`);
   }
-  const wrapper = content.fields as unknown as SupplyLimitWrapper;
-  return BigInt(wrapper.value);
+  return BigInt(bcs.u64().parse(raw));
 }
 
 // ─── Pre-flight health check (D7 + E7 30s cache) ────────────────────────
@@ -501,8 +522,9 @@ export async function packageHasModules(
   required: readonly string[],
 ): Promise<boolean> {
   try {
-    const mods = await sui.getNormalizedMoveModulesByPackage({ package: pkg });
-    const names = new Set(Object.keys(mods));
+    const res = await sui.movePackageService.getPackage({ packageId: pkg });
+    const modules = res.response?.package?.modules ?? [];
+    const names = new Set(modules.map((m) => m.name));
     return required.every((m) => names.has(m));
   } catch {
     return false;
@@ -510,35 +532,38 @@ export async function packageHasModules(
 }
 
 /**
- * Follow a package's linkage table to the current upgraded id for a lineage
- * root. Scallop's facade package links `TYPE_PACKAGE -> upgraded_id`, which
- * is how we recover the callable protocol package when discovery hands us
- * the facade. Returns null if there's no such linkage entry.
+ * Newest package id in a lineage (e.g. `TYPE_PACKAGE` → the current protocol
+ * package). This replaces the old linkage-table walk: under JSON-RPC we read
+ * `getObject(pkg, showBcs).linkageTable` off the *facade* to recover the real
+ * package, but gRPC's `getPackage` returns an empty linkage regardless of read
+ * mask. `listPackageVersions` answers the same question more directly — it
+ * enumerates the lineage itself rather than inferring it from whatever package
+ * discovery happened to hand us — so a facade candidate no longer even
+ * participates in the recovery.
+ *
+ * Verified on mainnet: TYPE_PACKAGE lists 19 versions and the newest is
+ * exactly `DEFAULT_CALL_PACKAGE`.
  */
-export async function upgradedIdFromLinkage(
+export async function latestPackageForLineage(
   sui: SuiClient,
-  pkg: string,
   lineageRoot: string,
 ): Promise<string | null> {
   try {
-    const obj = await sui.getObject({ id: pkg, options: { showBcs: true } });
-    const bcs = obj.data?.bcs as
-      | {
-          dataType?: string;
-          linkageTable?: Record<
-            string,
-            { upgradedId?: string; upgraded_id?: string }
-          >;
-        }
-      | undefined;
-    if (!bcs || bcs.dataType !== "package" || !bcs.linkageTable) return null;
-    const target = stripLeading0x(lineageRoot).toLowerCase();
-    for (const [root, info] of Object.entries(bcs.linkageTable)) {
-      if (stripLeading0x(root).toLowerCase() === target) {
-        return info.upgradedId ?? info.upgraded_id ?? null;
-      }
+    const res = await sui.movePackageService.listPackageVersions({
+      packageId: lineageRoot,
+      pageSize: 200,
+    });
+    const versions = res.response?.versions ?? [];
+    if (versions.length === 0) return null;
+    // Ordered oldest → newest; pick by version rather than trusting order.
+    let best: { id: string; version: bigint } | null = null;
+    for (const v of versions) {
+      const id = v.packageId;
+      if (!id) continue;
+      const version = BigInt(v.version ?? 0);
+      if (!best || version > best.version) best = { id, version };
     }
-    return null;
+    return best?.id ?? null;
   } catch {
     return null;
   }
@@ -550,8 +575,8 @@ export async function upgradedIdFromLinkage(
  * facade/wrapper that lacks those modules.
  *
  *   1. candidate itself has mint+redeem  -> use it (genuine upgrade case)
- *   2. else follow candidate's linkage to TYPE_PACKAGE and validate that
- *      (facade case — recovers the real protocol package)
+ *   2. else take the newest package in the TYPE_PACKAGE lineage and validate
+ *      that (facade case — recovers the real protocol package)
  *   3. else null  -> caller keeps its known-good baseline
  */
 export async function resolveProtocolPackage(
@@ -560,9 +585,9 @@ export async function resolveProtocolPackage(
 ): Promise<string | null> {
   if (!candidate) return null;
   if (await packageHasModules(sui, candidate, PROTOCOL_MODULES)) return candidate;
-  const linked = await upgradedIdFromLinkage(sui, candidate, TYPE_PACKAGE);
-  if (linked && (await packageHasModules(sui, linked, PROTOCOL_MODULES))) {
-    return linked;
+  const latest = await latestPackageForLineage(sui, TYPE_PACKAGE);
+  if (latest && (await packageHasModules(sui, latest, PROTOCOL_MODULES))) {
+    return latest;
   }
   return null;
 }
