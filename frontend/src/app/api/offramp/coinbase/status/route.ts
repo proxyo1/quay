@@ -21,7 +21,7 @@ import {
   markSent,
   markSettled,
   markUnmatched,
-  isStaleCreated,
+  isStaleOpenOrder,
   isStalledSend,
   type OfframpRow,
 } from "@/lib/server/coinbase-offramp-store";
@@ -97,7 +97,7 @@ export async function GET(req: Request) {
   // exact outcome of opening the widget and closing it.
   const deadlineMs = row.deadline_at ? Date.parse(row.deadline_at) : null;
   const deadlinePassed = deadlineMs !== null && deadlineMs < Date.now();
-  if ((deadlinePassed || isStaleCreated(row)) && canTransition(row.status, "expire")) {
+  if ((deadlinePassed || isStaleOpenOrder(row)) && canTransition(row.status, "expire")) {
     try {
       row = await markExpired(row.id, row.status);
     } catch (e) {

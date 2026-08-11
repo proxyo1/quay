@@ -6,6 +6,8 @@ import {
   isAwaitingCommit,
   mapTransactionStatus,
   parseDeadlineMs,
+  selectDepositTransaction,
+  type OfframpTransaction,
 } from "../coinbase-offramp";
 
 describe("mapTransactionStatus", () => {
@@ -58,6 +60,113 @@ describe("isAwaitingCommit", () => {
     for (const status of ["pending", "success", "failed", "unknown"] as const) {
       expect(isAwaitingCommit({ status, deadlineMs: null })).toBe(false);
     }
+  });
+});
+
+describe("selectDepositTransaction", () => {
+  const ROW_CREATED = Date.parse("2026-08-11T14:32:28.000Z");
+
+  const tx = (over: Partial<OfframpTransaction>): OfframpTransaction => ({
+    status: "created",
+    toAddress: "0xdeposit",
+    sellAmountUsdcMinor: 2_900_000n,
+    asset: "USDC",
+    network: "sui",
+    transactionId: "t-new",
+    deadlineMs: null,
+    createdAtMs: ROW_CREATED + 4_000,
+    ...over,
+  });
+
+  /** The live incident: a dead morning order still carrying its address. */
+  const STALE_FAILED = tx({
+    transactionId: "1f1958cb",
+    status: "failed",
+    createdAtMs: Date.parse("2026-08-11T13:58:12.828Z"),
+  });
+
+  test("a previous failed order is never reused as a deposit target", () => {
+    // This exact list bound a 14:32 cash-out to the 13:58 order and declared it
+    // fundable 1.4s after creation.
+    expect(
+      selectDepositTransaction([STALE_FAILED], {
+        rowCreatedAtMs: ROW_CREATED,
+        boundTransactionId: null,
+      }),
+    ).toBeNull();
+  });
+
+  test("age alone does not disqualify — liveness and recency are both required", () => {
+    // A live order that predates this row is still someone else's order.
+    const olderButLive = tx({ createdAtMs: ROW_CREATED - 10 * 60_000 });
+    expect(
+      selectDepositTransaction([olderButLive], {
+        rowCreatedAtMs: ROW_CREATED,
+        boundTransactionId: null,
+      }),
+    ).toBeNull();
+  });
+
+  test("picks the live record created for this order", () => {
+    const picked = selectDepositTransaction([STALE_FAILED, tx({})], {
+      rowCreatedAtMs: ROW_CREATED,
+      boundTransactionId: null,
+    });
+    expect(picked?.transactionId).toBe("t-new");
+  });
+
+  test("prefers the newest when a flow re-quotes", () => {
+    const older = tx({ transactionId: "t-older", createdAtMs: ROW_CREATED + 1_000 });
+    const newer = tx({ transactionId: "t-newer", createdAtMs: ROW_CREATED + 9_000 });
+    expect(
+      selectDepositTransaction([older, newer], {
+        rowCreatedAtMs: ROW_CREATED,
+        boundTransactionId: null,
+      })?.transactionId,
+    ).toBe("t-newer");
+  });
+
+  test("tolerates small clock skew against Coinbase", () => {
+    const slightlyEarly = tx({ createdAtMs: ROW_CREATED - 5_000 });
+    expect(
+      selectDepositTransaction([slightlyEarly], {
+        rowCreatedAtMs: ROW_CREATED,
+        boundTransactionId: null,
+      }),
+    ).not.toBeNull();
+  });
+
+  test("a record with no timestamp cannot be bound to an order", () => {
+    expect(
+      selectDepositTransaction([tx({ createdAtMs: null })], {
+        rowCreatedAtMs: ROW_CREATED,
+        boundTransactionId: null,
+      }),
+    ).toBeNull();
+  });
+
+  test("an already-bound row stays on its own transaction", () => {
+    // Even when a newer record exists — re-binding mid-flight would move the
+    // deposit target out from under an order the merchant already confirmed.
+    const bound = tx({ transactionId: "t-bound", createdAtMs: ROW_CREATED + 1_000 });
+    const newer = tx({ transactionId: "t-newer", createdAtMs: ROW_CREATED + 9_000 });
+    expect(
+      selectDepositTransaction([bound, newer], {
+        rowCreatedAtMs: ROW_CREATED,
+        boundTransactionId: "t-bound",
+      })?.transactionId,
+    ).toBe("t-bound");
+  });
+
+  test("a bound order that has since died is unusable, not replaced", () => {
+    const deadBound = tx({ transactionId: "t-bound", status: "failed" });
+    const newer = tx({ transactionId: "t-newer", createdAtMs: ROW_CREATED + 9_000 });
+    expect(
+      selectDepositTransaction([deadBound, newer], {
+        rowCreatedAtMs: ROW_CREATED,
+        boundTransactionId: "t-bound",
+      }),
+    ).toBeNull();
   });
 });
 

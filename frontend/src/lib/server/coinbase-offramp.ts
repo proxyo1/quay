@@ -450,6 +450,71 @@ export interface OfframpTransaction {
   transactionId: string | null;
   /** Deadline as reported by the API, not a computed +30m. */
   deadlineMs: number | null;
+  /** When Coinbase created the record — the only field tying it to an order. */
+  createdAtMs: number | null;
+}
+
+/** Coinbase is done with these; neither can accept a deposit. */
+function isTerminalTransaction(status: OfframpTransactionStatus): boolean {
+  return status === "failed" || status === "success";
+}
+
+/**
+ * Clock-skew allowance when deciding a record was created for *this* order.
+ *
+ * Coinbase's clock and ours are independent, and the observed gap ran the safe
+ * way (their record 4s after our row). This absorbs a small lag in the other
+ * direction without widening the window enough to readmit a previous attempt.
+ */
+const CREATED_SKEW_MS = 30_000;
+
+/**
+ * Pick the transaction carrying the deposit address for one specific order.
+ *
+ * `getUserTransactions` returns the merchant's **whole history**, and the
+ * previous implementation took `find(t => t.toAddress)` — the first entry with
+ * an address, with nothing tying it to the order being prepared. A dead order
+ * from earlier in the day still has an address, so a fresh cash-out bound
+ * itself to a Coinbase transaction that had already FAILED and declared itself
+ * ready to fund, 1.4 seconds after it was created. Sending against that would
+ * have put USDC at a deposit address with no live order behind it — the same
+ * loss as the incident it followed, by a different route.
+ *
+ * Two conditions make an entry usable, and neither is sufficient alone:
+ *
+ *  - **Still live.** A failed or completed order cannot accept a deposit.
+ *  - **Created after our row.** An order that predates the merchant clicking
+ *    cannot be the one they just started. This is the binding, because the
+ *    transaction list carries no `quote_id` to match on directly.
+ *
+ * Once the row has committed we know its `transaction_id` and match on that
+ * exactly, which is strictly better — but that is only available after the
+ * first successful prepare, and this window is the one that was guessing.
+ */
+export function selectDepositTransaction(
+  transactions: OfframpTransaction[],
+  opts: { rowCreatedAtMs: number; boundTransactionId: string | null },
+): OfframpTransaction | null {
+  if (opts.boundTransactionId) {
+    const bound = transactions.find((t) => t.transactionId === opts.boundTransactionId);
+    // Report a bound-but-dead order as unusable rather than falling back to
+    // another record — silently re-binding an order mid-flight is how a
+    // merchant ends up funding something they never agreed to.
+    if (!bound || isTerminalTransaction(bound.status)) return null;
+    return bound.toAddress ? bound : null;
+  }
+
+  const floor = opts.rowCreatedAtMs - CREATED_SKEW_MS;
+  const candidates = transactions.filter(
+    (t) =>
+      t.toAddress &&
+      !isTerminalTransaction(t.status) &&
+      t.createdAtMs !== null &&
+      t.createdAtMs >= floor,
+  );
+  if (candidates.length === 0) return null;
+  // Newest wins: a re-quote within one flow leaves the older record behind.
+  return candidates.reduce((a, b) => ((b.createdAtMs ?? 0) > (a.createdAtMs ?? 0) ? b : a));
 }
 
 /**
@@ -516,5 +581,6 @@ export async function getUserTransactions(
     network: (t.network as string) ?? null,
     transactionId: (t.transaction_id as string) ?? (t.id as string) ?? null,
     deadlineMs: parseDeadlineMs(t.expires_at ?? t.deadline ?? t.expires_at_ms),
+    createdAtMs: parseDeadlineMs(t.created_at),
   }));
 }

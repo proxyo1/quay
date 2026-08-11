@@ -13,6 +13,7 @@ import {
   getUserTransactions,
   isAwaitingCommit,
   isCoinbaseConfigured,
+  selectDepositTransaction,
 } from "@/lib/server/coinbase-offramp";
 import {
   OfframpStoreError,
@@ -124,12 +125,19 @@ export async function POST(req: Request) {
   // Ask Coinbase for the deposit address. Absent = the merchant has not
   // finished committing yet, which is a normal poll result, not an error.
   //
-  // A present `to_address` is NOT on its own proof of a commitment — see
-  // `isAwaitingCommit`.
+  // Two independent traps here, both of which have produced a live "ready to
+  // send" against an order that could not accept the funds:
+  //   - the list is the merchant's whole history, so the entry must be bound to
+  //     THIS order (`selectDepositTransaction`);
+  //   - a deposit address alone is not a commitment, because Coinbase issues
+  //     one at quote time (`isAwaitingCommit`).
   let tx;
   try {
     const transactions = await getUserTransactions(row.partner_user_ref);
-    tx = transactions.find((t) => t.toAddress) ?? null;
+    tx = selectDepositTransaction(transactions, {
+      rowCreatedAtMs: Date.parse(row.created_at),
+      boundTransactionId: row.coinbase_transaction_id,
+    });
   } catch (e) {
     if (e instanceof CoinbaseOfframpError) {
       return NextResponse.json(

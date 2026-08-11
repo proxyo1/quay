@@ -32,25 +32,37 @@ export type OfframpStatus =
 export const OPEN_STATUSES: OfframpStatus[] = ["created", "committed", "sent"];
 
 /**
- * How long a `created` row stays open before it is considered abandoned.
+ * How long a pre-send row stays open before it is considered abandoned.
  *
- * A `created` row has no Coinbase deadline — Coinbase only issues one when the
- * merchant commits the order — so without a local TTL it can never expire. The
- * per-owner in-flight lock would then block that merchant from ever cashing out
- * again, which is precisely what happens when someone opens the widget and
- * closes it.
+ * Without a local TTL such a row can never expire, and the per-owner in-flight
+ * lock then blocks that merchant from ever cashing out again — precisely what
+ * happens when someone opens the widget and closes it.
  *
  * 30 minutes is well past the CDP session token's ~5-minute life, so a row this
  * old cannot be resumed anyway.
  */
 export const CREATED_TTL_MS = 30 * 60 * 1000;
 
-/** True when a pre-commit row has aged out and should be expired. */
-export function isStaleCreated(row: {
+/**
+ * True when a pre-send row has aged out and should be expired.
+ *
+ * Covers two shapes, both of which lack any Coinbase clock to expire against:
+ *
+ *  - **`created`** — no deadline exists until the merchant commits.
+ *  - **`committed` with no deadline** — the row bound to a Coinbase order that
+ *    never supplied one. `prepare` refuses to hand out a send once that order
+ *    is no longer live, and rightly so, but the row would then poll forever
+ *    holding the lock. The deadline-based expiry in the callers handles every
+ *    committed row that does have a clock; this is the remainder.
+ */
+export function isStaleOpenOrder(row: {
   status: OfframpStatus;
   created_at: string;
+  deadline_at?: string | null;
 }): boolean {
-  if (row.status !== "created") return false;
+  const unclocked =
+    row.status === "created" || (row.status === "committed" && !row.deadline_at);
+  if (!unclocked) return false;
   const created = Date.parse(row.created_at);
   return Number.isFinite(created) && Date.now() - created > CREATED_TTL_MS;
 }

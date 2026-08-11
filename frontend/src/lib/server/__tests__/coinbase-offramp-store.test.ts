@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  CREATED_TTL_MS,
   IllegalTransitionError,
   OPEN_STATUSES,
   SENT_STALL_TTL_MS,
   TERMINAL_STATUSES,
   canTransition,
+  isStaleOpenOrder,
   isStalledSend,
   isTerminal,
   nextStatus,
@@ -159,6 +161,41 @@ describe("status sets", () => {
     // The partial unique index in the migration is defined over exactly these,
     // so a drift here silently lets a merchant open two concurrent cash-outs.
     expect(OPEN_STATUSES).toEqual(["created", "committed", "sent"]);
+  });
+});
+
+describe("isStaleOpenOrder", () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  const OLD = CREATED_TTL_MS + 60_000;
+
+  test("an abandoned pre-commit row ages out so the lock releases", () => {
+    expect(isStaleOpenOrder({ status: "created", created_at: ago(OLD) })).toBe(true);
+  });
+
+  test("a committed row with no Coinbase clock ages out too", () => {
+    // Otherwise it polls forever: prepare will not hand out a send once the
+    // bound order is dead, and there is no deadline for the callers to expire.
+    expect(
+      isStaleOpenOrder({ status: "committed", created_at: ago(OLD), deadline_at: null }),
+    ).toBe(true);
+  });
+
+  test("a committed row with a deadline is left to its own clock", () => {
+    expect(
+      isStaleOpenOrder({
+        status: "committed",
+        created_at: ago(OLD),
+        deadline_at: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    ).toBe(false);
+  });
+
+  test("a fresh row is never stale", () => {
+    expect(isStaleOpenOrder({ status: "created", created_at: ago(60_000) })).toBe(false);
+  });
+
+  test("a sent row never ages out — the money is already gone", () => {
+    expect(isStaleOpenOrder({ status: "sent", created_at: ago(OLD) })).toBe(false);
   });
 });
 
