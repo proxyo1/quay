@@ -453,6 +453,34 @@ export interface OfframpTransaction {
 }
 
 /**
+ * True while a transaction record exists but the merchant has not committed
+ * the order inside the widget.
+ *
+ * **Coinbase issues `to_address` at quote time, not at commit time.** This was
+ * assumed the other way round and it cost a real cash-out: a merchant whose
+ * popup was blocked never saw the widget, yet a transaction record appeared
+ * four seconds after the quote, carrying a deposit address. The app read that
+ * as "committed", offered "one tap to finish", and sent USDC to a deposit
+ * address belonging to an order Coinbase had no commitment for. The funds
+ * credited the merchant's Coinbase balance as an ordinary deposit, the order
+ * sat in `TRANSACTION_STATUS_STARTED` with an empty `tx_hash`, and no SGD was
+ * ever paid.
+ *
+ * The signal used here is the quote-time fingerprint observed live: still in
+ * the created/STARTED family AND carrying no deadline. Deliberately narrow —
+ * a committed order has never been observed, so anything stricter risks
+ * refusing to send on an order that is genuinely ready, which strands the
+ * merchant just as badly in the other direction. Tighten this once a
+ * successful order shows which field actually flips.
+ */
+export function isAwaitingCommit(tx: {
+  status: OfframpTransactionStatus;
+  deadlineMs: number | null;
+}): boolean {
+  return tx.status === "created" && tx.deadlineMs === null;
+}
+
+/**
  * Parse a deadline from whatever field the API supplies. Returns null rather
  * than inventing one — the UI must show Coinbase's clock, and guessing it
  * would let a countdown disagree with the order that is actually expiring.

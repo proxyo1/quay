@@ -11,12 +11,20 @@ import { getSuiClient } from "@/lib/sui-client";
  *
  * Design notes that are load-bearing rather than stylistic:
  *
- *  - **The widget opens with `window.open`, never a redirect.** The zkLogin
- *    signing key lives in localStorage and only client code can use it. A
- *    full-page navigation off-origin can come back in a different context with
- *    no session, leaving a committed order permanently unfillable — the funds
- *    would be owed to Coinbase with nothing able to sign the send. Keeping this
- *    tab alive is what lets it poll and then sign.
+ *  - **The widget opens with `window.open`, with a same-tab redirect as the
+ *    fallback.** Keeping this tab alive is what lets it poll and then sign, so
+ *    a new context is preferred. The redirect is a safe fallback rather than a
+ *    hazard: the zkLogin key is in localStorage, which survives navigating
+ *    off-origin and back, and a returning merchant rehydrates the row from
+ *    `/status`. It cannot be the default, though — Coinbase silently drops a
+ *    `redirectUrl` that is not on the CDP domain allowlist, which would leave
+ *    the merchant to find their own way back.
+ *  - **A blocked popup must never be silent.** `window.open` returns null when
+ *    blocked, and that return used to be ignored: the card advanced to
+ *    "waiting", then to "one tap to finish", for a merchant who had seen no
+ *    widget at all. Combined with `prepare` reading a quote-time deposit
+ *    address as a commitment, that sent real USDC against an order Coinbase
+ *    never had. Both halves are now fixed; this is the client half.
  *  - **The signature is never auto-fired.** When Coinbase confirms, the card
  *    primes a large button and waits for a tap. A wallet prompt appearing in an
  *    unattended tab trains merchants to dismiss prompts, which is precisely the
@@ -34,6 +42,7 @@ type Step =
   | { k: "redeemConfirm"; plan: SessionResponse }
   | { k: "redeemSigning" }
   | { k: "handoff"; session: SessionResponse }
+  | { k: "popupBlocked"; session: SessionResponse }
   | { k: "waitingCoinbase"; session: SessionResponse; ready: PrepareReady | null }
   | { k: "sendSigning" }
   | { k: "sending" }
@@ -338,9 +347,15 @@ export function CoinbaseOfframpSection({
 
   function openWidget(plan: SessionResponse) {
     setStep({ k: "handoff", session: plan });
-    // New context, not a redirect — see the component docblock.
+    // New context by preference, redirect by fallback — see the docblock.
     const w = window.open(plan.offramp_url, "_blank", "noopener,noreferrer");
     windowRef.current = w;
+    if (!w) {
+      // Blocked. Proceeding to "waiting" here is what let a merchant who never
+      // saw the widget be offered a send.
+      setStep({ k: "popupBlocked", session: plan });
+      return;
+    }
     setStep({ k: "waitingCoinbase", session: plan, ready: null });
   }
 
@@ -539,6 +554,52 @@ export function CoinbaseOfframpSection({
         <p className="relative z-10 text-sm text-[var(--muted)]">Opening Coinbase…</p>
       )}
 
+      {step.k === "popupBlocked" && (
+        <div className="relative z-10 space-y-3">
+          <p className="text-sm text-white">Your browser blocked the Coinbase window</p>
+          <p className="text-xs text-[var(--muted)] leading-relaxed">
+            Nothing has been sent. Open Coinbase to confirm the sale — your
+            cash-out is still waiting.
+          </p>
+          {step.session.offramp_url && (
+            <>
+              {/* A click is a user gesture, so this opens even though the
+                  scripted window.open was blocked. Preferred, because it keeps
+                  this tab alive to poll and sign. */}
+              <a
+                href={step.session.offramp_url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() =>
+                  setStep({ k: "waitingCoinbase", session: step.session, ready: null })
+                }
+                className="glass-btn-primary w-full min-h-[44px] flex items-center justify-center"
+              >
+                Open Coinbase in a new tab
+              </a>
+              <button
+                type="button"
+                onClick={() => window.location.assign(step.session.offramp_url!)}
+                className="glass-chip w-full min-h-[44px]"
+              >
+                Open in this tab instead
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => cancelCashOut(step.session)}
+            className="glass-chip w-full min-h-[44px]"
+          >
+            Cancel this cash-out
+          </button>
+          <p className="text-[10px] text-[var(--muted)] border-t border-white/5 pt-2 leading-relaxed">
+            Using this tab is safe — you stay signed in and we&apos;ll pick the
+            cash-out back up when Coinbase returns you here.
+          </p>
+        </div>
+      )}
+
       {step.k === "waitingCoinbase" && !step.ready && (
         <div className="relative z-10 space-y-3">
           <p className="text-sm text-white">Finish in the Coinbase window we opened.</p>
@@ -551,16 +612,26 @@ export function CoinbaseOfframpSection({
               {formatUsdc(step.session.sell_amount_usdc_minor)} USDC
             </span>
           </div>
-          {/* Popup blockers are silent, so always offer a focusable way through. */}
+          {/* A merchant can also lose the widget window after it opened, so the
+              same two ways back are offered here, not only on a blocked popup. */}
           {step.session.offramp_url && (
-            <a
-              href={step.session.offramp_url}
-              target="_blank"
-              rel="noreferrer"
-              className="glass-chip w-full min-h-[44px] flex items-center justify-center"
-            >
-              Reopen Coinbase
-            </a>
+            <>
+              <a
+                href={step.session.offramp_url}
+                target="_blank"
+                rel="noreferrer"
+                className="glass-chip w-full min-h-[44px] flex items-center justify-center"
+              >
+                Reopen Coinbase
+              </a>
+              <button
+                type="button"
+                onClick={() => window.location.assign(step.session.offramp_url!)}
+                className="glass-chip w-full min-h-[44px]"
+              >
+                Open in this tab instead
+              </button>
+            </>
           )}
           <button
             type="button"

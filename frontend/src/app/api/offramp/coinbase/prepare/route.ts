@@ -11,6 +11,7 @@ import {
 import {
   CoinbaseOfframpError,
   getUserTransactions,
+  isAwaitingCommit,
   isCoinbaseConfigured,
 } from "@/lib/server/coinbase-offramp";
 import {
@@ -35,9 +36,12 @@ export const runtime = "nodejs";
 /**
  * Build the sponsored swap-and-send transaction for a committed order.
  *
- * Called once Coinbase has issued a deposit address. The deposit address does
- * not exist until the merchant commits inside the widget, which is why this is
- * a separate call from `session` and why the PTB is built last.
+ * Called once the merchant has committed the order inside the widget.
+ *
+ * A deposit address alone does not mean that happened — Coinbase issues
+ * `to_address` at quote time, so a record with one appears within seconds of
+ * `session` whether or not the widget was ever opened. `isAwaitingCommit`
+ * carries the detail and the incident that established it.
  *
  * Re-quotes rather than reusing the session's quote: minutes may have passed
  * inside the widget, and the swap is exact-out, so a thinner route now needs
@@ -119,6 +123,9 @@ export async function POST(req: Request) {
 
   // Ask Coinbase for the deposit address. Absent = the merchant has not
   // finished committing yet, which is a normal poll result, not an error.
+  //
+  // A present `to_address` is NOT on its own proof of a commitment — see
+  // `isAwaitingCommit`.
   let tx;
   try {
     const transactions = await getUserTransactions(row.partner_user_ref);
@@ -133,7 +140,7 @@ export async function POST(req: Request) {
     throw e;
   }
 
-  if (!tx?.toAddress) {
+  if (!tx?.toAddress || isAwaitingCommit(tx)) {
     return NextResponse.json(
       { ready: false, reason: "waiting for you to confirm the order on Coinbase" },
       { status: 202 },

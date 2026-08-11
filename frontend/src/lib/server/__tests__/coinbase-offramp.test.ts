@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildOfframpUrl,
   decimalToMinor,
+  isAwaitingCommit,
   mapTransactionStatus,
   parseDeadlineMs,
 } from "../coinbase-offramp";
@@ -28,6 +29,34 @@ describe("mapTransactionStatus", () => {
     // Defaulting to success would settle a row on a status we cannot read.
     for (const raw of [undefined, "", "TRANSACTION_STATUS_WHO_KNOWS", "success"]) {
       expect(mapTransactionStatus(raw)).toBe("unknown");
+    }
+  });
+});
+
+describe("isAwaitingCommit", () => {
+  test("the live quote-time record is not ready to send against", () => {
+    // The exact shape returned four seconds after /sell/quote, for a merchant
+    // whose popup was blocked and who never opened the widget. Reading this as
+    // committed is what sent USDC against an order Coinbase never had.
+    expect(
+      isAwaitingCommit({ status: mapTransactionStatus("TRANSACTION_STATUS_STARTED"), deadlineMs: null }),
+    ).toBe(true);
+    expect(isAwaitingCommit({ status: "created", deadlineMs: null })).toBe(true);
+  });
+
+  test("a deadline means Coinbase committed the order", () => {
+    // Coinbase only issues a deadline once the merchant confirms, so its
+    // presence clears the gate even while the status still reads created.
+    expect(isAwaitingCommit({ status: "created", deadlineMs: 1_800_000_000_000 })).toBe(
+      false,
+    );
+  });
+
+  test("any status past created clears the gate", () => {
+    // Deliberately permissive: a committed order has never been observed, and
+    // refusing to send on one that is genuinely ready strands the merchant too.
+    for (const status of ["pending", "success", "failed", "unknown"] as const) {
+      expect(isAwaitingCommit({ status, deadlineMs: null })).toBe(false);
     }
   });
 });
