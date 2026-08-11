@@ -232,7 +232,7 @@ export async function POST(req: Request) {
 
   // Rate limit — production-only.
   if (process.env.NODE_ENV !== "development") {
-    const usageCheck = checkAndIncrementSponsorUsage(
+    const usageCheck = await checkAndIncrementSponsorUsage(
       `${body.owner}:${RATE_LIMIT_LABEL}`,
       DAILY_CAP,
     );
