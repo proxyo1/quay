@@ -15,6 +15,9 @@ import { txUrl } from "@/lib/sui-config";
 import { zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
 import { getSuiClient } from "@/lib/sui-client";
 
+import { CoinbaseOfframpSection } from "./CoinbaseOfframpSection";
+import { StrandedUsdcCard } from "./StrandedUsdcCard";
+
 /**
  * Money-out controls for /merchant/wallet. Hierarchy (D2-design): cash-out
  * to SGD is the primary hero; withdraw-to-address is a quieter secondary
@@ -83,8 +86,13 @@ export function MoneyOutSections({ session }: { session: ZkLoginSession }) {
     );
   }
 
-  // Warm empty state (D3-design): nothing liquid to move.
-  if (bal.liquidMinor === 0n) {
+  // Warm empty state: nothing liquid to move AND nothing earning to free up.
+  //
+  // The Coinbase rail works from a pure-sCoin balance — it redeems as part of
+  // the flow — so a merchant whose funds are all earning must still see it.
+  // Gating this on `liquidMinor === 0n` alone swallowed the whole section for
+  // exactly the merchants most likely to want it.
+  if (bal.liquidMinor === 0n && bal.yieldMinor === 0n) {
     return (
       <section className="glass-card rounded-2xl p-5 space-y-2">
         <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">Cash out</p>
@@ -107,8 +115,30 @@ export function MoneyOutSections({ session }: { session: ZkLoginSession }) {
 
   return (
     <div className="space-y-4">
-      <CashOutSection session={session} liquidMinor={bal.liquidMinor} onDone={() => balQ.refetch()} />
-      <WithdrawSection session={session} liquidMinor={bal.liquidMinor} onDone={() => balQ.refetch()} />
+      <StrandedUsdcCard owner={session.address} />
+      {bal.liquidMinor === 0n ? (
+        <section className="glass-card rounded-2xl p-5 space-y-2">
+          <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
+            Cash out
+          </p>
+          <p className="relative z-10 text-sm text-[var(--muted)] leading-relaxed">
+            Your USDsui is currently earning interest. The Coinbase cash-out
+            below can free it up for you, or turn earning off to withdraw it
+            directly.
+          </p>
+        </section>
+      ) : (
+        <>
+          <CashOutSection session={session} liquidMinor={bal.liquidMinor} onDone={() => balQ.refetch()} />
+          <WithdrawSection session={session} liquidMinor={bal.liquidMinor} onDone={() => balQ.refetch()} />
+        </>
+      )}
+      <CoinbaseOfframpSection
+        session={session}
+        liquidMinor={bal.liquidMinor}
+        yieldMinor={bal.yieldMinor}
+        onDone={() => balQ.refetch()}
+      />
     </div>
   );
 }
