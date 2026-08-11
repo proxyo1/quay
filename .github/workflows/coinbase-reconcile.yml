@@ -1,0 +1,86 @@
+# Triggers /api/cron/coinbase-reconcile on a schedule.
+#
+# Vercel's Hobby plan allows two cron jobs at daily frequency, and the two
+# Scallop crons already occupy both slots — a third entry in vercel.json fails
+# the deployment outright. So the schedule lives here instead. Move it back to
+# vercel.json if the account goes Pro; nothing else needs to change.
+#
+# Every 15 minutes, against a 45-minute stall TTL, so a delivered-but-unsold
+# cash-out is flagged within an hour of the deposit rather than whenever the
+# merchant next opens the wallet.
+#
+# This is a backstop. /api/offramp/coinbase/status runs the same reconciliation
+# on every poll, so a merchant who stays on the page settles their own row. The
+# job exists for the one who sends and never comes back.
+#
+# Setup, both required or this is a no-op:
+#   1. Repo secret CRON_SECRET (Settings → Secrets → Actions)
+#   2. The SAME value as CRON_SECRET in the Vercel project env
+# Without the Vercel side the route stays unauthenticated and open to anyone;
+# without the repo secret this workflow sends an empty bearer and gets a 401.
+name: coinbase-reconcile
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  # Manual runs are the redrive path for a stuck row.
+  workflow_dispatch:
+
+# A slow run must not overlap the next tick and double-process rows. The
+# reconciler's transitions are guarded, so an overlap is safe rather than
+# harmful — this just avoids the wasted work.
+concurrency:
+  group: coinbase-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger reconcile
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::CRON_SECRET is not set on this repository."
+            exit 1
+          fi
+
+          # Body and status captured separately: the route returns 200 with an
+          # errors count for per-row failures, so the status line alone does not
+          # tell you whether the run did its job.
+          http_status=$(curl -sS --max-time 120 \
+            -w '%{http_code}' -o /tmp/reconcile.json \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "https://app.quay.cash/api/cron/coinbase-reconcile")
+
+          echo "HTTP ${http_status}"
+          cat /tmp/reconcile.json
+          echo
+
+          if [ "${http_status}" != "200" ]; then
+            echo "::error::reconcile returned HTTP ${http_status}"
+            exit 1
+          fi
+
+          # Surface per-row failures as a job failure. A silently failing
+          # backstop is worse than no backstop, because it looks covered.
+          errors=$(python3 -c "import json;print(json.load(open('/tmp/reconcile.json')).get('errors',0))")
+          if [ "${errors}" != "0" ]; then
+            echo "::error::reconcile reported ${errors} row error(s)"
+            exit 1
+          fi
+
+          python3 - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json
+          r = json.load(open("/tmp/reconcile.json"))
+          print("| metric | value |")
+          print("| --- | --- |")
+          for k in ("rows_scanned", "settled", "unmatched", "expired", "errors"):
+              print(f"| {k} | {r.get(k, 0)} |")
+          if r.get("note"):
+              print(f"\n> {r['note']}")
+          PY

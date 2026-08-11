@@ -186,13 +186,14 @@ export async function GET(req: Request) {
         await markUnmatched(row.id, row.status);
         unmatched += 1;
       } else if (isStalledSend(row) && canTransition(row.status, "unmatch")) {
-        // Delivered, but the order is still sitting in a non-terminal status a
-        // day later — Coinbase never matched the deposit to it. Left alone this
-        // row stays `sent` forever and the merchant is never told to go look.
+        // Delivered, but the order is still non-terminal well past the point
+        // Coinbase resolves one. Left alone this row stays `sent` forever and
+        // the merchant is never told to go look.
         await markUnmatched(
           row.id,
           row.status,
-          `Coinbase did not match the deposit within 24h (order status '${remote.status}')`,
+          `Coinbase had not completed the sale 45 minutes after the deposit ` +
+            `(order status '${remote.status}') — it may still land`,
         );
         unmatched += 1;
       }

@@ -156,7 +156,8 @@ export async function GET(req: Request) {
         row = await markUnmatched(
           row.id,
           row.status,
-          `Coinbase did not match the deposit within 24h (order status '${remote.status}')`,
+          `Coinbase had not completed the sale 45 minutes after the deposit ` +
+            `(order status '${remote.status}') — it may still land`,
         );
       } catch (e) {
         if (!(e instanceof OfframpStoreError)) throw e;

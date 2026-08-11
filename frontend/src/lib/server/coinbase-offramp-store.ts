@@ -88,11 +88,18 @@ export const TERMINAL_STATUSES: OfframpStatus[] = [
  * USDC had already been credited to the merchant's Coinbase balance as an
  * ordinary crypto deposit.
  *
- * 24h is deliberately generous. This marks a row for human attention, it does
- * not move money, so the cost of waiting too long is lower than the cost of
- * declaring a still-settling order dead.
+ * 45 minutes, down from a first-guess 24h. Coinbase quotes "less than 5
+ * minutes" for the cash to arrive and resolved the one observed failure in
+ * ~31, so a day of silence taught the merchant nothing they could act on.
+ *
+ * The tradeoff is real and one-directional: `unmatched` is terminal, so a
+ * genuinely slow success flagged at 45 minutes keeps a wrong label
+ * permanently. That is a confusing message about money the merchant does have,
+ * against a day of not knowing about money they do not. Hence the wording on
+ * this transition never claims Coinbase is finished — only that Quay stopped
+ * waiting.
  */
-export const SENT_STALL_TTL_MS = 24 * 60 * 60 * 1000;
+export const SENT_STALL_TTL_MS = 45 * 60 * 1000;
 
 /**
  * True when a sent row has waited past the TTL for Coinbase to complete.
