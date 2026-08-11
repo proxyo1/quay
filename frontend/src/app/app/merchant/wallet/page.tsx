@@ -1,12 +1,11 @@
 "use client";
 
-import { useSuiClient } from "@mysten/dapp-kit";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { fetchMerchantProfile, getEntriesTableId } from "@/lib/quay";
+import { fetchMerchantProfile, listOwnedMerchantEntries } from "@/lib/quay";
 import { USDSUI } from "@/lib/quay/scallop";
 import { QUAY, accountUrl, txUrl } from "@/lib/sui-config";
 import { uploadBlob, WalrusUploadError } from "@/lib/walrus/client";
@@ -20,6 +19,7 @@ import {
 import { useZkLoginSession, zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
 
 import { MoneyOutSections } from "./MoneyOutSections";
+import { getSuiClient } from "@/lib/sui-client";
 
 function receiveLabel(token: SupportedReceiveToken): string {
   const opt = RECEIVE_TOKEN_OPTIONS.find((o) => o.type === token);
@@ -135,54 +135,18 @@ interface MerchantUenRow {
   metadataBlobId: string | null;
 }
 
-interface MerchantRegisteredEvent {
-  uen_hash: number[];
-  sui_address: string;
-  timestamp_ms: string;
-}
-
 function useMerchantUenRows(address: string | undefined) {
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   return useQuery<MerchantUenRow[]>({
     queryKey: ["merchant-uens-wallet", address],
     queryFn: async () => {
       if (!address) return [];
-      const tableId = await getEntriesTableId(sui, QUAY.registryId);
-      const events = await sui.queryEvents({
-        query: { MoveEventType: `${QUAY.packageId}::payments::MerchantRegistered` },
-        order: "descending",
-        limit: 100,
-      });
-      const mine = events.data.filter(
-        (e) => (e.parsedJson as MerchantRegisteredEvent | undefined)?.sui_address === address,
+      return listOwnedMerchantEntries(
+        sui,
+        QUAY.registryId,
+        QUAY.packageId,
+        address,
       );
-      const rows = await Promise.all(
-        mine.map(async (e) => {
-          const ev = e.parsedJson as MerchantRegisteredEvent;
-          try {
-            const field = await sui.getDynamicFieldObject({
-              parentId: tableId,
-              name: { type: "vector<u8>", value: ev.uen_hash },
-            });
-            const content = field.data?.content;
-            if (!content || content.dataType !== "moveObject") return null;
-            const fields = (content.fields as { value?: { fields?: Record<string, unknown> } })
-              .value?.fields;
-            if (!fields) return null;
-            const uenRaw = fields.uen_raw;
-            let uen: string | null = null;
-            if (Array.isArray(uenRaw)) uen = new TextDecoder().decode(new Uint8Array(uenRaw as number[]));
-            else if (typeof uenRaw === "string") uen = uenRaw;
-            if (!uen) return null;
-            const meta = fields.metadata_uri;
-            const metadataBlobId = typeof meta === "string" && meta.length > 0 ? meta : null;
-            return { uen, metadataBlobId };
-          } catch {
-            return null;
-          }
-        }),
-      );
-      return rows.filter((x): x is MerchantUenRow => x !== null);
     },
     enabled: !!address,
     staleTime: 10_000,
@@ -240,7 +204,7 @@ function UenPreferenceRow({
   session: ZkLoginSession;
   onSaved: () => void;
 }) {
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   const [editing, setEditing] = useState(false);
   const [chosen, setChosen] = useState<SupportedReceiveToken | null>(null);
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
@@ -305,14 +269,15 @@ function UenPreferenceRow({
 
       // 4. Submit with both signatures.
       setSave({ kind: "executing" });
-      const result = await sui.executeTransactionBlock({
-        transactionBlock: txBytes,
-        signature: [senderSig, sp.sponsor_signature],
-        options: { showEffects: true },
+      const resultRes = await sui.executeTransaction({
+        transaction: txBytes,
+        signatures: [senderSig, sp.sponsor_signature],
+        include: { effects: true },
       });
-      const status = result.effects?.status?.status;
-      if (status !== "success") {
-        throw new Error(result.effects?.status?.error ?? "tx failed");
+      const result = resultRes.Transaction;
+      if (!result) throw new Error("transaction not returned by the node");
+      if (!result.status?.success) {
+        throw new Error(result.status?.error?.message ?? "tx failed");
       }
       await sui.waitForTransaction({ digest: result.digest });
       setSave({ kind: "success", digest: result.digest });
@@ -480,7 +445,7 @@ function YieldRoutingToggle(props: {
   currentYieldRouting: YieldRouting | null;
   onSaved: () => void;
 }) {
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   const [state, setState] = useState<YieldToggleState>({ kind: "idle" });
   const enabled = props.currentYieldRouting?.enabled === true;
 
@@ -567,14 +532,15 @@ function YieldRoutingToggle(props: {
 
       // 4. Submit dual-signed.
       setState({ kind: "executing" });
-      const result = await sui.executeTransactionBlock({
-        transactionBlock: txBytes,
-        signature: [senderSig, sp.tx.sponsor_signature],
-        options: { showEffects: true },
+      const resultRes = await sui.executeTransaction({
+        transaction: txBytes,
+        signatures: [senderSig, sp.tx.sponsor_signature],
+        include: { effects: true },
       });
-      const status = result.effects?.status?.status;
-      if (status !== "success") {
-        throw new Error(result.effects?.status?.error ?? "tx failed");
+      const result = resultRes.Transaction;
+      if (!result) throw new Error("transaction not returned by the node");
+      if (!result.status?.success) {
+        throw new Error(result.status?.error?.message ?? "tx failed");
       }
       await sui.waitForTransaction({ digest: result.digest });
       setState({

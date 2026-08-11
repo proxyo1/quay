@@ -1,9 +1,5 @@
 import "server-only";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { NextResponse } from "next/server";
 
@@ -12,7 +8,8 @@ import {
   loadSponsorKeypair,
 } from "@/lib/server/sponsor";
 import { looksLikeUen } from "@/lib/sgqr";
-import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
+import { QUAY } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 export const runtime = "nodejs";
 
@@ -35,7 +32,7 @@ const DAILY_CAP = 10;
 const LOW_BALANCE_FLOOR_MIST = 40_000_000n; // 20% of 200M target
 const CLOCK = "0x6";
 
-const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
+const sui = getSuiClient();
 
 interface SponsorUpdateMetadataRequest {
   uen: string;
@@ -106,11 +103,11 @@ export async function POST(req: Request) {
 
   const sponsorAddr = sponsor.toSuiAddress();
   const sponsorBal = await sui.getBalance({ owner: sponsorAddr });
-  if (BigInt(sponsorBal.totalBalance) < LOW_BALANCE_FLOOR_MIST) {
+  if (BigInt(sponsorBal.balance.balance) < LOW_BALANCE_FLOOR_MIST) {
     return NextResponse.json(
       {
         error: "sponsor balance below floor — refusing to sign",
-        sponsor_balance_mist: sponsorBal.totalBalance,
+        sponsor_balance_mist: sponsorBal.balance.balance,
         floor_mist: LOW_BALANCE_FLOOR_MIST.toString(),
       },
       { status: 503 },

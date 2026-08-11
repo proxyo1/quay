@@ -1,21 +1,18 @@
 import "server-only";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { NextResponse } from "next/server";
 
 import { insertSubmission, KybStoreError } from "@/lib/server/kyb-store";
 import { mintPollingToken } from "@/lib/server/polling-token";
 import { lookupUen } from "@/lib/quay";
 import { looksLikeUen } from "@/lib/sgqr";
-import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
+import { QUAY } from "@/lib/sui-config";
 import {
   uploadBlob,
   WalrusRateLimitError,
   WalrusUploadError,
 } from "@/lib/walrus/client";
+import { getSuiClient } from "@/lib/sui-client";
 
 export const runtime = "nodejs";
 
@@ -42,7 +39,7 @@ const ALLOWED_MIME = new Set([
   "image/webp",
 ]);
 
-const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
+const sui = getSuiClient();
 
 interface SubmitRequestBody {
   uen?: string;

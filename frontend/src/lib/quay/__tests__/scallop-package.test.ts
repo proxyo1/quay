@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
+import type { SuiClient } from "@/lib/sui-client";
 
 import {
   DEFAULT_CALL_PACKAGE,
@@ -14,28 +14,34 @@ const PROTOCOL = "0xde5c09ad171544aa3724dc67216668c80e754860f419136a68d78504eb2e
 const FACADE = "0xd54c9437a97e3f87cb805de5054eaadf22c3919a9b717add13db3859aa993796";
 
 /**
- * Duck-typed Sui client. `modulesByPkg` maps package id -> module name list;
- * `linkageByPkg` maps package id -> linkage table (lineageRoot -> upgraded id).
- * Mirrors the real 2026-05-18 shape: the facade has only [scallop] and links
- * TYPE_PACKAGE -> PROTOCOL.
+ * Duck-typed gRPC Sui client. `modulesByPkg` maps package id -> module name
+ * list; `lineageVersions` maps a lineage root -> the package ids published
+ * under it, oldest first. Mirrors the real 2026-05-18 shape: the facade has
+ * only [scallop], and the protocol package is recovered as the newest version
+ * in the TYPE_PACKAGE lineage.
  */
 function fakeSui(
   modulesByPkg: Record<string, string[]>,
-  linkageByPkg: Record<string, Record<string, string>> = {},
+  lineageVersions: Record<string, string[]> = {},
 ): SuiClient {
   return {
-    async getNormalizedMoveModulesByPackage({ package: pkg }: { package: string }) {
-      const mods = modulesByPkg[pkg];
-      if (!mods) throw new Error("package not found");
-      return Object.fromEntries(mods.map((m) => [m, {}]));
-    },
-    async getObject({ id }: { id: string }) {
-      const linkage = linkageByPkg[id];
-      if (!linkage) return { data: { bcs: { dataType: "other" } } };
-      const linkageTable = Object.fromEntries(
-        Object.entries(linkage).map(([root, up]) => [root, { upgradedId: up }]),
-      );
-      return { data: { bcs: { dataType: "package", linkageTable } } };
+    movePackageService: {
+      async getPackage({ packageId }: { packageId: string }) {
+        const mods = modulesByPkg[packageId];
+        if (!mods) throw new Error("package not found");
+        return {
+          response: { package: { modules: mods.map((name) => ({ name })) } },
+        };
+      },
+      async listPackageVersions({ packageId }: { packageId: string }) {
+        const ids = lineageVersions[packageId];
+        if (!ids) return { response: { versions: [] } };
+        return {
+          response: {
+            versions: ids.map((id, i) => ({ packageId: id, version: BigInt(i + 1) })),
+          },
+        };
+      },
     },
   } as unknown as SuiClient;
 }
@@ -61,19 +67,24 @@ describe("resolveProtocolPackage", () => {
     expect(await resolveProtocolPackage(sui, PROTOCOL)).toBe(PROTOCOL);
   });
 
-  test("facade candidate → follows linkage to protocol (the 2026-05-18 case)", async () => {
+  test("facade candidate → recovers protocol from the lineage (the 2026-05-18 case)", async () => {
     const sui = fakeSui(
       { [FACADE]: ["scallop"], [PROTOCOL]: ["mint", "redeem"] },
-      { [FACADE]: { [TYPE_PACKAGE]: PROTOCOL } },
+      { [TYPE_PACKAGE]: ["0xold", PROTOCOL] },
     );
     expect(await resolveProtocolPackage(sui, FACADE)).toBe(PROTOCOL);
   });
 
-  test("facade whose linkage target is also invalid → null", async () => {
+  test("facade whose lineage head is also invalid → null", async () => {
     const sui = fakeSui(
       { [FACADE]: ["scallop"], [PROTOCOL]: ["scallop"] },
-      { [FACADE]: { [TYPE_PACKAGE]: PROTOCOL } },
+      { [TYPE_PACKAGE]: ["0xold", PROTOCOL] },
     );
+    expect(await resolveProtocolPackage(sui, FACADE)).toBeNull();
+  });
+
+  test("no lineage versions → null", async () => {
+    const sui = fakeSui({ [FACADE]: ["scallop"] });
     expect(await resolveProtocolPackage(sui, FACADE)).toBeNull();
   });
 

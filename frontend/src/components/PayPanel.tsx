@@ -4,8 +4,7 @@ import {
   ConnectButton,
   useCurrentAccount,
   useSignAndExecuteTransaction,
-  useSuiClient,
-} from "@mysten/dapp-kit";
+  } from "@mysten/dapp-kit";
 import { blake2b } from "@noble/hashes/blake2.js";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -32,6 +31,7 @@ import { AggregatorRouteError, quoteRoute } from "@/lib/dex/aggregator";
 import { formatBalance, useUserBalances, type UserBalance } from "@/lib/dex/balances";
 import { type SupportedReceiveToken } from "@/lib/walrus/profileSchema";
 import { txUrl } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 type PayPhase = "uploading-receipt" | "quoting-route" | "awaiting-signature";
 
@@ -81,7 +81,7 @@ export function PayPanel({
   const [pay, setPay] = useState<PayState>({ kind: "idle" });
 
   const account = useCurrentAccount();
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
   // Pass the connected wallet address as the Cetus signer. Without it the
@@ -331,18 +331,18 @@ export function PayPanel({
       if (payerCoinType === COIN_TYPES.SUI) {
         payerCoinSource = "gas";
       } else {
-        const coins = await sui.getCoins({
+        const coins = await sui.listCoins({
           owner: account.address,
           coinType: payerCoinType,
         });
-        if (coins.data.length === 0) {
+        if (coins.objects.length === 0) {
           throw new Error(`No ${payerLabel} coins in your wallet.`);
         }
         // Pick the largest balance to maximize the chance the split succeeds.
-        const largest = coins.data.reduce((a, b) =>
+        const largest = coins.objects.reduce((a, b) =>
           BigInt(a.balance) >= BigInt(b.balance) ? a : b,
         );
-        payerCoinSource = { objectId: largest.coinObjectId };
+        payerCoinSource = { objectId: largest.objectId };
       }
 
       const built = await buildPayAnyTokenPtb({

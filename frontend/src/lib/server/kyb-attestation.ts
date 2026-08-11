@@ -1,15 +1,11 @@
 import "server-only";
 
 import { bcs } from "@mysten/sui/bcs";
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { blake2b } from "@noble/hashes/blake2.js";
 
 import { deriveUenHash } from "@/lib/quay";
-import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
+import { QUAY } from "@/lib/sui-config";
 import {
   uploadBlob,
   WalrusRateLimitError,
@@ -22,6 +18,7 @@ import {
   checkAndIncrementSponsorUsage,
   loadSponsorKeypair,
 } from "./sponsor";
+import { getSuiClient } from "@/lib/sui-client";
 
 /**
  * Extracted attestation + sponsored-tx builder. Originally lived inside
@@ -58,7 +55,7 @@ export const ClaimMessage = bcs.struct("ClaimMessage", {
   evidence_hash: bcs.vector(bcs.u8()),
 });
 
-const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
+const sui = getSuiClient();
 
 // ─────────────────────────────── Errors ───────────────────────────────
 
@@ -187,9 +184,9 @@ export async function signAndBuildRegisterTx(
   // 4. Sponsor balance preflight.
   const sponsorAddr = sponsor.toSuiAddress();
   const sponsorBal = await sui.getBalance({ owner: sponsorAddr });
-  if (BigInt(sponsorBal.totalBalance) < LOW_BALANCE_FLOOR_MIST) {
+  if (BigInt(sponsorBal.balance.balance) < LOW_BALANCE_FLOOR_MIST) {
     throw new AttestationError(
-      `sponsor balance below floor — refusing to sign (balance=${sponsorBal.totalBalance}, floor=${LOW_BALANCE_FLOOR_MIST})`,
+      `sponsor balance below floor — refusing to sign (balance=${sponsorBal.balance.balance}, floor=${LOW_BALANCE_FLOOR_MIST})`,
       503,
     );
   }

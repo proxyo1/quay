@@ -1,9 +1,5 @@
 import "server-only";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { NextResponse } from "next/server";
 
 import { getSupabaseClient } from "@/lib/server/supabase";
@@ -19,6 +15,8 @@ import {
   resolveProtocolPackage,
   type MarketState,
 } from "@/lib/quay/scallop";
+import { getSuiClient, type SuiClient } from "@/lib/sui-client";
+import { latestEmittingPackage } from "@/lib/quay/events";
 
 export const runtime = "nodejs";
 
@@ -67,7 +65,6 @@ const MIN_CAP_HEADROOM = 0.01; // 1% — same threshold preflightScallopHealthy 
 // Scallop's main market is mainnet-only. Hard-coded to mainnet RPC even
 // though Quay itself is on testnet today (Phase 6+ flips to mainnet after
 // the Move audit; the cron stays pointed at Scallop mainnet either way).
-const SCALLOP_RPC = getFullnodeUrl("mainnet");
 
 interface Anomaly {
   kind:
@@ -124,7 +121,7 @@ export async function GET(req: Request) {
   }
 
   const checkedAt = new Date().toISOString();
-  const sui = new SuiClient({ network: "mainnet", url: SCALLOP_RPC });
+  const sui = getSuiClient();
 
   // 1. Load current flag row + baseline metadata.
   const supabase = getSupabaseClient();
@@ -367,11 +364,6 @@ export async function GET(req: Request) {
 async function discoverCurrentPackage(
   sui: SuiClient,
 ): Promise<string | null> {
-  const res = await sui.queryEvents({
-    query: { MoveEventType: `${TYPE_PACKAGE}::mint::MintEvent` },
-    limit: 1,
-    order: "descending",
-  });
-  const candidate = res.data[0]?.packageId ?? null;
+  const candidate = await latestEmittingPackage(`${TYPE_PACKAGE}::mint::MintEvent`);
   return resolveProtocolPackage(sui, candidate);
 }

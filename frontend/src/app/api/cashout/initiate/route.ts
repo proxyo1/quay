@@ -1,9 +1,5 @@
 import "server-only";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { NextResponse } from "next/server";
 
 import {
@@ -22,7 +18,7 @@ import {
 import { loadTreasuryKeypair } from "@/lib/server/treasury";
 import { buildSponsoredUsdsuiTransfer, InsufficientUsdsuiError } from "@/lib/quay/transfer";
 import { fetchLatestPrices, priceAgeSeconds, PYTH_FEEDS } from "@/lib/pyth";
-import { SUI_NETWORK } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 export const runtime = "nodejs";
 
@@ -38,7 +34,7 @@ export const runtime = "nodejs";
 const DAILY_CAP = 10;
 const LOW_BALANCE_FLOOR_MIST = 40_000_000n;
 
-const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
+const sui = getSuiClient();
 
 interface InitiateRequest {
   owner: string;
@@ -135,7 +131,7 @@ export async function POST(req: Request) {
   }
   const sponsorAddr = sponsor.toSuiAddress();
   const sponsorBal = await sui.getBalance({ owner: sponsorAddr });
-  if (BigInt(sponsorBal.totalBalance) < LOW_BALANCE_FLOOR_MIST) {
+  if (BigInt(sponsorBal.balance.balance) < LOW_BALANCE_FLOOR_MIST) {
     return NextResponse.json(
       { error: "sponsor balance below floor — refusing to sign" },
       { status: 503 },

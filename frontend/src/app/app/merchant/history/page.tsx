@@ -13,26 +13,27 @@
  * unsigned visitors get bounced to /merchant/login?next=/merchant/history.
  */
 
-import { useSuiClientQuery } from "@mysten/dapp-kit";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 
+import { bytesFromEventField, queryEventsByType, type QuayEvent } from "@/lib/quay/events";
 import { decode as decodeQuoteMetadata } from "@/lib/sgqr/quote-metadata";
 import { QUAY, txUrl } from "@/lib/sui-config";
 import { useZkLoginSession } from "@/lib/zklogin";
 
 interface PaymentReceiptEvent {
-  receipt_id: number[];
+  receipt_id: unknown;
   merchant: string;
   payer: string;
   amount: string;
   token_type: { name: string };
-  uen_hash: number[];
+  uen_hash: unknown;
   timestamp_ms: string;
-  memo: number[] | null;
+  memo: unknown;
   sgd_minor_units: string;
-  quote_metadata: number[] | null;
+  quote_metadata: unknown;
 }
 
 interface NormalizedReceipt {
@@ -63,23 +64,18 @@ export default function MerchantHistoryPage() {
 
   const merchantAddress = session?.address;
 
-  const { data, error, isLoading } = useSuiClientQuery(
-    "queryEvents",
-    {
-      query: { MoveEventType: `${QUAY.packageId}::payments::PaymentReceipt` },
-      order: "descending",
-      limit: 100,
-    },
-    {
-      refetchInterval: 5000,
-      refetchIntervalInBackground: false,
-      enabled: !!merchantAddress,
-    },
-  );
+  const { data, error, isLoading } = useQuery({
+    queryKey: ["payment-receipts"],
+    queryFn: () =>
+      queryEventsByType(`${QUAY.packageId}::payments::PaymentReceipt`, 100),
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
+    enabled: !!merchantAddress,
+  });
 
   const receipts: NormalizedReceipt[] = useMemo(() => {
-    if (!data?.data || !merchantAddress) return [];
-    return data.data
+    if (!data || !merchantAddress) return [];
+    return data
       .map(normalizeEvent)
       .filter((r): r is NormalizedReceipt => r !== null && r.merchant === merchantAddress);
   }, [data, merchantAddress]);
@@ -397,10 +393,7 @@ function groupByDay(receipts: NormalizedReceipt[]): { label: string; items: Norm
   return groups;
 }
 
-function normalizeEvent(ev: {
-  id: { txDigest: string; eventSeq: string };
-  parsedJson?: unknown;
-}): NormalizedReceipt | null {
+function normalizeEvent(ev: QuayEvent, index: number): NormalizedReceipt | null {
   if (!ev.parsedJson) return null;
   const p = ev.parsedJson as PaymentReceiptEvent;
   if (!p.receipt_id || !p.merchant) return null;
@@ -408,21 +401,25 @@ function normalizeEvent(ev: {
     let receiptBlobId: string | null = null;
     if (p.quote_metadata) {
       try {
-        const decoded = decodeQuoteMetadata(Uint8Array.from(p.quote_metadata));
-        receiptBlobId = decoded.receiptBlobId;
+        const qm = bytesFromEventField(p.quote_metadata);
+        const decoded = qm ? decodeQuoteMetadata(qm) : null;
+        receiptBlobId = decoded?.receiptBlobId ?? null;
       } catch {
         // v1 / unknown discriminator — leave link off.
       }
     }
     return {
-      receiptId: `${ev.id.txDigest}_${ev.id.eventSeq}`,
-      txDigest: ev.id.txDigest,
+      receiptId: `${ev.txDigest}_${index}`,
+      txDigest: ev.txDigest ?? "",
       payer: p.payer,
       merchant: p.merchant,
       amount: BigInt(p.amount),
       sgdMinorUnits: Number(p.sgd_minor_units),
       tokenType: p.token_type?.name ?? "",
-      memo: p.memo ? new TextDecoder().decode(Uint8Array.from(p.memo)) : "",
+      memo: (() => {
+        const m = bytesFromEventField(p.memo);
+        return m ? new TextDecoder().decode(m) : "";
+      })(),
       timestampMs: Number(p.timestamp_ms),
       receiptBlobId,
     };

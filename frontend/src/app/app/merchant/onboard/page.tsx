@@ -1,6 +1,5 @@
 "use client";
 
-import { useSuiClient } from "@mysten/dapp-kit";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -28,6 +27,7 @@ import {
   type SupportedReceiveToken,
 } from "@/lib/walrus/profileSchema";
 import { useZkLoginSession } from "@/lib/zklogin";
+import { getSuiClient } from "@/lib/sui-client";
 
 const LOGO_MAX_BYTES = 200 * 1024;
 const LOGO_ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -49,7 +49,7 @@ type State =
 export default function OnboardPage() {
   const { session, hydrated, expired, signOut } = useZkLoginSession();
   const router = useRouter();
-  const sui = useSuiClient();
+  const sui = getSuiClient();
 
   const [uen, setUen] = useState("");
   const [merchantName, setMerchantName] = useState("");

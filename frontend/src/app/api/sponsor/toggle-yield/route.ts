@@ -1,9 +1,5 @@
 import "server-only";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { NextResponse } from "next/server";
 
@@ -28,7 +24,8 @@ import {
   readCostBasis,
 } from "@/lib/server/yield-cost-basis";
 import { looksLikeUen } from "@/lib/sgqr";
-import { QUAY, SUI_NETWORK } from "@/lib/sui-config";
+import { QUAY } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 export const runtime = "nodejs";
 
@@ -78,7 +75,7 @@ const MAX_COINS_PER_PTB = 50;
 const IDEMPOTENCY_TTL_MS = 15 * 60 * 1000;
 const FEATURE_FLAG_NAME = "yield_routing.scallop.usdsui";
 
-const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
+const sui = getSuiClient();
 
 interface ToggleYieldRequest {
   uen: string;
@@ -261,11 +258,11 @@ export async function POST(req: Request) {
   }
   const sponsorAddr = sponsor.toSuiAddress();
   const sponsorBal = await sui.getBalance({ owner: sponsorAddr });
-  if (BigInt(sponsorBal.totalBalance) < LOW_BALANCE_FLOOR_MIST) {
+  if (BigInt(sponsorBal.balance.balance) < LOW_BALANCE_FLOOR_MIST) {
     return NextResponse.json(
       {
         error: "sponsor balance below floor — refusing to sign",
-        sponsor_balance_mist: sponsorBal.totalBalance,
+        sponsor_balance_mist: sponsorBal.balance.balance,
         floor_mist: LOW_BALANCE_FLOOR_MIST.toString(),
       },
       { status: 503 },
@@ -301,16 +298,16 @@ export async function POST(req: Request) {
   const migrationCoinType = body.new_yield_enabled
     ? USDSUI.coinType
     : USDSUI.sCoinType;
-  const coinsRes = await sui.getCoins({
+  const coinsRes = await sui.listCoins({
     owner: body.owner,
     coinType: migrationCoinType,
     limit: MAX_COINS_PER_PTB + 1,
   });
-  if (coinsRes.data.length > MAX_COINS_PER_PTB) {
+  if (coinsRes.objects.length > MAX_COINS_PER_PTB) {
     const body413 = {
       error: "too_many_coins",
       coin_type: migrationCoinType,
-      count: coinsRes.data.length,
+      count: coinsRes.objects.length,
       max: MAX_COINS_PER_PTB,
       hint: "batched migration (D8) deferred to a follow-up; consolidate via wallet first",
     };
@@ -320,8 +317,8 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(body413, { status: 413 });
   }
-  const coinIds = coinsRes.data.map((c) => c.coinObjectId);
-  const totalAmount = coinsRes.data.reduce(
+  const coinIds = coinsRes.objects.map((c) => c.objectId);
+  const totalAmount = coinsRes.objects.reduce(
     (acc, c) => acc + BigInt(c.balance),
     0n,
   );

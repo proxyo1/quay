@@ -1,27 +1,28 @@
 "use client";
 
-import { useSuiClient, useSuiClientQuery } from "@mysten/dapp-kit";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 
 import { useZkLoginSession } from "@/lib/zklogin";
-import { getEntriesTableId } from "@/lib/quay";
+import { listOwnedMerchantEntries, type OwnedMerchantEntry } from "@/lib/quay";
+import { bytesFromEventField, queryEventsByType, type QuayEvent } from "@/lib/quay/events";
 import { QUAY, txUrl } from "@/lib/sui-config";
 import { getBlobUrl } from "@/lib/walrus/client";
+import { getSuiClient } from "@/lib/sui-client";
 
 interface PaymentReceiptEvent {
-  receipt_id: number[];
+  receipt_id: unknown;
   merchant: string;
   payer: string;
   amount: string;
   token_type: { name: string };
-  uen_hash: number[];
+  uen_hash: unknown;
   timestamp_ms: string;
-  memo: number[] | null;
+  memo: unknown;
   sgd_minor_units: string;
-  quote_metadata: number[] | null;
+  quote_metadata: unknown;
 }
 
 interface NormalizedReceipt {
@@ -58,85 +59,24 @@ export default function TerminalPage() {
   return <TerminalView session={session} onSignOut={signOut} />;
 }
 
-interface MerchantUen {
-  uen: string;
-  digest: string;
-  timestamp: number;
-  metadataBlobId: string | null;
-}
-
-interface MerchantRegisteredEvent {
-  uen_hash: number[];
-  sui_address: string;
-  timestamp_ms: string;
-}
+type MerchantUen = OwnedMerchantEntry;
 
 function useMerchantUens(address: string | undefined) {
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   return useQuery<MerchantUen[]>({
     queryKey: ["merchant-uens", address],
     queryFn: async () => {
       if (!address) return [];
-      const tableId = await getEntriesTableId(sui, QUAY.registryId);
-      const events = await sui.queryEvents({
-        query: { MoveEventType: `${QUAY.packageId}::payments::MerchantRegistered` },
-        order: "descending",
-        limit: 100,
-      });
-      const mine = events.data.filter(
-        (e) => (e.parsedJson as MerchantRegisteredEvent | undefined)?.sui_address === address,
+      return listOwnedMerchantEntries(
+        sui,
+        QUAY.registryId,
+        QUAY.packageId,
+        address,
       );
-      const entries = await Promise.all(
-        mine.map(async (e) => {
-          const ev = e.parsedJson as MerchantRegisteredEvent;
-          try {
-            const field = await sui.getDynamicFieldObject({
-              parentId: tableId,
-              name: { type: "vector<u8>", value: ev.uen_hash },
-            });
-            const extracted = extractEntryFields(field.data?.content);
-            if (!extracted) return null;
-            return {
-              uen: extracted.uen,
-              metadataBlobId: extracted.metadataBlobId,
-              digest: e.id.txDigest,
-              timestamp: Number(ev.timestamp_ms),
-            };
-          } catch {
-            return null;
-          }
-        }),
-      );
-      return entries.filter((x): x is MerchantUen => x !== null);
     },
     enabled: !!address,
     refetchInterval: 10_000,
   });
-}
-
-function extractEntryFields(
-  content: unknown,
-): { uen: string; metadataBlobId: string | null } | null {
-  if (!content || typeof content !== "object") return null;
-  const c = content as { dataType?: string; fields?: Record<string, unknown> };
-  if (c.dataType !== "moveObject") return null;
-  const value = c.fields?.value as { fields?: Record<string, unknown> } | undefined;
-  const fields = value?.fields;
-  if (!fields) return null;
-
-  const uenRaw = fields.uen_raw;
-  let uen: string | null = null;
-  if (Array.isArray(uenRaw)) {
-    uen = new TextDecoder().decode(new Uint8Array(uenRaw as number[]));
-  } else if (typeof uenRaw === "string") {
-    uen = uenRaw;
-  }
-  if (!uen) return null;
-
-  const meta = fields.metadata_uri;
-  const metadataBlobId = typeof meta === "string" && meta.length > 0 ? meta : null;
-
-  return { uen, metadataBlobId };
 }
 
 function TerminalView({
@@ -149,24 +89,19 @@ function TerminalView({
   const merchantAddress = session?.address ?? "0x0";
   const uens = useMerchantUens(session?.address);
 
-  const { data, error, isLoading } = useSuiClientQuery(
-    "queryEvents",
-    {
-      query: { MoveEventType: `${QUAY.packageId}::payments::PaymentReceipt` },
-      order: "descending",
-      limit: 50,
-    },
-    {
-      refetchInterval: 2000,
-      refetchIntervalInBackground: false,
-      enabled: !!session,
-    },
-  );
+  const { data, error, isLoading } = useQuery({
+    queryKey: ["terminal-receipts"],
+    queryFn: () =>
+      queryEventsByType(`${QUAY.packageId}::payments::PaymentReceipt`, 50),
+    refetchInterval: 2000,
+    refetchIntervalInBackground: false,
+    enabled: !!session,
+  });
 
   const receipts: NormalizedReceipt[] = useMemo(() => {
-    if (!data?.data || !session) return [];
-    return data.data
-      .map((ev) => normalizeEvent(ev))
+    if (!data || !session) return [];
+    return data
+      .map((ev, i) => normalizeEvent(ev, i))
       .filter((r): r is NormalizedReceipt => r !== null && r.merchant === merchantAddress);
   }, [data, session, merchantAddress]);
 
@@ -356,7 +291,7 @@ function UenList({ state }: { state: ReturnType<typeof useMerchantUens> }) {
               <span className="font-mono text-sm text-white truncate">{u.uen}</span>
             </div>
             <a
-              href={txUrl(u.digest)}
+              href={txUrl(u.digest ?? "")}
               target="_blank"
               rel="noreferrer"
               className="text-[11px] text-[var(--accent)] hover:underline shrink-0"
@@ -466,23 +401,23 @@ function ArrowDown() {
   );
 }
 
-function normalizeEvent(ev: {
-  id: { txDigest: string; eventSeq: string };
-  parsedJson?: unknown;
-}): NormalizedReceipt | null {
+function normalizeEvent(ev: QuayEvent, index: number): NormalizedReceipt | null {
   if (!ev.parsedJson) return null;
   const p = ev.parsedJson as PaymentReceiptEvent;
   if (!p.receipt_id || !p.merchant) return null;
   try {
     return {
-      receiptId: `${ev.id.txDigest}_${ev.id.eventSeq}`,
-      txDigest: ev.id.txDigest,
+      receiptId: `${ev.txDigest}_${index}`,
+      txDigest: ev.txDigest ?? "",
       payer: p.payer,
       merchant: p.merchant,
       amount: BigInt(p.amount),
       sgdMinorUnits: Number(p.sgd_minor_units),
       tokenType: p.token_type?.name ?? "",
-      memo: p.memo ? new TextDecoder().decode(Uint8Array.from(p.memo)) : "",
+      memo: (() => {
+        const m = bytesFromEventField(p.memo);
+        return m ? new TextDecoder().decode(m) : "";
+      })(),
       timestampMs: Number(p.timestamp_ms),
     };
   } catch {

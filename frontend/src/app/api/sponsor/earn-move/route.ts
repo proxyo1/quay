@@ -1,9 +1,5 @@
 import "server-only";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { NextResponse } from "next/server";
 
@@ -27,7 +23,7 @@ import {
   getYieldFeeConfig,
   readCostBasis,
 } from "@/lib/server/yield-cost-basis";
-import { SUI_NETWORK } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 export const runtime = "nodejs";
 
@@ -55,7 +51,7 @@ const LOW_BALANCE_FLOOR_MIST = 40_000_000n;
 const MAX_COINS_PER_PTB = 50;
 const FEATURE_FLAG_NAME = "yield_routing.scallop.usdsui";
 
-const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
+const sui = getSuiClient();
 
 type Direction = "to_cash" | "to_earning";
 
@@ -199,11 +195,11 @@ export async function POST(req: Request) {
   }
   const sponsorAddr = sponsor.toSuiAddress();
   const sponsorBal = await sui.getBalance({ owner: sponsorAddr });
-  if (BigInt(sponsorBal.totalBalance) < LOW_BALANCE_FLOOR_MIST) {
+  if (BigInt(sponsorBal.balance.balance) < LOW_BALANCE_FLOOR_MIST) {
     return NextResponse.json(
       {
         error: "sponsor balance below floor — refusing to sign",
-        sponsor_balance_mist: sponsorBal.totalBalance,
+        sponsor_balance_mist: sponsorBal.balance.balance,
         floor_mist: LOW_BALANCE_FLOOR_MIST.toString(),
       },
       { status: 503 },
@@ -243,30 +239,30 @@ export async function POST(req: Request) {
   if (body.direction === "to_earning") {
     // Mint: merchant moves liquid USDsui into Scallop.
     const sourceType = USDSUI.coinType;
-    const coinsRes = await sui.getCoins({
+    const coinsRes = await sui.listCoins({
       owner: body.owner,
       coinType: sourceType,
       limit: MAX_COINS_PER_PTB + 1,
     });
-    if (coinsRes.data.length === 0) {
+    if (coinsRes.objects.length === 0) {
       return NextResponse.json(
         { error: "merchant has no liquid USDsui" },
         { status: 400 },
       );
     }
-    if (coinsRes.data.length > MAX_COINS_PER_PTB) {
+    if (coinsRes.objects.length > MAX_COINS_PER_PTB) {
       return NextResponse.json(
         {
           error: "too_many_coins",
           coin_type: sourceType,
-          count: coinsRes.data.length,
+          count: coinsRes.objects.length,
           max: MAX_COINS_PER_PTB,
           hint: "consolidate via wallet first",
         },
         { status: 413 },
       );
     }
-    const totalBalance = coinsRes.data.reduce(
+    const totalBalance = coinsRes.objects.reduce(
       (acc, c) => acc + BigInt(c.balance),
       0n,
     );
@@ -283,7 +279,7 @@ export async function POST(req: Request) {
 
     const merged = mergeAll(
       tx,
-      coinsRes.data.map((c) => c.coinObjectId),
+      coinsRes.objects.map((c) => c.objectId),
     );
     const [exactAmount] = tx.splitCoins(merged, [tx.pure.u64(amount)]);
     const sCoin = buildMintWithSCoinWrap(tx, {
@@ -297,23 +293,23 @@ export async function POST(req: Request) {
   } else {
     // to_cash: merchant moves sUSDsui back to liquid USDsui.
     const sourceType = USDSUI.sCoinType;
-    const coinsRes = await sui.getCoins({
+    const coinsRes = await sui.listCoins({
       owner: body.owner,
       coinType: sourceType,
       limit: MAX_COINS_PER_PTB + 1,
     });
-    if (coinsRes.data.length === 0) {
+    if (coinsRes.objects.length === 0) {
       return NextResponse.json(
         { error: "merchant has no sUSDsui" },
         { status: 400 },
       );
     }
-    if (coinsRes.data.length > MAX_COINS_PER_PTB) {
+    if (coinsRes.objects.length > MAX_COINS_PER_PTB) {
       return NextResponse.json(
         {
           error: "too_many_coins",
           coin_type: sourceType,
-          count: coinsRes.data.length,
+          count: coinsRes.objects.length,
           max: MAX_COINS_PER_PTB,
           hint: "consolidate via wallet first",
         },
@@ -358,7 +354,7 @@ export async function POST(req: Request) {
       Math.ceil(Number(actualAmount) / sharePrice),
     );
 
-    const totalShareBalance = coinsRes.data.reduce(
+    const totalShareBalance = coinsRes.objects.reduce(
       (acc, c) => acc + BigInt(c.balance),
       0n,
     );
@@ -390,7 +386,7 @@ export async function POST(req: Request) {
 
     const merged = mergeAll(
       tx,
-      coinsRes.data.map((c) => c.coinObjectId),
+      coinsRes.objects.map((c) => c.objectId),
     );
     const [exactShare] = tx.splitCoins(merged, [tx.pure.u64(sharesToBurn)]);
     const underlying = buildRedeemFromSCoin(tx, {

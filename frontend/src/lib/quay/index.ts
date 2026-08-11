@@ -22,6 +22,9 @@ export {
   deriveUenHash,
   getEntriesTableId,
   fetchMerchantProfile,
+  listOwnedMerchantEntries,
   type UenLookupResult,
   type ResolvedMerchantProfile,
+  type OwnedMerchantEntry,
+  type MerchantRegisteredEvent,
 } from "./lookup";

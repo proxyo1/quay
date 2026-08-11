@@ -17,13 +17,13 @@
  * splash while the events query resolves (~200–800ms in practice).
  */
 
-import { useSuiClient } from "@mysten/dapp-kit";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { QUAY } from "@/lib/sui-config";
 import { useZkLoginSession } from "@/lib/zklogin";
+import { queryEventsByType } from "@/lib/quay/events";
 
 interface MerchantRegisteredEvent {
   sui_address: string;
@@ -32,18 +32,16 @@ interface MerchantRegisteredEvent {
 export default function PostSignInPage() {
   const { session, hydrated, expired } = useZkLoginSession();
   const router = useRouter();
-  const sui = useSuiClient();
 
   const hasUensQ = useQuery({
     queryKey: ["post-signin-has-uens", session?.address],
     queryFn: async () => {
       if (!session?.address) return false;
-      const events = await sui.queryEvents({
-        query: { MoveEventType: `${QUAY.packageId}::payments::MerchantRegistered` },
-        order: "descending",
-        limit: 100,
-      });
-      return events.data.some(
+      const events = await queryEventsByType(
+        `${QUAY.packageId}::payments::MerchantRegistered`,
+        100,
+      );
+      return events.some(
         (e) =>
           (e.parsedJson as MerchantRegisteredEvent | undefined)?.sui_address ===
           session.address,

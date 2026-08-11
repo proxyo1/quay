@@ -1,14 +1,10 @@
 "use client";
 
-import {
-  SuiJsonRpcClient as SuiClient,
-  getJsonRpcFullnodeUrl as getFullnodeUrl,
-} from "@mysten/sui/jsonRpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { generateNonce, generateRandomness } from "@mysten/sui/zklogin";
 
-import { SUI_NETWORK } from "@/lib/sui-config";
+import { getSuiClient } from "@/lib/sui-client";
 
 import {
   EPOCH_LOOKAHEAD,
@@ -16,7 +12,7 @@ import {
   redirectUri,
 } from "./config";
 
-const sui = new SuiClient({ network: SUI_NETWORK, url: getFullnodeUrl(SUI_NETWORK) });
+const sui = getSuiClient();
 
 const PENDING_KEY = "quay.zklogin.pending.v1";
 
@@ -44,8 +40,8 @@ export async function startGoogleZkLogin(nextUrl: string = "/merchant/onboard"):
     throw new Error("NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set");
   }
   const ephemeral = Ed25519Keypair.generate();
-  const { epoch } = await sui.getLatestSuiSystemState();
-  const maxEpoch = Number(epoch) + EPOCH_LOOKAHEAD;
+  const { systemState } = await sui.core.getCurrentSystemState();
+  const maxEpoch = Number(systemState.epoch) + EPOCH_LOOKAHEAD;
   const randomness = generateRandomness();
   const nonce = generateNonce(ephemeral.getPublicKey(), maxEpoch, randomness);
 

@@ -1,6 +1,5 @@
 "use client";
 
-import { useSuiClient } from "@mysten/dapp-kit";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
@@ -10,6 +9,7 @@ import { buildGaslessUsdsuiSendAll } from "@/lib/quay/transfer";
 import { USDSUI } from "@/lib/quay/scallop";
 import { txUrl } from "@/lib/sui-config";
 import { zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
+import { getSuiClient } from "@/lib/sui-client";
 
 /**
  * Money-out controls for /merchant/wallet. Hierarchy (D2-design): cash-out
@@ -66,7 +66,7 @@ interface Balances {
 }
 
 function useUsdsuiBalances(owner: string | undefined) {
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   return useQuery<Balances>({
     queryKey: ["usdsui-balances", owner],
     queryFn: async () => {
@@ -76,8 +76,8 @@ function useUsdsuiBalances(owner: string | undefined) {
         sui.getBalance({ owner, coinType: USDSUI.sCoinType }),
       ]);
       return {
-        liquidMinor: BigInt(liquid.totalBalance),
-        yieldMinor: BigInt(yld.totalBalance),
+        liquidMinor: BigInt(liquid.balance.balance),
+        yieldMinor: BigInt(yld.balance.balance),
       };
     },
     enabled: !!owner,
@@ -169,7 +169,7 @@ function CashOutSection({
   liquidMinor: bigint;
   onDone: () => void;
 }) {
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   const [amount, setAmount] = useState("");
   const [step, setStep] = useState<CashStep>({ k: "form" });
   const [recipientType, setRecipientType] = useState<string>("");
@@ -255,13 +255,14 @@ function CashOutSection({
       const senderSig = await zkLoginSign(session, txBytes);
 
       setStep({ k: "processing", label: "Sending USDsui…" });
-      const result = await sui.executeTransactionBlock({
-        transactionBlock: txBytes,
-        signature: [senderSig, init.sponsor_signature],
-        options: { showEffects: true },
+      const resultRes = await sui.executeTransaction({
+        transaction: txBytes,
+        signatures: [senderSig, init.sponsor_signature],
+        include: { effects: true },
       });
-      if (result.effects?.status?.status !== "success") {
-        throw new Error(result.effects?.status?.error ?? "transfer failed");
+      const result = resultRes.Transaction;
+      if (!result?.status?.success) {
+        throw new Error(result?.status?.error?.message ?? "transfer failed");
       }
       await sui.waitForTransaction({ digest: result.digest });
 
@@ -472,7 +473,7 @@ function WithdrawSection({
   liquidMinor: bigint;
   onDone: () => void;
 }) {
-  const sui = useSuiClient();
+  const sui = getSuiClient();
   const [open, setOpen] = useState(false);
   // "all" → gasless send_funds of the whole balance (free, no sponsor).
   // "amount" → sponsored partial transfer (split isn't gasless-allowlisted).
@@ -493,7 +494,7 @@ function WithdrawSection({
     const dest = destination.trim();
     try {
       let txBytes: Uint8Array;
-      let signature: string | string[];
+      let signature: string[];
 
       if (isAll) {
         // Gasless: build client-side, no sponsor, merchant signs gas=0 alone.
@@ -505,7 +506,7 @@ function WithdrawSection({
         });
         txBytes = await tx.build({ client: sui });
         setStep({ k: "processing", label: "Signing…" });
-        signature = await zkLoginSign(session, txBytes);
+        signature = [await zkLoginSign(session, txBytes)];
       } else {
         // Sponsored partial transfer (gas on us).
         if (amountMinor === null) return;
@@ -531,13 +532,14 @@ function WithdrawSection({
       }
 
       setStep({ k: "processing", label: isAll ? "Sending (gasless)…" : "Sending…" });
-      const result = await sui.executeTransactionBlock({
-        transactionBlock: txBytes,
-        signature,
-        options: { showEffects: true },
+      const resultRes = await sui.executeTransaction({
+        transaction: txBytes,
+        signatures: signature,
+        include: { effects: true },
       });
-      if (result.effects?.status?.status !== "success") {
-        throw new Error(result.effects?.status?.error ?? "transfer failed");
+      const result = resultRes.Transaction;
+      if (!result?.status?.success) {
+        throw new Error(result?.status?.error?.message ?? "transfer failed");
       }
       await sui.waitForTransaction({ digest: result.digest });
       setStep({ k: "success", digest: result.digest });
