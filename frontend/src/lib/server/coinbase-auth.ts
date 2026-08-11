@@ -146,6 +146,13 @@ export async function authorizeOfframpRequest(input: {
   authorizationHeader: string | null;
   /** Fallback when no token is presented. */
   owner?: unknown;
+  /**
+   * Registry reader, injectable for tests. A parameter rather than something
+   * tests stub with `mock.module`, because Bun's module mocks are global and
+   * persist across files — mocking `@/lib/quay/lookup` from this suite
+   * silently broke unrelated ones that import it.
+   */
+  lookupUens?: (owner: string) => Promise<string[]>;
 }): Promise<OfframpTokenClaims> {
   const header = input.authorizationHeader ?? "";
   if (header.startsWith("Bearer ")) {
@@ -165,7 +172,8 @@ export async function authorizeOfframpRequest(input: {
     );
   }
 
-  const uens = await registeredUensFor(input.owner);
+  const lookup = input.lookupUens ?? registeredUensFor;
+  const uens = await lookup(input.owner);
   if (uens.length === 0) {
     // Not "unauthenticated" — the address is simply not a merchant. Cashing
     // out is a merchant action, so this is the real authorisation boundary.

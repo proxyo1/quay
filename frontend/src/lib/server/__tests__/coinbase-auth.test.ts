@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 
 process.env.ADMIN_JWT_SECRET =
   process.env.ADMIN_JWT_SECRET ?? "test-secret-at-least-32-characters-long!!";
@@ -6,17 +6,15 @@ process.env.ADMIN_JWT_SECRET =
 let registeredUens: string[] = [];
 let lookupCalls = 0;
 
-mock.module("@/lib/quay/lookup", () => ({
-  listOwnedMerchantEntries: async () => {
-    lookupCalls += 1;
-    return registeredUens.map((uen) => ({
-      uen,
-      metadataBlobId: null,
-      digest: null,
-      timestamp: 0,
-    }));
-  },
-}));
+/**
+ * Injected registry reader. Deliberately NOT `mock.module` — Bun's module
+ * mocks are global and persist across files, so mocking `@/lib/quay/lookup`
+ * from here broke kyb-attestation's suite when the two ran together.
+ */
+async function fakeLookup(): Promise<string[]> {
+  lookupCalls += 1;
+  return registeredUens;
+}
 
 const {
   OfframpAuthError,
@@ -82,6 +80,7 @@ describe("authorizeOfframpRequest", () => {
     const token = await mintOfframpToken({ owner: OWNER, uen: "53014014D" });
     const claims = await authorizeOfframpRequest({
       authorizationHeader: `Bearer ${token}`,
+      lookupUens: fakeLookup,
     });
     expect(claims.owner).toBe(OWNER);
     // The point of the token: no chain read on the hot path.
@@ -92,6 +91,7 @@ describe("authorizeOfframpRequest", () => {
     const claims = await authorizeOfframpRequest({
       authorizationHeader: null,
       owner: OWNER,
+      lookupUens: fakeLookup,
     });
     expect(claims).toEqual({ owner: OWNER, uen: "53014014D" });
     expect(lookupCalls).toBe(1);
@@ -102,7 +102,7 @@ describe("authorizeOfframpRequest", () => {
     // not a merchant, and cashing out is a merchant action.
     registeredUens = [];
     try {
-      await authorizeOfframpRequest({ authorizationHeader: null, owner: OWNER });
+      await authorizeOfframpRequest({ authorizationHeader: null, owner: OWNER, lookupUens: fakeLookup });
       throw new Error("expected throw");
     } catch (e) {
       expect(e).toBeInstanceOf(OfframpAuthError);
@@ -112,7 +112,7 @@ describe("authorizeOfframpRequest", () => {
 
   test("a malformed owner is 400 and never reaches the chain", async () => {
     try {
-      await authorizeOfframpRequest({ authorizationHeader: null, owner: "nope" });
+      await authorizeOfframpRequest({ authorizationHeader: null, owner: "nope", lookupUens: fakeLookup });
       throw new Error("expected throw");
     } catch (e) {
       expect(e).toBeInstanceOf(OfframpAuthError);
@@ -123,7 +123,7 @@ describe("authorizeOfframpRequest", () => {
 
   test("an expired or bogus bearer token is 401", async () => {
     try {
-      await authorizeOfframpRequest({ authorizationHeader: "Bearer not.a.jwt" });
+      await authorizeOfframpRequest({ authorizationHeader: "Bearer not.a.jwt", lookupUens: fakeLookup });
       throw new Error("expected throw");
     } catch (e) {
       expect(e).toBeInstanceOf(OfframpAuthError);
@@ -138,6 +138,7 @@ describe("authorizeOfframpRequest", () => {
       authorizeOfframpRequest({
         authorizationHeader: "Bearer garbage",
         owner: OWNER,
+        lookupUens: fakeLookup,
       }),
     ).rejects.toBeInstanceOf(OfframpAuthError);
     expect(lookupCalls).toBe(0);
