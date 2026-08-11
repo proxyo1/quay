@@ -18,10 +18,11 @@ import {
   getById,
   getOpenForOwner,
   markExpired,
-  markRefunded,
   markSent,
   markSettled,
+  markUnmatched,
   isStaleCreated,
+  isStalledSend,
   type OfframpRow,
 } from "@/lib/server/coinbase-offramp-store";
 
@@ -139,11 +140,23 @@ export async function GET(req: Request) {
       } catch (e) {
         if (!(e instanceof OfframpStoreError)) throw e;
       }
-    } else if (remote.status === "failed" && canTransition(row.status, "refund")) {
-      // Failed AFTER we sent means the USDC came back to the merchant. The
-      // wallet does not treat USDC as a balance, so the UI has to surface it.
+    } else if (remote.status === "failed" && canTransition(row.status, "unmatch")) {
+      // Failed AFTER we sent: the USDC reached Coinbase but the sale did not
+      // complete. Whether they returned it on-chain or kept it as a crypto
+      // credit is not knowable from here, so the row says only what happened.
       try {
-        row = await markRefunded(row.id, row.status);
+        row = await markUnmatched(row.id, row.status);
+      } catch (e) {
+        if (!(e instanceof OfframpStoreError)) throw e;
+      }
+    } else if (isStalledSend(row) && canTransition(row.status, "unmatch")) {
+      // Delivered but never matched to the order — see SENT_STALL_TTL_MS.
+      try {
+        row = await markUnmatched(
+          row.id,
+          row.status,
+          `Coinbase did not match the deposit within 24h (order status '${remote.status}')`,
+        );
       } catch (e) {
         if (!(e instanceof OfframpStoreError)) throw e;
       }

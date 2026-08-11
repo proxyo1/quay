@@ -25,7 +25,7 @@ export type OfframpStatus =
   | "sent"
   | "settled"
   | "expired"
-  | "refunded"
+  | "unmatched"
   | "failed";
 
 /** Statuses where the merchant still has an open order. */
@@ -62,9 +62,40 @@ export const RESUMABLE_STATUSES: OfframpStatus[] = ["created", "committed", "sen
 export const TERMINAL_STATUSES: OfframpStatus[] = [
   "settled",
   "expired",
-  "refunded",
+  "unmatched",
   "failed",
 ];
+
+/**
+ * How long a `sent` row waits for Coinbase to complete the sale.
+ *
+ * Without this a send that Coinbase never matches to its order sits in `sent`
+ * forever: the deposit is delivered, so nothing expires, and the order status
+ * never reaches a terminal value for the reconcilers to act on. Observed live —
+ * an order held `TRANSACTION_STATUS_STARTED` with an empty `tx_hash` while the
+ * USDC had already been credited to the merchant's Coinbase balance as an
+ * ordinary crypto deposit.
+ *
+ * 24h is deliberately generous. This marks a row for human attention, it does
+ * not move money, so the cost of waiting too long is lower than the cost of
+ * declaring a still-settling order dead.
+ */
+export const SENT_STALL_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * True when a sent row has waited past the TTL for Coinbase to complete.
+ *
+ * Callers must additionally confirm the remote order is still non-terminal —
+ * age alone is not evidence that nothing happened.
+ */
+export function isStalledSend(row: {
+  status: OfframpStatus;
+  sent_at: string | null;
+}): boolean {
+  if (row.status !== "sent" || !row.sent_at) return false;
+  const sent = Date.parse(row.sent_at);
+  return Number.isFinite(sent) && Date.now() - sent > SENT_STALL_TTL_MS;
+}
 
 /**
  * Events that can move a row. Named for what happened, not for the status
@@ -75,7 +106,7 @@ export type OfframpEvent =
   | "send" // the on-chain USDC send landed
   | "settle" // Coinbase confirmed the sale
   | "expire" // deadline passed with nothing sent
-  | "refund" // Coinbase cancelled after we sent; USDC came back
+  | "unmatch" // we sent, Coinbase never completed the sale; funds are theirs to resolve
   | "fail"; // unrecoverable error
 
 export class IllegalTransitionError extends Error {
@@ -97,9 +128,9 @@ export class IllegalTransitionError extends Error {
  *  - **`settle` is not reachable from `committed`.** A row may only settle
  *    after `sent`. Settling straight from `committed` would mark a cash-out
  *    complete when no USDC ever left the merchant's wallet.
- *  - **`refund` is only reachable from `sent`.** A refund means Coinbase
- *    returned funds we actually sent; allowing it earlier would invent a
- *    return of money that never moved.
+ *  - **`unmatch` is only reachable from `sent`.** It describes a sale that
+ *    failed to complete against USDC we actually delivered; allowing it
+ *    earlier would report a stranded deposit that was never made.
  */
 const TRANSITIONS: Record<OfframpStatus, Partial<Record<OfframpEvent, OfframpStatus>>> = {
   created: {
@@ -114,14 +145,14 @@ const TRANSITIONS: Record<OfframpStatus, Partial<Record<OfframpEvent, OfframpSta
   },
   sent: {
     settle: "settled",
-    refund: "refunded",
+    unmatch: "unmatched",
     fail: "failed",
   },
   // Terminal — no outgoing edges. A late webhook or a duplicated cron tick
   // must not resurrect a finished row.
   settled: {},
   expired: {},
-  refunded: {},
+  unmatched: {},
   failed: {},
 };
 
@@ -387,13 +418,23 @@ export function markExpired(
   return applyEvent(id, from, "expire", { failure_reason: reason });
 }
 
-/** Coinbase cancelled post-send; the USDC is back with the merchant. */
-export function markRefunded(
+/**
+ * We delivered the USDC but Coinbase never completed the sale.
+ *
+ * Deliberately does **not** claim the funds were returned. In this corridor
+ * they usually were not: the deposit lands in the merchant's Coinbase balance
+ * as ordinary USDC and the sell order is simply never matched to it, so the
+ * money is with Coinbase and the merchant resolves it there. The on-chain
+ * return does happen — Coinbase can send USDC back to the source address — but
+ * that case is detected from the merchant's actual USDC balance by
+ * `StrandedUsdcCard`, not asserted from a row status we cannot verify.
+ */
+export function markUnmatched(
   id: string,
   from: OfframpStatus,
-  reason = "Coinbase cancelled the order",
+  reason = "Coinbase did not complete the sale",
 ): Promise<OfframpRow> {
-  return applyEvent(id, from, "refund", { failure_reason: reason });
+  return applyEvent(id, from, "unmatch", { failure_reason: reason });
 }
 
 export function markFailed(

@@ -9,9 +9,16 @@ import { getSuiClient } from "@/lib/sui-client";
 /**
  * Surfaces USDC sitting in a merchant's wallet.
  *
- * A merchant should normally never hold USDC. It appears in exactly one
- * situation: Coinbase cancelled a cash-out *after* the send, and refunded the
- * USDC to the address it came from.
+ * A merchant should normally never hold USDC. It appears in one situation:
+ * a cash-out failed *after* the send and Coinbase returned the USDC to the
+ * address it came from.
+ *
+ * That is the less common of the two post-send failures, and this card is what
+ * distinguishes them. When Coinbase does not complete a sale the deposit
+ * usually stays in the merchant's Coinbase balance as ordinary USDC — nothing
+ * comes back on chain and this card correctly renders nothing. So the row
+ * status (`unmatched`) never claims a return; the balance here is the only
+ * evidence that one happened.
  *
  * That balance is otherwise invisible. USDC is not a supported receive token
  * (`MAINNET_RECEIVE_TOKENS` is USDsui only), and the wallet page reads only

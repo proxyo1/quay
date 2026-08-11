@@ -413,11 +413,18 @@ export type OfframpTransactionStatus =
  * Map Coinbase's `TRANSACTION_STATUS_*` enum onto our state machine.
  *
  * Pure and exhaustively tested, because everything downstream — whether we
- * send funds, settle a row, or mark it refunded — keys off this.
+ * send funds, settle a row, or mark it unmatched — keys off this.
+ *
+ * `TRANSACTION_STATUS_STARTED` is **not in Coinbase's published enum** but is
+ * what the live API actually returns for an order awaiting its deposit —
+ * observed on a real mainnet order that sat in it while the USDC was already
+ * delivered. It was previously falling through to `unknown`, which the
+ * reconcilers ignore, so such a row could never leave `sent`.
  */
 export function mapTransactionStatus(raw: string | undefined): OfframpTransactionStatus {
   switch (raw) {
     case "TRANSACTION_STATUS_CREATED":
+    case "TRANSACTION_STATUS_STARTED":
       return "created";
     case "TRANSACTION_STATUS_IN_PROGRESS":
     case "TRANSACTION_STATUS_PENDING":

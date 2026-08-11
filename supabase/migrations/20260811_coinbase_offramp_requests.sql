@@ -12,9 +12,15 @@
 --
 --   created ──▶ committed ──▶ sent ──▶ settled
 --      │            │           │
---      │            │           └──▶ refunded  (Coinbase cancelled post-send)
+--      │            │           └──▶ unmatched (delivered, sale never completed)
 --      │            └───────────────▶ expired  (deadline passed, nothing sent)
 --      └────────────────────────────▶ failed
+--
+-- `unmatched` deliberately does not say where the funds are. Coinbase may
+-- return them to the source address, but more often the deposit simply credits
+-- the merchant's Coinbase balance as USDC and the sell order is never matched
+-- to it. `status` is text with no CHECK constraint, so this rename needs no
+-- migration; no row has ever held the old 'refunded' value.
 
 create table if not exists public.coinbase_offramp_requests (
     id uuid primary key default gen_random_uuid(),

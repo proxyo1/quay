@@ -12,9 +12,10 @@ import {
   canTransition,
   listReconcilable,
   markExpired,
-  markRefunded,
   markSettled,
+  markUnmatched,
   isStaleCreated,
+  isStalledSend,
 } from "@/lib/server/coinbase-offramp-store";
 
 export const runtime = "nodejs";
@@ -68,7 +69,7 @@ interface ReconcileResponse {
   checked_at: string;
   rows_scanned: number;
   settled: number;
-  refunded: number;
+  unmatched: number;
   expired: number;
   errors: number;
   note?: string;
@@ -88,7 +89,7 @@ export async function GET(req: Request) {
       checked_at: checkedAt,
       rows_scanned: 0,
       settled: 0,
-      refunded: 0,
+      unmatched: 0,
       expired: 0,
       errors: 0,
       note: "coinbase_offramp_enabled is off — nothing to reconcile",
@@ -101,7 +102,7 @@ export async function GET(req: Request) {
         checked_at: checkedAt,
         rows_scanned: 0,
         settled: 0,
-        refunded: 0,
+        unmatched: 0,
         expired: 0,
         errors: 1,
         note: "CDP credentials not configured",
@@ -121,7 +122,7 @@ export async function GET(req: Request) {
         checked_at: checkedAt,
         rows_scanned: 0,
         settled: 0,
-        refunded: 0,
+        unmatched: 0,
         expired: 0,
         errors: 1,
         note: message,
@@ -131,7 +132,7 @@ export async function GET(req: Request) {
   }
 
   let settled = 0;
-  let refunded = 0;
+  let unmatched = 0;
   let expired = 0;
   let errors = 0;
 
@@ -178,11 +179,22 @@ export async function GET(req: Request) {
       if (remote.status === "success" && canTransition(row.status, "settle")) {
         await markSettled(row.id, row.status);
         settled += 1;
-      } else if (remote.status === "failed" && canTransition(row.status, "refund")) {
-        // Coinbase cancelled after we sent: the USDC is back with the merchant,
-        // and USDC is not a token the wallet displays, so the UI surfaces it.
-        await markRefunded(row.id, row.status);
-        refunded += 1;
+      } else if (remote.status === "failed" && canTransition(row.status, "unmatch")) {
+        // The sale did not complete against USDC we already delivered. Where
+        // the funds ended up is Coinbase's to say, so the row records the
+        // outcome and does not assert a return that may not have happened.
+        await markUnmatched(row.id, row.status);
+        unmatched += 1;
+      } else if (isStalledSend(row) && canTransition(row.status, "unmatch")) {
+        // Delivered, but the order is still sitting in a non-terminal status a
+        // day later — Coinbase never matched the deposit to it. Left alone this
+        // row stays `sent` forever and the merchant is never told to go look.
+        await markUnmatched(
+          row.id,
+          row.status,
+          `Coinbase did not match the deposit within 24h (order status '${remote.status}')`,
+        );
+        unmatched += 1;
       }
     } catch (e) {
       errors += 1;
@@ -197,7 +209,7 @@ export async function GET(req: Request) {
     checked_at: checkedAt,
     rows_scanned: rows.length,
     settled,
-    refunded,
+    unmatched,
     expired,
     errors,
   } satisfies ReconcileResponse);

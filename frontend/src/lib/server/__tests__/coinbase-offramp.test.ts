@@ -8,6 +8,13 @@ import {
 } from "../coinbase-offramp";
 
 describe("mapTransactionStatus", () => {
+  test("STARTED is a live value the published enum omits", () => {
+    // Observed on a real mainnet order that held this status while the USDC was
+    // already delivered. It used to fall through to `unknown`, which both
+    // reconcilers ignore, stranding the row in `sent` forever.
+    expect(mapTransactionStatus("TRANSACTION_STATUS_STARTED")).toBe("created");
+  });
+
   test("maps every documented TRANSACTION_STATUS_* value", () => {
     expect(mapTransactionStatus("TRANSACTION_STATUS_CREATED")).toBe("created");
     expect(mapTransactionStatus("TRANSACTION_STATUS_IN_PROGRESS")).toBe("pending");

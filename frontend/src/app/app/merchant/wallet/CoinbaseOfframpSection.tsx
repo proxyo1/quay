@@ -39,7 +39,7 @@ type Step =
   | { k: "sending" }
   | { k: "settled"; sgdMinor: string }
   | { k: "expired"; amountMinor: string }
-  | { k: "refunded"; usdcMinor: string }
+  | { k: "unmatched"; usdcMinor: string }
   | { k: "sessionLost"; requestId: string; deadlineMs: number | null }
   | { k: "error"; message: string };
 
@@ -197,9 +197,9 @@ export function CoinbaseOfframpSection({
       setStep({ k: "settled", sgdMinor: String(body.estimated_sgd_minor ?? "0") });
     } else if (status === "expired") {
       setStep({ k: "expired", amountMinor: String(body.amount_usdsui_minor ?? "0") });
-    } else if (status === "refunded") {
+    } else if (status === "unmatched") {
       setStep({
-        k: "refunded",
+        k: "unmatched",
         usdcMinor: String(body.sell_amount_usdc_minor ?? "0"),
       });
     } else if (status === "created" || status === "committed" || status === "sent") {
@@ -628,13 +628,15 @@ export function CoinbaseOfframpSection({
         </div>
       )}
 
-      {step.k === "refunded" && (
+      {step.k === "unmatched" && (
         <div className="relative z-10 space-y-2">
-          <p className="text-sm text-white">Coinbase returned your USDC</p>
+          <p className="text-sm text-white">Coinbase didn&apos;t complete the sale</p>
           <p className="text-xs text-[var(--muted)] leading-relaxed">
-            The sale didn&apos;t complete, so {formatUsdc(step.usdcMinor)} USDC went
-            back to your wallet. USDC isn&apos;t your settlement token, so it
-            won&apos;t show in your main balance.
+            We delivered {formatUsdc(step.usdcMinor)} USDC to Coinbase, but the
+            sale to SGD never went through. The USDC is almost certainly sitting
+            in your Coinbase account — check there and sell it to SGD yourself.
+            If Coinbase sent it back to your wallet instead, it appears as a
+            USDC balance at the top of this page.
           </p>
         </div>
       )}

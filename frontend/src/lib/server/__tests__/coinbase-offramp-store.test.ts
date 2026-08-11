@@ -3,8 +3,10 @@ import { describe, expect, test } from "bun:test";
 import {
   IllegalTransitionError,
   OPEN_STATUSES,
+  SENT_STALL_TTL_MS,
   TERMINAL_STATUSES,
   canTransition,
+  isStalledSend,
   isTerminal,
   nextStatus,
   type OfframpEvent,
@@ -17,7 +19,7 @@ const ALL_STATUSES: OfframpStatus[] = [
   "sent",
   "settled",
   "expired",
-  "refunded",
+  "unmatched",
   "failed",
 ];
 
@@ -26,7 +28,7 @@ const ALL_EVENTS: OfframpEvent[] = [
   "send",
   "settle",
   "expire",
-  "refund",
+  "unmatch",
   "fail",
 ];
 
@@ -39,7 +41,7 @@ const LEGAL: Array<[OfframpStatus, OfframpEvent, OfframpStatus]> = [
   ["committed", "expire", "expired"],
   ["committed", "fail", "failed"],
   ["sent", "settle", "settled"],
-  ["sent", "refund", "refunded"],
+  ["sent", "unmatch", "unmatched"],
   ["sent", "fail", "failed"],
 ];
 
@@ -84,11 +86,11 @@ describe("nextStatus — illegal transitions", () => {
     expect(() => nextStatus("created", "settle")).toThrow(IllegalTransitionError);
   });
 
-  test("a row cannot refund without having sent", () => {
-    // A refund means Coinbase returned funds we actually sent; earlier it
-    // would invent a return of money that never moved.
-    expect(() => nextStatus("created", "refund")).toThrow(IllegalTransitionError);
-    expect(() => nextStatus("committed", "refund")).toThrow(IllegalTransitionError);
+  test("a row cannot be unmatched without having sent", () => {
+    // `unmatch` reports a delivered deposit the sale never consumed; earlier it
+    // would describe money that never moved.
+    expect(() => nextStatus("created", "unmatch")).toThrow(IllegalTransitionError);
+    expect(() => nextStatus("committed", "unmatch")).toThrow(IllegalTransitionError);
   });
 
   test("a row cannot send before the order is committed", () => {
@@ -157,5 +159,35 @@ describe("status sets", () => {
     // The partial unique index in the migration is defined over exactly these,
     // so a drift here silently lets a merchant open two concurrent cash-outs.
     expect(OPEN_STATUSES).toEqual(["created", "committed", "sent"]);
+  });
+});
+
+describe("isStalledSend", () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+
+  test("a send Coinbase never completed is stalled once past the TTL", () => {
+    expect(
+      isStalledSend({ status: "sent", sent_at: ago(SENT_STALL_TTL_MS + 60_000) }),
+    ).toBe(true);
+  });
+
+  test("a recent send is not stalled — the sale may still be settling", () => {
+    expect(isStalledSend({ status: "sent", sent_at: ago(60_000) })).toBe(false);
+    expect(
+      isStalledSend({ status: "sent", sent_at: ago(SENT_STALL_TTL_MS - 60_000) }),
+    ).toBe(false);
+  });
+
+  test("only sent rows stall", () => {
+    // `committed` has its own deadline and `settled` is done; treating either
+    // as stalled would expire an order that is fine, or reopen a closed one.
+    for (const status of ALL_STATUSES.filter((s) => s !== "sent")) {
+      expect(isStalledSend({ status, sent_at: ago(SENT_STALL_TTL_MS * 2) })).toBe(false);
+    }
+  });
+
+  test("a missing or unparseable sent_at never stalls", () => {
+    expect(isStalledSend({ status: "sent", sent_at: null })).toBe(false);
+    expect(isStalledSend({ status: "sent", sent_at: "not a date" })).toBe(false);
   });
 });
