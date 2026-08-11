@@ -363,6 +363,8 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     request_id: row.id,
+    // The redeem leg calls /api/sponsor/earn-move, which is keyed by UEN.
+    uen: claims.uen,
     /** Present this on subsequent calls to skip the registry read. */
     offramp_token: await mintOfframpToken({ owner, uen: claims.uen }),
     offramp_url: offrampUrl,

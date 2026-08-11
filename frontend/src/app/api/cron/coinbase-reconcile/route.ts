@@ -14,6 +14,7 @@ import {
   markExpired,
   markRefunded,
   markSettled,
+  isStaleCreated,
 } from "@/lib/server/coinbase-offramp-store";
 
 export const runtime = "nodejs";
@@ -149,6 +150,14 @@ export async function GET(req: Request) {
           row.status,
           "deadline passed before the merchant signed the send",
         );
+        expired += 1;
+        continue;
+      }
+
+      // A `created` row never gets a Coinbase deadline, so it is aged out
+      // locally — otherwise the in-flight lock traps the merchant forever.
+      if (isStaleCreated(row)) {
+        await markExpired(row.id, row.status, "abandoned before committing on Coinbase");
         expired += 1;
         continue;
       }

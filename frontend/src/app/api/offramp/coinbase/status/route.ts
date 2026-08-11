@@ -21,6 +21,7 @@ import {
   markRefunded,
   markSent,
   markSettled,
+  isStaleCreated,
   type OfframpRow,
 } from "@/lib/server/coinbase-offramp-store";
 
@@ -88,12 +89,14 @@ export async function GET(req: Request) {
   }
 
   // Deadline first: an expired order should not be reported as merely waiting.
+  //
+  // A `created` row has no Coinbase deadline (one is only issued on commit), so
+  // it is aged out locally instead. Without that it could never expire, and the
+  // in-flight lock would bar the merchant from ever cashing out again — the
+  // exact outcome of opening the widget and closing it.
   const deadlineMs = row.deadline_at ? Date.parse(row.deadline_at) : null;
-  if (
-    deadlineMs !== null &&
-    deadlineMs < Date.now() &&
-    canTransition(row.status, "expire")
-  ) {
+  const deadlinePassed = deadlineMs !== null && deadlineMs < Date.now();
+  if ((deadlinePassed || isStaleCreated(row)) && canTransition(row.status, "expire")) {
     try {
       row = await markExpired(row.id, row.status);
     } catch (e) {
@@ -169,15 +172,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "not available" }, { status: 404 });
   }
 
-  let body: { request_id?: string; sui_digest?: string; owner?: string };
+  let body: {
+    request_id?: string;
+    sui_digest?: string;
+    owner?: string;
+    action?: "cancel";
+  };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
-  if (!body.request_id || !body.sui_digest) {
+  if (!body.request_id) {
+    return NextResponse.json({ error: "request_id required" }, { status: 400 });
+  }
+  if (body.action !== "cancel" && !body.sui_digest) {
     return NextResponse.json(
-      { error: "request_id and sui_digest required" },
+      { error: "sui_digest required unless action is 'cancel'" },
       { status: 400 },
     );
   }
@@ -201,11 +212,24 @@ export async function POST(req: Request) {
     if (row.owner !== claims.owner) {
       return NextResponse.json({ error: "not your cash-out" }, { status: 403 });
     }
+    // Explicit abandon. Releases the in-flight lock immediately rather than
+    // making the merchant wait out the TTL. Only legal before the send — once
+    // funds have moved, the order is Coinbase's to resolve.
+    if (body.action === "cancel") {
+      if (!canTransition(row.status, "expire")) {
+        return NextResponse.json(
+          { error: `a '${row.status}' cash-out cannot be cancelled`, status: row.status },
+          { status: 409 },
+        );
+      }
+      const cancelled = await markExpired(row.id, row.status, "cancelled by the merchant");
+      return NextResponse.json({ ok: true, ...serialize(cancelled) });
+    }
     if (row.status === "sent" && row.sui_digest === body.sui_digest) {
       // Idempotent retry of the same submission.
       return NextResponse.json({ ok: true, ...serialize(row) });
     }
-    const updated = await markSent(row.id, row.status, body.sui_digest);
+    const updated = await markSent(row.id, row.status, body.sui_digest!);
     return NextResponse.json({ ok: true, ...serialize(updated) });
   } catch (e) {
     if (e instanceof OfframpStoreError) {

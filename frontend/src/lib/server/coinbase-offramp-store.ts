@@ -31,6 +31,30 @@ export type OfframpStatus =
 /** Statuses where the merchant still has an open order. */
 export const OPEN_STATUSES: OfframpStatus[] = ["created", "committed", "sent"];
 
+/**
+ * How long a `created` row stays open before it is considered abandoned.
+ *
+ * A `created` row has no Coinbase deadline — Coinbase only issues one when the
+ * merchant commits the order — so without a local TTL it can never expire. The
+ * per-owner in-flight lock would then block that merchant from ever cashing out
+ * again, which is precisely what happens when someone opens the widget and
+ * closes it.
+ *
+ * 30 minutes is well past the CDP session token's ~5-minute life, so a row this
+ * old cannot be resumed anyway.
+ */
+export const CREATED_TTL_MS = 30 * 60 * 1000;
+
+/** True when a pre-commit row has aged out and should be expired. */
+export function isStaleCreated(row: {
+  status: OfframpStatus;
+  created_at: string;
+}): boolean {
+  if (row.status !== "created") return false;
+  const created = Date.parse(row.created_at);
+  return Number.isFinite(created) && Date.now() - created > CREATED_TTL_MS;
+}
+
 /** Statuses a returning merchant can resume from. */
 export const RESUMABLE_STATUSES: OfframpStatus[] = ["created", "committed", "sent"];
 

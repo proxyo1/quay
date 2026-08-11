@@ -45,6 +45,7 @@ type Step =
 
 interface SessionResponse {
   request_id: string;
+  uen?: string;
   offramp_token: string;
   offramp_url: string;
   sell_amount_usdc_minor: string;
@@ -184,6 +185,32 @@ export function CoinbaseOfframpSection({
     [],
   );
 
+  /**
+   * Restore the UI for a merchant returning mid-flow. This recovers the ROW,
+   * not the key — if the zkLogin session is gone, the only way back is a
+   * re-login, which is what `sessionLost` routes to.
+   */
+  const rehydrate = useCallback((body: Record<string, unknown>) => {
+    const status = body.status as string;
+    const deadlineMs = (body.deadline_at_ms as number | null) ?? null;
+    if (status === "settled") {
+      setStep({ k: "settled", sgdMinor: String(body.estimated_sgd_minor ?? "0") });
+    } else if (status === "expired") {
+      setStep({ k: "expired", amountMinor: String(body.amount_usdsui_minor ?? "0") });
+    } else if (status === "refunded") {
+      setStep({
+        k: "refunded",
+        usdcMinor: String(body.sell_amount_usdc_minor ?? "0"),
+      });
+    } else if (status === "created" || status === "committed" || status === "sent") {
+      setStep({
+        k: "sessionLost",
+        requestId: String(body.request_id),
+        deadlineMs,
+      });
+    }
+  }, []);
+
   // Flag discovery is a 404 from the server, never a client-side flag read.
   useEffect(() => {
     let cancelled = false;
@@ -206,33 +233,8 @@ export function CoinbaseOfframpSection({
     return () => {
       cancelled = true;
     };
-  }, [session.address]);
+  }, [session.address, rehydrate]);
 
-  /**
-   * Restore the UI for a merchant returning mid-flow. This recovers the ROW,
-   * not the key — if the zkLogin session is gone, the only way back is a
-   * re-login, which is what `sessionLost` routes to.
-   */
-  function rehydrate(body: Record<string, unknown>) {
-    const status = body.status as string;
-    const deadlineMs = (body.deadline_at_ms as number | null) ?? null;
-    if (status === "settled") {
-      setStep({ k: "settled", sgdMinor: String(body.estimated_sgd_minor ?? "0") });
-    } else if (status === "expired") {
-      setStep({ k: "expired", amountMinor: String(body.amount_usdsui_minor ?? "0") });
-    } else if (status === "refunded") {
-      setStep({
-        k: "refunded",
-        usdcMinor: String(body.sell_amount_usdc_minor ?? "0"),
-      });
-    } else if (status === "created" || status === "committed" || status === "sent") {
-      setStep({
-        k: "sessionLost",
-        requestId: String(body.request_id),
-        deadlineMs,
-      });
-    }
-  }
 
   async function startCashOut() {
     if (!amountMinor || amountMinor <= 0n) return;
@@ -261,6 +263,58 @@ export function CoinbaseOfframpSection({
       } else {
         openWidget(plan);
       }
+    } catch (e) {
+      setStep({ k: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  /**
+   * Step 1 of 2: pull the shortfall out of Scallop, then open the widget.
+   *
+   * This has to complete BEFORE Coinbase sees an order. The send PTB spends
+   * liquid USDsui, so committing an order first and redeeming after would put
+   * an uncontrollable dependency (Scallop's shared pool cash) behind an
+   * irreversible commitment.
+   */
+  async function runRedeemThenOpen(plan: SessionResponse) {
+    const needed = BigInt(plan.redeem.realizable_underlying_minor ?? "0");
+    if (needed <= 0n) {
+      openWidget(plan);
+      return;
+    }
+    setStep({ k: "redeemSigning" });
+    try {
+      const res = await fetch("/api/sponsor/earn-move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uen: plan.uen ?? "",
+          owner: session.address,
+          direction: "to_cash",
+          amount_usdsui_minor: needed.toString(),
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setStep({ k: "error", message: body.error ?? "could not free up your funds" });
+        return;
+      }
+
+      const txBytes = base64ToBytes(body.tx.tx_bytes_b64);
+      const senderSig = await zkLoginSign(session, txBytes);
+      const sui = getSuiClient();
+      const exec = await sui.executeTransaction({
+        transaction: txBytes,
+        signatures: [senderSig, body.tx.sponsor_signature],
+        include: { effects: true },
+      });
+      const tx = exec.Transaction;
+      if (!tx?.status?.success) {
+        throw new Error(tx?.status?.error?.message ?? "the redeem failed");
+      }
+      await sui.waitForTransaction({ digest: tx.digest });
+      onDone();
+      openWidget(plan);
     } catch (e) {
       setStep({ k: "error", message: e instanceof Error ? e.message : String(e) });
     }
@@ -311,6 +365,26 @@ export function CoinbaseOfframpSection({
       clearInterval(id);
     };
   }, [step, authHeaders]);
+
+  /**
+   * Abandon an open order. Releases the per-owner in-flight lock straight away
+   * rather than making the merchant wait out the 30-minute TTL — without this,
+   * closing the Coinbase window left them unable to start another cash-out.
+   */
+  async function cancelCashOut(plan: SessionResponse) {
+    try {
+      await fetch("/api/offramp/coinbase/status", {
+        method: "POST",
+        headers: authHeaders(plan.offramp_token),
+        body: JSON.stringify({ request_id: plan.request_id, action: "cancel" }),
+      });
+    } catch {
+      /* the TTL will collect it regardless */
+    }
+    setAmount("");
+    setStep({ k: "form" });
+    onDone();
+  }
 
   async function submitSend(plan: SessionResponse, ready: PrepareReady) {
     setStep({ k: "sendSigning" });
@@ -419,7 +493,7 @@ export function CoinbaseOfframpSection({
           )}
           <button
             type="button"
-            onClick={() => openWidget(step.plan)}
+            onClick={() => runRedeemThenOpen(step.plan)}
             className="glass-btn-primary w-full min-h-[44px]"
           >
             Free up and continue
@@ -459,6 +533,13 @@ export function CoinbaseOfframpSection({
           >
             Reopen Coinbase
           </a>
+          <button
+            type="button"
+            onClick={() => cancelCashOut(step.session)}
+            className="glass-chip w-full min-h-[44px]"
+          >
+            Cancel this cash-out
+          </button>
           <p className="text-[10px] text-[var(--muted)] border-t border-white/5 pt-2 leading-relaxed">
             Coinbase pays SGD into your own Coinbase account. Moving it to your
             bank is a separate step you do there.
