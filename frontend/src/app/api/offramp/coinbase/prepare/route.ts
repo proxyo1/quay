@@ -26,6 +26,7 @@ import { usdsuiSpendableMinor } from "@/lib/quay/transfer";
 import { USDSUI } from "@/lib/quay/scallop";
 import {
   SwapBudgetExceededError,
+  USDC_MAINNET,
   appendUsdcSwapToPtb,
   quoteUsdcSwap,
 } from "@/lib/quay/swap-to-usdc";
@@ -42,15 +43,30 @@ export const runtime = "nodejs";
  * this route confirms only that the address belongs to a live order that is
  * this merchant's and current. See the note above `selectDepositTransaction`.
  *
- * Re-quotes rather than reusing the session's quote: minutes may have passed
- * inside the widget, and the swap is exact-out, so a thinner route now needs
- * more USDsui. The max-in bound is what stops that from silently spending more
- * than the merchant freed up.
+ * **Two transactions, not one.** Coinbase matches a deposit by validating
+ * `from_address`, `to_address`, `amount`, `network` and `asset` against the
+ * chain, and a single swap-and-send PTB fails the first of those: the USDC is
+ * produced by the Cetus swap and transferred straight to Coinbase, so the
+ * merchant's only balance change is USDsui leaving. No USDC ever moves *from*
+ * `from_address`, so there is no transfer for Coinbase to match and the deposit
+ * lands as an ordinary credit with no sale behind it. That cost two live
+ * cash-outs before the matching rule was found in the integration guide.
  *
- * `from_address` note: the returned PTB has `sender = merchant` and
- * `gasOwner = sponsor`. Whether Coinbase validates the transaction sender or
- * the gas payer is unverified — it is listed as an open risk on the plan, and
- * a capped live run is what settles it.
+ * So the swap lands the USDC in the merchant's own address first, and a second
+ * plain transfer sends it on. One PTB doing both would not help — Sui reports
+ * *net* balance changes, so USDC arriving and leaving in one transaction nets
+ * to zero and still shows no transfer.
+ *
+ * Which stage this call builds is derived from the merchant's live USDC
+ * balance rather than stored, so the flow resumes correctly if the tab dies
+ * between the two signatures. A merchant already holding enough USDC — stranded
+ * by an earlier failure — skips straight to the send and spends that instead,
+ * which is the right outcome.
+ *
+ * The swap stage re-quotes rather than reusing the session's quote: minutes may
+ * have passed inside the widget, and the swap is exact-out, so a thinner route
+ * now needs more USDsui. The max-in bound is what stops that from silently
+ * spending more than the merchant freed up.
  */
 
 const LOW_BALANCE_FLOOR_MIST = 40_000_000n;
@@ -204,6 +220,54 @@ export async function POST(req: Request) {
     );
   }
 
+  // Stage selection. Enough USDC in hand means the swap already happened (or
+  // the merchant was left holding some by an earlier failure), so this call
+  // builds the transfer Coinbase can actually match.
+  const usdcBalance = BigInt(
+    (await sui.getBalance({ owner: claims.owner, coinType: USDC_MAINNET })).balance
+      .balance,
+  );
+
+  if (usdcBalance >= sellAmountUsdc) {
+    const sendPtb = new Transaction();
+    sendPtb.setSender(claims.owner);
+    sendPtb.setGasOwner(sponsorAddr);
+    sendPtb.setGasBudget(20_000_000n);
+
+    // Exactly `sell_amount`, sourced from coin objects and/or the address
+    // balance. An inexact amount fails Coinbase's match as surely as a wrong
+    // address does.
+    const usdcCoin = sendPtb.add(
+      coinWithBalance({ type: USDC_MAINNET, balance: sellAmountUsdc }),
+    );
+    sendPtb.transferObjects([usdcCoin], sendPtb.pure.address(tx.toAddress));
+
+    let sendBytes: Uint8Array;
+    try {
+      sendBytes = await sendPtb.build({ client: sui });
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error: `could not build the send: ${e instanceof Error ? e.message : String(e)}`,
+        },
+        { status: 500 },
+      );
+    }
+    const sendSig = await sponsor.signTransaction(sendBytes);
+
+    return NextResponse.json({
+      ready: true,
+      stage: "send",
+      request_id: row.id,
+      tx_bytes_b64: Buffer.from(sendBytes).toString("base64"),
+      sponsor_signature: sendSig.signature,
+      sponsor_address: sponsorAddr,
+      to_address: tx.toAddress,
+      sell_amount_usdc_minor: sellAmountUsdc.toString(),
+      deadline_at_ms: tx.deadlineMs,
+    });
+  }
+
   // The merchant's spendable USDsui, across coin objects AND the address
   // balance. By this point any Scallop redeem has been signed and settled, so
   // this is the real budget.
@@ -271,9 +335,13 @@ export async function POST(req: Request) {
     );
   }
 
+  // To the MERCHANT, not to Coinbase. This is the whole point of the split:
+  // the USDC has to be owned by `from_address` before it moves, or the transfer
+  // Coinbase is watching for never exists on chain.
+  //
   // Exact-out swap: Cetus returns any unspent input to the configured signer
   // (the merchant), so no explicit leftover transfer is needed.
-  ptb.transferObjects([usdcCoin], ptb.pure.address(tx.toAddress));
+  ptb.transferObjects([usdcCoin], ptb.pure.address(claims.owner));
 
   let txBytes: Uint8Array;
   try {
@@ -289,6 +357,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ready: true,
+    stage: "swap",
     request_id: row.id,
     tx_bytes_b64: Buffer.from(txBytes).toString("base64"),
     sponsor_signature: sponsorSig.signature,

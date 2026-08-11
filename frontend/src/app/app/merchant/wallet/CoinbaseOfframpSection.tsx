@@ -82,6 +82,13 @@ interface SessionResponse {
 
 interface PrepareReady {
   ready: true;
+  /**
+   * `swap` lands USDC in the merchant's own address; `send` moves it to
+   * Coinbase. Two transactions because Coinbase matches a deposit on
+   * `from_address`, and a combined swap-and-send never moves USDC *from* the
+   * merchant — see the prepare route.
+   */
+  stage?: "swap" | "send";
   request_id: string;
   tx_bytes_b64: string;
   sponsor_signature: string;
@@ -451,25 +458,69 @@ export function CoinbaseOfframpSection({
     onDone();
   }
 
+  /** Sign, submit and confirm one stage. Returns its digest. */
+  async function runStage(plan: SessionResponse, ready: PrepareReady): Promise<string> {
+    const txBytes = base64ToBytes(ready.tx_bytes_b64);
+    const senderSig = await zkLoginSign(session, txBytes);
+    const sui = getSuiClient();
+    const res = await sui.executeTransaction({
+      transaction: txBytes,
+      // Sender first, then the sponsor.
+      signatures: [senderSig, ready.sponsor_signature],
+      include: { effects: true },
+    });
+    const tx = res.Transaction;
+    if (!tx?.status?.success) {
+      throw new Error(tx?.status?.error?.message ?? "the transaction failed");
+    }
+    await sui.waitForTransaction({ digest: tx.digest });
+    return tx.digest;
+  }
+
+  /**
+   * Run the cash-out to completion: swap, then send.
+   *
+   * Both signatures are zkLogin, which signs from the in-browser key with no
+   * prompt, so two transactions still cost the merchant exactly one tap.
+   *
+   * Only the send digest is recorded — it is the transfer Coinbase matches and
+   * the row's idempotency key. Re-entry is safe: `prepare` picks the stage from
+   * the merchant's live USDC balance, so a tab that dies between the two comes
+   * back straight to the send.
+   */
   async function submitSend(plan: SessionResponse, ready: PrepareReady) {
     setStep({ k: "sendSigning" });
     try {
-      const txBytes = base64ToBytes(ready.tx_bytes_b64);
-      const senderSig = await zkLoginSign(session, txBytes);
-      setStep({ k: "sending" });
+      let current = ready;
 
-      const sui = getSuiClient();
-      const res = await sui.executeTransaction({
-        transaction: txBytes,
-        // Sender first, then the sponsor.
-        signatures: [senderSig, ready.sponsor_signature],
-        include: { effects: true },
-      });
-      const tx = res.Transaction;
-      if (!tx?.status?.success) {
-        throw new Error(tx?.status?.error?.message ?? "the send failed");
+      if (current.stage === "swap") {
+        await runStage(plan, current);
+        setStep({ k: "sending" });
+
+        const res = await fetch("/api/offramp/coinbase/prepare", {
+          method: "POST",
+          headers: authHeaders(plan.offramp_token),
+          body: JSON.stringify({
+            request_id: plan.request_id,
+            owner: session.address,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok || body?.ready !== true) {
+          throw new Error(
+            body?.error ??
+              "the swap landed but the send could not be prepared — your USDC is " +
+                "in your wallet and reopening this page will finish the cash-out",
+          );
+        }
+        current = body as PrepareReady;
+        if (current.stage === "swap") {
+          throw new Error("the swap did not produce enough USDC to send");
+        }
       }
-      await sui.waitForTransaction({ digest: tx.digest });
+
+      setStep({ k: "sending" });
+      const digest = await runStage(plan, current);
 
       await fetch("/api/offramp/coinbase/status", {
         method: "POST",
@@ -477,7 +528,7 @@ export function CoinbaseOfframpSection({
         body: JSON.stringify({
           request_id: plan.request_id,
           owner: session.address,
-          sui_digest: tx.digest,
+          sui_digest: digest,
         }),
       });
 
