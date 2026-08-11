@@ -8,10 +8,6 @@
     {
       "path": "/api/cron/scallop-cost-basis-indexer",
       "schedule": "0 5 * * *"
-    },
-    {
-      "path": "/api/cron/coinbase-reconcile",
-      "schedule": "0 * * * *"
     }
   ]
 }

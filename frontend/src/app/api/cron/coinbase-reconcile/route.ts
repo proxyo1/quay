@@ -36,6 +36,19 @@ export const runtime = "nodejs";
  * Chosen over a CDP webhook deliberately — no signature-verification code, no
  * extra CLI dependency, and it reuses the cron pattern already in the repo
  * (scallop-monitor, scallop-cost-basis-indexer).
+ *
+ * **Not currently on a Vercel schedule.** The Hobby plan allows two cron jobs
+ * at daily frequency, and the two Scallop crons already occupy both slots, so
+ * adding a third here fails the deployment outright. This endpoint is
+ * therefore triggered manually or by an external scheduler until the account
+ * moves to a paid tier — see TODOS.
+ *
+ * That is tolerable because it is a backstop rather than the primary path:
+ * `/api/offramp/coinbase/status` performs the same reconciliation on every
+ * poll, so any merchant who returns to the wallet settles their own row. This
+ * job exists for the merchant who sends and then never comes back — where the
+ * funds have already reached Coinbase and the sale completes on their side
+ * regardless, leaving only the local row stale.
  */
 
 const FEATURE_FLAG_NAME = "coinbase_offramp_enabled";

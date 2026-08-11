@@ -77,7 +77,13 @@ Generated 2026-05-12 from office-hours design session + hackathon scoping.
   - [ ] **`from_address` semantics unverified** — does Coinbase validate the transaction *sender*
     or the *gas payer*? Quay's sponsored PTB has `sender = merchant`, `gasOwner = sponsor`, so the
     two differ. The capped live run settles this.
-  - [ ] The hourly reconcile cron needs a paid Vercel tier (Hobby is daily-only).
+  - [ ] **Reconcile cron has no schedule.** Hobby allows 2 cron jobs at daily frequency and the two
+    Scallop crons fill both slots, so a third entry fails the deploy. `/api/cron/coinbase-reconcile`
+    exists and works but must be triggered externally (GitHub Action on a schedule, cron-job.org, or
+    manually) until the account is on Pro. Set `CRON_SECRET` first if exposing it to an external
+    caller. Not urgent: `/api/offramp/coinbase/status` reconciles on every poll, so this only covers
+    the merchant who sends and never returns — where the funds are already with Coinbase and only the
+    local row is stale.
   - [ ] Swap-back path for stranded USDC. After a post-send cancellation the merchant holds USDC,
     which is not a receive token; `StrandedUsdcCard` surfaces the balance but there is no one-tap
     conversion, so recovery is currently a support action.
