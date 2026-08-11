@@ -14,6 +14,7 @@ import {
   buildOfframpUrl,
   createSellQuote,
   createSessionToken,
+  getCashoutLimits,
   isCoinbaseConfigured,
 } from "@/lib/server/coinbase-offramp";
 import {
@@ -120,6 +121,33 @@ export async function POST(req: Request) {
   }
   if (amountMinor <= 0n) {
     return NextResponse.json({ error: "amount must be > 0" }, { status: 400 });
+  }
+
+  // Cheap pre-check BEFORE the rate limit is consumed.
+  //
+  // Coinbase enforces its minimum in SGD, which we cannot know until the quote
+  // comes back — by which point a daily slot is already spent. A merchant
+  // fumbling the amount two or three times would lock themselves out for a
+  // day over something we could see coming. USDsui and USDC are both 1:1 USD,
+  // so a deliberately conservative floor rate turns the SGD minimum into a
+  // USDsui one. Advisory only: it errs toward letting a marginal amount
+  // through, and the Coinbase quote remains the authority.
+  const limits = await getCashoutLimits({});
+  if (limits) {
+    const CONSERVATIVE_SGD_PER_USD = 140n; // 1.40, hundredths
+    const minUsdsuiMinor = (limits.minMinor * 1_000_000n * 100n) / (CONSERVATIVE_SGD_PER_USD * 100n);
+    if (amountMinor < minUsdsuiMinor) {
+      return NextResponse.json(
+        {
+          error:
+            `Coinbase's minimum cash-out is S$${formatSgdMinor(limits.minMinor)}. ` +
+            `Try a larger amount.`,
+          min_sgd_minor: limits.minMinor.toString(),
+          max_sgd_minor: limits.maxMinor.toString(),
+        },
+        { status: 400 },
+      );
+    }
   }
 
   const usage = await checkAndIncrementSponsorUsage(
@@ -249,8 +277,32 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     if (e instanceof CoinbaseOfframpError) {
+      // Coinbase puts the actionable reason in the body, not the status line.
+      // Surfacing only `e.message` produced "Coinbase POST /sell/quote -> 400",
+      // which tells an operator nothing and a merchant less.
+      const detail =
+        (e.body as { message?: string } | undefined)?.message ?? e.message;
+      console.error(`[coinbase-offramp] sell/quote failed: ${detail}`);
+
+      // A rejected *amount* is the merchant's problem to fix, not an outage,
+      // so it is a 400 with Coinbase's own published limits rather than a 502.
+      if (e.status === 400) {
+        const limits = await getCashoutLimits({});
+        return NextResponse.json(
+          {
+            error: limits
+              ? `Coinbase pays out between S$${formatSgdMinor(limits.minMinor)} and ` +
+                `S$${formatSgdMinor(limits.maxMinor)} per cash-out. Try a larger amount.`
+              : "Coinbase rejected this amount",
+            detail,
+            min_sgd_minor: limits?.minMinor.toString() ?? null,
+            max_sgd_minor: limits?.maxMinor.toString() ?? null,
+          },
+          { status: 400 },
+        );
+      }
       return NextResponse.json(
-        { error: "Coinbase is unavailable right now", detail: e.message },
+        { error: "Coinbase is unavailable right now", detail },
         { status: 502 },
       );
     }

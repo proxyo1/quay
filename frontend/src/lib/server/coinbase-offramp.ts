@@ -209,6 +209,64 @@ export async function getSellOptions(country: string): Promise<SellOptions> {
   return cdpRequest("GET", "/onramp/v1/sell/options", { query: { country } });
 }
 
+export interface CashoutLimits {
+  /** Minimum payout, in fiat minor units (SGD cents). */
+  minMinor: bigint;
+  /** Maximum payout, in fiat minor units. */
+  maxMinor: bigint;
+}
+
+/**
+ * Published payout limits for a payment method, e.g. SGD/FIAT_WALLET is
+ * min S$3.00 / max S$1,281,100.
+ *
+ * Worth fetching rather than hardcoding: a sale under the minimum is rejected
+ * by `/sell/quote` with a generic `ERROR_CODE_INVALID_REQUEST`, which is far
+ * too late and far too vague to show a merchant. These are Coinbase's own
+ * numbers, so quoting them back is exact.
+ *
+ * Cached for an hour — they are effectively static, and this sits on the
+ * cash-out path.
+ */
+const limitsCache = new Map<string, { at: number; value: CashoutLimits | null }>();
+const LIMITS_TTL_MS = 60 * 60 * 1000;
+
+export async function getCashoutLimits(input: {
+  country?: string;
+  currency?: string;
+  paymentMethod?: string;
+}): Promise<CashoutLimits | null> {
+  const country = input.country ?? "SG";
+  const currency = input.currency ?? "SGD";
+  const method = input.paymentMethod ?? "FIAT_WALLET";
+  const key = `${country}:${currency}:${method}`;
+
+  const hit = limitsCache.get(key);
+  if (hit && Date.now() - hit.at < LIMITS_TTL_MS) return hit.value;
+
+  let value: CashoutLimits | null = null;
+  try {
+    const opts = await getSellOptions(country);
+    const cur = (opts.cashout_currencies ?? []).find((c) => c.id === currency) as
+      | { limits?: Array<{ id?: string; min?: string; max?: string }> }
+      | undefined;
+    const lim = cur?.limits?.find((l) => l.id === method);
+    if (lim?.min) {
+      value = {
+        minMinor: decimalToMinor(lim.min, 2),
+        maxMinor: lim.max ? decimalToMinor(lim.max, 2) : 0n,
+      };
+    }
+  } catch {
+    // Limits are advisory here — a failure must not block a cash-out that
+    // would otherwise succeed. The quote call remains the real gate.
+    value = null;
+  }
+
+  limitsCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
 /**
  * Mint a session token for a merchant's Sui address.
  *
