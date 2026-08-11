@@ -1,4 +1,4 @@
-import { Transaction } from "@mysten/sui/transactions";
+import { Transaction, coinWithBalance } from "@mysten/sui/transactions";
 
 import { USDSUI } from "./scallop";
 import type { SuiClient } from "@/lib/sui-client";
@@ -51,11 +51,35 @@ export interface BuildSponsoredUsdsuiTransferInput {
 }
 
 /**
- * Sum the merchant's liquid USDsui and return all coin object ids.
+ * Total spendable USDsui, counting BOTH funding shapes.
  *
- * Exported because the Coinbase cash-out flow needs the same gather step
- * before its swap leg; it was private when withdraw and cash-out were the
- * only callers.
+ * Sui holds a coin balance in two places: discrete `Coin<T>` objects, and the
+ * protocol-level *address balance* (what `0x2::coin::send_funds` credits — the
+ * same gasless mechanism `buildGaslessUsdsuiSendAll` below uses). `getBalance`
+ * reports `balance` as the sum, with `coinBalance` and `addressBalance` broken
+ * out.
+ *
+ * Enumerating coin objects therefore under-reports, sometimes drastically: a
+ * merchant funded by a gasless transfer had 2.94 USDsui of which only 0.058
+ * sat in coin objects, so a coin-only check told them they had insufficient
+ * funds while the wallet displayed the full amount.
+ */
+export async function usdsuiSpendableMinor(
+  sui: SuiClient,
+  owner: string,
+): Promise<bigint> {
+  const res = await sui.getBalance({ owner, coinType: USDSUI.coinType });
+  return BigInt(res.balance.balance);
+}
+
+/**
+ * Sum the merchant's USDsui held as discrete coin objects, with their ids.
+ *
+ * NOTE: this deliberately excludes the address balance — it exists for
+ * `buildGaslessUsdsuiSendAll`, which emits one `send_funds` per coin object.
+ * For "how much can this merchant spend" use `usdsuiSpendableMinor`, and to
+ * source a spendable coin inside a PTB use `coinWithBalance`, which draws from
+ * both.
  */
 export async function collectUsdsuiCoins(
   sui: SuiClient,
@@ -127,12 +151,9 @@ export async function buildSponsoredUsdsuiTransfer(
 ): Promise<Transaction> {
   if (input.amountMinor <= 0n) throw new Error("amountMinor must be > 0");
 
-  const { totalMinor, coinObjectIds } = await collectUsdsuiCoins(
-    input.sui,
-    input.owner,
-  );
-  if (totalMinor < input.amountMinor) {
-    throw new InsufficientUsdsuiError(totalMinor, input.amountMinor);
+  const spendable = await usdsuiSpendableMinor(input.sui, input.owner);
+  if (spendable < input.amountMinor) {
+    throw new InsufficientUsdsuiError(spendable, input.amountMinor);
   }
 
   const tx = new Transaction();
@@ -140,14 +161,12 @@ export async function buildSponsoredUsdsuiTransfer(
   tx.setGasOwner(input.sponsorAddress);
   tx.setGasBudget(input.gasBudgetMist ?? 20_000_000n);
 
-  const primary = tx.object(coinObjectIds[0]);
-  if (coinObjectIds.length > 1) {
-    tx.mergeCoins(
-      primary,
-      coinObjectIds.slice(1).map((id) => tx.object(id)),
-    );
-  }
-  const [out] = tx.splitCoins(primary, [tx.pure.u64(input.amountMinor)]);
+  // `coinWithBalance` sources the exact amount from whichever shape holds it —
+  // merging coin objects and/or withdrawing from the address balance — which
+  // the previous manual merge-and-split could not do.
+  const out = tx.add(
+    coinWithBalance({ type: USDSUI.coinType, balance: input.amountMinor }),
+  );
   tx.transferObjects([out], tx.pure.address(input.destination));
 
   return tx;

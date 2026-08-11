@@ -1,6 +1,6 @@
 import "server-only";
 
-import { Transaction } from "@mysten/sui/transactions";
+import { Transaction, coinWithBalance } from "@mysten/sui/transactions";
 import { NextResponse } from "next/server";
 
 import { getFeatureFlag } from "@/lib/server/feature-flags";
@@ -21,7 +21,8 @@ import {
 import { loadSponsorKeypair } from "@/lib/server/sponsor";
 import { AggregatorRouteError } from "@/lib/dex/aggregator";
 import { getDexClients } from "@/lib/dex/client";
-import { collectUsdsuiCoins } from "@/lib/quay/transfer";
+import { usdsuiSpendableMinor } from "@/lib/quay/transfer";
+import { USDSUI } from "@/lib/quay/scallop";
 import {
   SwapBudgetExceededError,
   appendUsdcSwapToPtb,
@@ -189,10 +190,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // Gather the merchant's liquid USDsui. By this point any Scallop redeem has
-  // already been signed and settled, so this is the real budget.
-  const { totalMinor, coinObjectIds } = await collectUsdsuiCoins(sui, claims.owner);
-  if (coinObjectIds.length === 0 || totalMinor === 0n) {
+  // The merchant's spendable USDsui, across coin objects AND the address
+  // balance. By this point any Scallop redeem has been signed and settled, so
+  // this is the real budget.
+  const totalMinor = await usdsuiSpendableMinor(sui, claims.owner);
+  if (totalMinor === 0n) {
     return NextResponse.json(
       { error: "no liquid USDsui to send — free up funds from earning first" },
       { status: 400 },
@@ -228,19 +230,16 @@ export async function POST(req: Request) {
     throw e;
   }
 
-  // Build: merge → split the bounded input → swap exact-out → send USDC.
+  // Build: source the bounded input → swap exact-out → send USDC.
   const ptb = new Transaction();
   ptb.setSender(claims.owner);
   ptb.setGasOwner(sponsorAddr);
   ptb.setGasBudget(50_000_000n);
 
-  const primary = ptb.object(coinObjectIds[0]);
-  if (coinObjectIds.length > 1) {
-    ptb.mergeCoins(primary, coinObjectIds.slice(1).map((id) => ptb.object(id)));
-  }
-  const [swapInput] = ptb.splitCoins(primary, [
-    ptb.pure.u64(swapQuote.maxAmountIn),
-  ]);
+  // Sources from coin objects and/or the address balance, whichever holds it.
+  const swapInput = ptb.add(
+    coinWithBalance({ type: USDSUI.coinType, balance: swapQuote.maxAmountIn }),
+  );
 
   let usdcCoin;
   try {
@@ -258,9 +257,9 @@ export async function POST(req: Request) {
     );
   }
 
+  // Exact-out swap: Cetus returns any unspent input to the configured signer
+  // (the merchant), so no explicit leftover transfer is needed.
   ptb.transferObjects([usdcCoin], ptb.pure.address(tx.toAddress));
-  // Any unspent USDsui from the bounded split returns to the merchant.
-  ptb.transferObjects([primary], ptb.pure.address(claims.owner));
 
   let txBytes: Uint8Array;
   try {

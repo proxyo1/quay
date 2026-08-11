@@ -26,7 +26,7 @@ import { checkAndIncrementSponsorUsage } from "@/lib/server/sponsor";
 import { coinbaseOfframpCapMinor, formatSgdMinor } from "@/lib/money";
 import { readBalanceSheet, USDSUI } from "@/lib/quay/scallop";
 import { planRedeemFromBalanceSheet } from "@/lib/quay/scallop-redeem";
-import { collectUsdsuiCoins } from "@/lib/quay/transfer";
+import { usdsuiSpendableMinor } from "@/lib/quay/transfer";
 import { SwapBudgetExceededError, quoteUsdcSwap } from "@/lib/quay/swap-to-usdc";
 import { AggregatorRouteError } from "@/lib/dex/aggregator";
 import { getDexClients } from "@/lib/dex/client";
@@ -186,13 +186,13 @@ export async function POST(req: Request) {
 
   // What can this merchant actually realize right now: liquid USDsui plus
   // whatever Scallop's pool cash will let them redeem.
-  let liquidMinor = 0n;
-  try {
-    const collected = await collectUsdsuiCoins(sui, owner);
-    liquidMinor = collected.totalMinor;
-  } catch {
-    liquidMinor = 0n;
-  }
+  //
+  // Counts BOTH funding shapes. Enumerating coin objects alone under-reports —
+  // a merchant funded by a gasless `send_funds` transfer holds the balance at
+  // the address level, not as coin objects, and was told they had insufficient
+  // funds while the wallet showed the full amount. Errors are no longer
+  // swallowed to zero either; that turned an outage into a wrong answer.
+  const liquidMinor = await usdsuiSpendableMinor(sui, owner);
 
   const balanceSheet = await readBalanceSheet(sui, USDSUI.coinType);
   let realizableFromYield = 0n;
