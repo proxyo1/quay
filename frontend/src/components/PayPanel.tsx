@@ -26,6 +26,11 @@ import {
   deriveUenHash,
   encodeQuoteMetadata,
 } from "@/lib/quay";
+import {
+  tokenDecimals,
+  tokenLabel,
+  tokenLabelIfKnown,
+} from "@/lib/quay/token-meta";
 import { getDexClients } from "@/lib/dex/client";
 import { AggregatorRouteError, quoteRoute } from "@/lib/dex/aggregator";
 import { formatBalance, useUserBalances, type UserBalance } from "@/lib/dex/balances";
@@ -41,22 +46,6 @@ type PayState =
   | { kind: "success"; digest: string; blobId?: string; routedVia: "direct" | "aggregator" }
   | { kind: "error"; message: string };
 
-/**
- * Display labels + decimals for the merchant's RECEIVE token. Only the curated
- * settlement set needs to live here (SUI + USDC for V0). The payer side uses
- * dynamic metadata fetched per-token via `useUserBalances`.
- */
-const RECEIVE_DECIMALS: Record<SupportedReceiveToken, number> = {
-  [COIN_TYPES.SUI]: 9,
-  [COIN_TYPES.USDC_TESTNET]: 6,
-  [COIN_TYPES.USDSUI]: 6,
-};
-
-const RECEIVE_LABEL: Record<SupportedReceiveToken, string> = {
-  [COIN_TYPES.SUI]: "SUI",
-  [COIN_TYPES.USDC_TESTNET]: "USDC",
-  [COIN_TYPES.USDSUI]: "USDsui",
-};
 
 export function PayPanel({
   merchantAddress,
@@ -113,12 +102,12 @@ export function PayPanel({
   }, [balancesQ.data, merchantReceiveType]);
 
   const payerBalance = balances.find((b) => b.coinType === payerCoinType);
-  // Prefer our curated `RECEIVE_LABEL` over the raw on-chain `CoinMetadata.symbol`.
+  // Prefer our curated label over the raw on-chain `CoinMetadata.symbol`.
   // Bridge publishes USDsui's symbol as "USDSUI" all-caps but the brand reads
   // "USDsui" — so for any token in our settlement set, force the nice label.
   // For tokens we don't curate (HAEDAL, WAL, …), fall through to the chain symbol.
   const payerLabel =
-    RECEIVE_LABEL[payerCoinType as SupportedReceiveToken] ??
+    tokenLabel(payerCoinType) ??
     payerBalance?.symbol ??
     shortType(payerCoinType);
 
@@ -393,7 +382,7 @@ export function PayPanel({
         </p>
         <p className="text-[11px] text-[var(--muted)] mt-1.5">
           Merchant receives in{" "}
-          <span className="text-white font-medium">{RECEIVE_LABEL[merchantReceiveType]}</span>
+          <span className="text-white font-medium">{tokenLabel(merchantReceiveType)}</span>
         </p>
       </header>
 
@@ -571,7 +560,7 @@ function SourceTokenPicker({
               >
                 <span className="flex items-center gap-2 min-w-0">
                   <span className="text-sm font-medium">
-                    {RECEIVE_LABEL[b.coinType as SupportedReceiveToken] ?? b.symbol}
+                    {tokenLabelIfKnown(b.coinType) ?? b.symbol}
                   </span>
                   {direct && (
                     <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--success)]">
@@ -630,7 +619,7 @@ function PreSignReceipt({
       <div className="relative z-10 flex items-center justify-between">
         <span className="text-[var(--muted)]">Merchant receives</span>
         <span className="font-medium tabular-nums text-white">
-          {outFormatted} {RECEIVE_LABEL[merchantReceiveType]}
+          {outFormatted} {tokenLabel(merchantReceiveType)}
         </span>
       </div>
       <div className="relative z-10 flex items-center justify-between text-[var(--muted-soft)]">
@@ -865,7 +854,7 @@ function parseSgdInput(s: string): number {
 }
 
 function formatTokenAmount(amount: bigint, token: SupportedReceiveToken): string {
-  const decimals = RECEIVE_DECIMALS[token];
+  const decimals = tokenDecimals(token);
   const divisor = 10n ** BigInt(decimals);
   const whole = amount / divisor;
   const fraction = amount % divisor;

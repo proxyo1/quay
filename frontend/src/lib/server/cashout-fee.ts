@@ -12,7 +12,17 @@
  */
 
 export const QUAY_FEE_BPS = 25; // 0.25%
-export const USDSUI_DECIMALS = 6;
+
+// Generic money helpers moved to lib/money.ts so client components and the
+// Coinbase rail can use them without depending on this file, which goes away
+// with the Wise demo. Re-exported here for the existing Wise call sites.
+export {
+  USDSUI_DECIMALS,
+  formatSgdMinor,
+  cashoutCapMinor,
+  DEFAULT_CASHOUT_MAX_SGD_MINOR,
+} from "@/lib/money";
+import { USDSUI_DECIMALS } from "@/lib/money";
 
 /**
  * Max age we accept for the Pyth USD/SGD rate, in seconds.
@@ -26,25 +36,7 @@ export const USDSUI_DECIMALS = 6;
  */
 export const FX_RATE_MAX_AGE_SECONDS = 8 * 24 * 60 * 60;
 
-/**
- * Per-cash-out hard cap on the net SGD payout (cents). Safety rail for the
- * live (real-money) path: a fat-fingered amount or a bug can never move more
- * than this in one transaction. Default S$50; override with the
- * CASHOUT_MAX_SGD_MINOR env var (server-only — clients never enforce it).
- */
-export const DEFAULT_CASHOUT_MAX_SGD_MINOR = 5000n; // S$50.00
 
-/** Resolve the per-cash-out SGD cap from env, falling back to the default. */
-export function cashoutCapMinor(): bigint {
-  const raw = process.env.CASHOUT_MAX_SGD_MINOR;
-  if (!raw) return DEFAULT_CASHOUT_MAX_SGD_MINOR;
-  try {
-    const v = BigInt(raw);
-    return v > 0n ? v : DEFAULT_CASHOUT_MAX_SGD_MINOR;
-  } catch {
-    return DEFAULT_CASHOUT_MAX_SGD_MINOR;
-  }
-}
 
 export interface CashoutQuote {
   amountUsdsuiMinor: bigint;
@@ -84,11 +76,3 @@ export function computeCashoutQuote(
   return { amountUsdsuiMinor, rateSgdPerUsd, feeBps, grossSgdMinor, feeSgdMinor, netSgdMinor };
 }
 
-/** Format SGD cents as a display string, e.g. 13416n -> "134.16". */
-export function formatSgdMinor(minor: bigint): string {
-  const neg = minor < 0n;
-  const abs = neg ? -minor : minor;
-  const dollars = abs / 100n;
-  const cents = abs % 100n;
-  return `${neg ? "-" : ""}${dollars}.${cents.toString().padStart(2, "0")}`;
-}

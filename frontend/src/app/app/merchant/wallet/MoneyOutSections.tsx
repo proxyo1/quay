@@ -4,7 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
-import { formatSgdMinor } from "@/lib/server/cashout-fee";
+import {
+  formatSgdMinor,
+  formatUsdsuiExact,
+  parseUsdsuiToMinor,
+} from "@/lib/money";
 import { buildGaslessUsdsuiSendAll } from "@/lib/quay/transfer";
 import { USDSUI } from "@/lib/quay/scallop";
 import { txUrl } from "@/lib/sui-config";
@@ -40,25 +44,7 @@ function formatUsdsui(minor: bigint): string {
   return `${dollars}.${frac.toString().padStart(USDSUI.decimals, "0").slice(0, 2)}`;
 }
 
-/** Full-precision (6dp) USDsui string — round-trips through parseUsdsuiToMinor. */
-function formatUsdsuiExact(minor: bigint): string {
-  const dollars = minor / BigInt(USDSUI_UNIT);
-  const frac = minor % BigInt(USDSUI_UNIT);
-  return `${dollars}.${frac.toString().padStart(USDSUI.decimals, "0")}`;
-}
 
-/** Parse a decimal USDsui string into microunits, or null if invalid. */
-function parseUsdsuiToMinor(s: string): bigint | null {
-  const t = s.trim();
-  if (!/^\d+(\.\d{1,6})?$/.test(t)) return null;
-  const [whole, frac = ""] = t.split(".");
-  const padded = (frac + "000000").slice(0, 6);
-  try {
-    return BigInt(whole) * BigInt(USDSUI_UNIT) + BigInt(padded);
-  } catch {
-    return null;
-  }
-}
 
 interface Balances {
   liquidMinor: bigint;
