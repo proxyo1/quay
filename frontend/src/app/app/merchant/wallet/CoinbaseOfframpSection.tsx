@@ -54,6 +54,7 @@ type Step =
   | { k: "waitingCoinbase"; session: SessionResponse; ready: PrepareReady | null }
   | { k: "sendSigning" }
   | { k: "sending" }
+  | { k: "awaitingSettlement"; requestId: string; usdcMinor: string }
   | { k: "settled"; sgdMinor: string; currency: string }
   | { k: "expired"; amountMinor: string }
   | { k: "unmatched"; usdcMinor: string }
@@ -244,7 +245,17 @@ export function CoinbaseOfframpSection({
         k: "unmatched",
         usdcMinor: String(body.sell_amount_usdc_minor ?? "0"),
       });
-    } else if (status === "created" || status === "committed" || status === "sent") {
+    } else if (status === "sent") {
+      // Delivered and waiting on Coinbase — NOT resumable through `prepare`,
+      // which only accepts created/committed. Routing this to the widget-wait
+      // state polled prepare, got a 409, and showed the merchant a red error
+      // for a cash-out that was progressing normally.
+      setStep({
+        k: "awaitingSettlement",
+        requestId: String(body.request_id),
+        usdcMinor: String(body.sell_amount_usdc_minor ?? "0"),
+      });
+    } else if (status === "created" || status === "committed") {
       // Resume, do NOT ask the merchant to sign in again.
       //
       // This component only renders when a valid zkLogin session exists, so an
@@ -393,6 +404,40 @@ export function CoinbaseOfframpSection({
     setStep({ k: "waitingCoinbase", session: plan, ready: null });
   }
 
+  // Poll while Coinbase completes the sale. Hits /status, not /prepare —
+  // /status reconciles the row against Coinbase on every call, so this both
+  // watches and drives the transition.
+  useEffect(() => {
+    if (step.k !== "awaitingSettlement") return;
+    const { requestId } = step;
+    let cancelled = false;
+
+    const tick = async () => {
+      try {
+        const res = await fetch(
+          `/api/offramp/coinbase/status?owner=${session.address}&request_id=${requestId}`,
+        );
+        if (cancelled || !res.ok) return;
+        const body = await res.json();
+        if (cancelled || !body.found) return;
+        if (body.status === "settled" || body.status === "unmatched") {
+          rehydrate(body);
+        }
+      } catch {
+        /* transient — the next tick retries */
+      }
+    };
+
+    void tick();
+    // Coinbase quotes under 5 minutes and resolved a failure in ~31, so this
+    // is a slow watch, not a race.
+    const id = setInterval(tick, 20_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [step, session.address, rehydrate]);
+
   // Poll while the merchant is in the widget. Background tabs get throttled on
   // mobile, so this is a coarse interval and the tap-to-send below does not
   // depend on catching the transition promptly.
@@ -532,10 +577,14 @@ export function CoinbaseOfframpSection({
         }),
       });
 
+      // Deliberately NOT "settled". All that is known here is that the USDC
+      // reached Coinbase; whether they complete the sale is their side, and
+      // twice today they did not. Claiming settlement at this point is how the
+      // UI came to assert a payout that never happened.
       setStep({
-        k: "settled",
-        sgdMinor: plan.estimated_sgd_minor,
-        currency: plan.cashout_currency ?? DEFAULT_CURRENCY,
+        k: "awaitingSettlement",
+        requestId: plan.request_id,
+        usdcMinor: plan.sell_amount_usdc_minor,
       });
       onDone();
     } catch (e) {
@@ -763,6 +812,19 @@ export function CoinbaseOfframpSection({
       )}
       {step.k === "sending" && (
         <p className="relative z-10 text-sm text-[var(--muted)]">Sending USDC…</p>
+      )}
+
+      {step.k === "awaitingSettlement" && (
+        <div className="relative z-10 space-y-2">
+          <p className="text-sm text-white">
+            {formatUsdc(step.usdcMinor)} USDC delivered to Coinbase
+          </p>
+          <p className="text-xs text-[var(--muted)] leading-relaxed">
+            Coinbase is completing the sale — this usually takes a few minutes.
+            We&apos;ll update this when it lands, and tell you if it doesn&apos;t.
+            Nothing further is needed from you.
+          </p>
+        </div>
       )}
 
       {step.k === "settled" && (
