@@ -50,8 +50,14 @@ export interface BuildSponsoredUsdsuiTransferInput {
   gasBudgetMist?: bigint;
 }
 
-/** Sum the merchant's liquid USDsui and return all coin object ids. */
-async function collectUsdsuiCoins(
+/**
+ * Sum the merchant's liquid USDsui and return all coin object ids.
+ *
+ * Exported because the Coinbase cash-out flow needs the same gather step
+ * before its swap leg; it was private when withdraw and cash-out were the
+ * only callers.
+ */
+export async function collectUsdsuiCoins(
   sui: SuiClient,
   owner: string,
 ): Promise<{ totalMinor: bigint; coinObjectIds: string[] }> {

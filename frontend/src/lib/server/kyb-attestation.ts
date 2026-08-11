@@ -160,7 +160,7 @@ export async function signAndBuildRegisterTx(
 
   // 2. Sponsor daily cap.
   if (!input.skipRateLimit && process.env.NODE_ENV !== "development") {
-    const usage = checkAndIncrementSponsorUsage(input.claimer, DAILY_CAP);
+    const usage = await checkAndIncrementSponsorUsage(input.claimer, DAILY_CAP);
     if (!usage.ok) {
       throw new AttestationError(
         `daily sponsored-gas cap reached for this address (cap=${DAILY_CAP}, reset_at_ms=${usage.resetAt})`,

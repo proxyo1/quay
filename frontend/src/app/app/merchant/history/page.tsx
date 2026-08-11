@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 
 import { bytesFromEventField, queryEventsByType, type QuayEvent } from "@/lib/quay/events";
+import { tokenMeta as tokenDisplay } from "@/lib/quay/token-meta";
 import { decode as decodeQuoteMetadata } from "@/lib/sgqr/quote-metadata";
 import { QUAY, txUrl } from "@/lib/sui-config";
 import { useZkLoginSession } from "@/lib/zklogin";
@@ -431,20 +432,6 @@ function normalizeEvent(ev: QuayEvent, index: number): NormalizedReceipt | null 
 // Mirrors the curated-label table used by /history so casing matches the
 // canonical brand names (USDsui, sUSDsui) regardless of the all-caps
 // Move struct names that arrive over RPC.
-const TOKEN_DISPLAY: Record<string, { label: string; decimals: number }> = {
-  "::sui::SUI": { label: "SUI", decimals: 9 },
-  "::usdc::USDC": { label: "USDC", decimals: 6 },
-  "::usdsui::USDSUI": { label: "USDsui", decimals: 6 },
-  "::scallop_usdsui::SCALLOP_USDSUI": { label: "sUSDsui", decimals: 6 },
-};
-
-function tokenDisplay(typeName: string): { label: string; decimals: number } {
-  for (const [suffix, info] of Object.entries(TOKEN_DISPLAY)) {
-    if (typeName.endsWith(suffix)) return info;
-  }
-  const parts = typeName.split("::");
-  return { label: parts.at(-1) ?? typeName, decimals: 0 };
-}
 
 function formatTokenAmount(amount: bigint, typeName: string): string {
   const { label, decimals } = tokenDisplay(typeName);

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 
 import { bytesFromEventField, queryEventsByType, type QuayEvent } from "@/lib/quay/events";
+import { tokenMeta as tokenDisplay } from "@/lib/quay/token-meta";
 import { decode as decodeQuoteMetadata } from "@/lib/sgqr/quote-metadata";
 import { QUAY, accountUrl, txUrl } from "@/lib/sui-config";
 
@@ -402,22 +403,6 @@ function normalizeEvent(ev: QuayEvent, index: number): NormalizedReceipt | null 
   }
 }
 
-// Bridge publishes USDsui's on-chain symbol as "USDSUI" all-caps but the brand
-// reads "USDsui" — mirror PayPanel's curated labels here.
-const TOKEN_DISPLAY: Record<string, { label: string; decimals: number }> = {
-  "::sui::SUI": { label: "SUI", decimals: 9 },
-  "::usdc::USDC": { label: "USDC", decimals: 6 },
-  "::usdsui::USDSUI": { label: "USDsui", decimals: 6 },
-  "::scallop_usdsui::SCALLOP_USDSUI": { label: "sUSDsui", decimals: 6 },
-};
-
-function tokenDisplay(typeName: string): { label: string; decimals: number } {
-  for (const [suffix, info] of Object.entries(TOKEN_DISPLAY)) {
-    if (typeName.endsWith(suffix)) return info;
-  }
-  const parts = typeName.split("::");
-  return { label: parts.at(-1) ?? typeName, decimals: 0 };
-}
 
 function formatTokenAmount(amount: bigint, typeName: string): string {
   const { label, decimals } = tokenDisplay(typeName);

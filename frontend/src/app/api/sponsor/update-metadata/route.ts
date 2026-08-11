@@ -78,7 +78,7 @@ export async function POST(req: Request) {
 
   // Rate limit — production-only. Dev skips the cap for iterative testing.
   if (process.env.NODE_ENV !== "development") {
-    const usageCheck = checkAndIncrementSponsorUsage(body.owner, DAILY_CAP);
+    const usageCheck = await checkAndIncrementSponsorUsage(body.owner, DAILY_CAP);
     if (!usageCheck.ok) {
       return NextResponse.json(
         {

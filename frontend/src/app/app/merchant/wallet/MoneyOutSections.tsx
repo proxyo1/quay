@@ -4,12 +4,19 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
-import { formatSgdMinor } from "@/lib/server/cashout-fee";
+import {
+  formatSgdMinor,
+  formatUsdsuiExact,
+  parseUsdsuiToMinor,
+} from "@/lib/money";
 import { buildGaslessUsdsuiSendAll } from "@/lib/quay/transfer";
 import { USDSUI } from "@/lib/quay/scallop";
 import { txUrl } from "@/lib/sui-config";
 import { zkLoginSign, type ZkLoginSession } from "@/lib/zklogin";
 import { getSuiClient } from "@/lib/sui-client";
+
+import { CoinbaseOfframpSection } from "./CoinbaseOfframpSection";
+import { StrandedUsdcCard } from "./StrandedUsdcCard";
 
 /**
  * Money-out controls for /merchant/wallet. Hierarchy (D2-design): cash-out
@@ -40,25 +47,7 @@ function formatUsdsui(minor: bigint): string {
   return `${dollars}.${frac.toString().padStart(USDSUI.decimals, "0").slice(0, 2)}`;
 }
 
-/** Full-precision (6dp) USDsui string — round-trips through parseUsdsuiToMinor. */
-function formatUsdsuiExact(minor: bigint): string {
-  const dollars = minor / BigInt(USDSUI_UNIT);
-  const frac = minor % BigInt(USDSUI_UNIT);
-  return `${dollars}.${frac.toString().padStart(USDSUI.decimals, "0")}`;
-}
 
-/** Parse a decimal USDsui string into microunits, or null if invalid. */
-function parseUsdsuiToMinor(s: string): bigint | null {
-  const t = s.trim();
-  if (!/^\d+(\.\d{1,6})?$/.test(t)) return null;
-  const [whole, frac = ""] = t.split(".");
-  const padded = (frac + "000000").slice(0, 6);
-  try {
-    return BigInt(whole) * BigInt(USDSUI_UNIT) + BigInt(padded);
-  } catch {
-    return null;
-  }
-}
 
 interface Balances {
   liquidMinor: bigint;
@@ -97,8 +86,13 @@ export function MoneyOutSections({ session }: { session: ZkLoginSession }) {
     );
   }
 
-  // Warm empty state (D3-design): nothing liquid to move.
-  if (bal.liquidMinor === 0n) {
+  // Warm empty state: nothing liquid to move AND nothing earning to free up.
+  //
+  // The Coinbase rail works from a pure-sCoin balance — it redeems as part of
+  // the flow — so a merchant whose funds are all earning must still see it.
+  // Gating this on `liquidMinor === 0n` alone swallowed the whole section for
+  // exactly the merchants most likely to want it.
+  if (bal.liquidMinor === 0n && bal.yieldMinor === 0n) {
     return (
       <section className="glass-card rounded-2xl p-5 space-y-2">
         <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">Cash out</p>
@@ -121,8 +115,30 @@ export function MoneyOutSections({ session }: { session: ZkLoginSession }) {
 
   return (
     <div className="space-y-4">
-      <CashOutSection session={session} liquidMinor={bal.liquidMinor} onDone={() => balQ.refetch()} />
-      <WithdrawSection session={session} liquidMinor={bal.liquidMinor} onDone={() => balQ.refetch()} />
+      <StrandedUsdcCard owner={session.address} />
+      {bal.liquidMinor === 0n ? (
+        <section className="glass-card rounded-2xl p-5 space-y-2">
+          <p className="relative z-10 text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
+            Cash out
+          </p>
+          <p className="relative z-10 text-sm text-[var(--muted)] leading-relaxed">
+            Your USDsui is currently earning interest. The Coinbase cash-out
+            below can free it up for you, or turn earning off to withdraw it
+            directly.
+          </p>
+        </section>
+      ) : (
+        <>
+          <CashOutSection session={session} liquidMinor={bal.liquidMinor} onDone={() => balQ.refetch()} />
+          <WithdrawSection session={session} liquidMinor={bal.liquidMinor} onDone={() => balQ.refetch()} />
+        </>
+      )}
+      <CoinbaseOfframpSection
+        session={session}
+        liquidMinor={bal.liquidMinor}
+        yieldMinor={bal.yieldMinor}
+        onDone={() => balQ.refetch()}
+      />
     </div>
   );
 }

@@ -13,11 +13,14 @@ import {
   USDSUI,
   buildMintWithSCoinWrap,
   buildRedeemFromSCoin,
-  getPoolCash,
-  getSharePrice,
+  readBalanceSheet,
   preflightScallopHealthy,
   safeCallPackage,
 } from "@/lib/quay/scallop";
+import {
+  MAX_COINS_PER_PTB,
+  planRedeemFromBalanceSheet,
+} from "@/lib/quay/scallop-redeem";
 import {
   computeRedeemFee,
   getYieldFeeConfig,
@@ -71,7 +74,6 @@ const DAILY_CAP = 5;
 const RATE_LIMIT_LABEL = "toggle-yield";
 const LOW_BALANCE_FLOOR_MIST = 40_000_000n; // 20% of 200M target
 const CLOCK = "0x6";
-const MAX_COINS_PER_PTB = 50;
 const IDEMPOTENCY_TTL_MS = 15 * 60 * 1000;
 const FEATURE_FLAG_NAME = "yield_routing.scallop.usdsui";
 
@@ -230,7 +232,7 @@ export async function POST(req: Request) {
 
   // Rate limit — production-only.
   if (process.env.NODE_ENV !== "development") {
-    const usageCheck = checkAndIncrementSponsorUsage(
+    const usageCheck = await checkAndIncrementSponsorUsage(
       `${body.owner}:${RATE_LIMIT_LABEL}`,
       DAILY_CAP,
     );
@@ -355,16 +357,23 @@ export async function POST(req: Request) {
       // Migrate SCALLOP_USDSUI → USDsui (partial if pool cash insufficient,
       // and minus the Quay performance fee on any gain).
       const merged = mergeAll(tx, coinIds);
-      const [poolCash, sharePrice, ledgerRows] = await Promise.all([
-        getPoolCash(sui, USDSUI.coinType),
-        getSharePrice(sui, USDSUI.coinType),
+      // One balance-sheet read: share price and pool cash must come from the
+      // same chain snapshot, and previously each was fetched separately.
+      const [balanceSheet, ledgerRows] = await Promise.all([
+        readBalanceSheet(sui, USDSUI.coinType),
         readCostBasis(body.owner),
       ]);
-      const partial = computePartialRedeemSync({
-        mergedShareBalance: totalAmount,
-        poolCash,
-        sharePrice,
+      if (!balanceSheet) {
+        return NextResponse.json(
+          { error: "Scallop reserve unavailable" },
+          { status: 503 },
+        );
+      }
+      const partial = planRedeemFromBalanceSheet({
+        shareBalance: totalAmount,
+        balanceSheet,
       });
+      const sharePrice = partial.sharePrice;
 
       const feeConfig = getYieldFeeConfig(flag);
       const feeComp = computeRedeemFee({
@@ -485,57 +494,3 @@ function mergeAll(tx: Transaction, coinIds: string[]) {
   return primaryArg;
 }
 
-interface PartialRedeem {
-  partial: boolean;
-  redeemableShare: bigint;
-  leftoverShare: bigint;
-}
-
-/**
- * Compute the largest share amount we can redeem given current pool cash.
- *
- * Math: redeemable_share ≈ floor(pool_cash / share_price). We apply a
- * conservative 1% haircut on `pool_cash` to leave headroom for share-price
- * drift / concurrent borrows between this read and the tx commit.
- *
- * Float share-price multiplication is imprecise on bigint amounts; we
- * round DOWN so the on-chain redeem can never request more cash than
- * exists.
- *
- * Caller supplies the share price already (pulled in parallel with the
- * cost-basis read upstream) so this stays pure.
- */
-function computePartialRedeemSync(args: {
-  mergedShareBalance: bigint;
-  poolCash: bigint;
-  sharePrice: number;
-}): PartialRedeem {
-  const { mergedShareBalance, poolCash, sharePrice } = args;
-  if (mergedShareBalance === 0n) {
-    return { partial: false, redeemableShare: 0n, leftoverShare: 0n };
-  }
-  if (sharePrice <= 0) {
-    // Genesis edge — assume 1:1 (every fresh reserve starts at 1.0).
-    return {
-      partial: false,
-      redeemableShare: mergedShareBalance,
-      leftoverShare: 0n,
-    };
-  }
-  const HAIRCUT_BPS = 100n; // 1%
-  const haircut = (poolCash * HAIRCUT_BPS) / 10_000n;
-  const usableCash = poolCash > haircut ? poolCash - haircut : 0n;
-  const sharesAtCash = BigInt(Math.floor(Number(usableCash) / sharePrice));
-  if (sharesAtCash >= mergedShareBalance) {
-    return {
-      partial: false,
-      redeemableShare: mergedShareBalance,
-      leftoverShare: 0n,
-    };
-  }
-  return {
-    partial: true,
-    redeemableShare: sharesAtCash,
-    leftoverShare: mergedShareBalance - sharesAtCash,
-  };
-}

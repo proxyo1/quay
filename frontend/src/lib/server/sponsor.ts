@@ -5,6 +5,8 @@ import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { getSupabaseClient } from "@/lib/server/supabase";
+
 /**
  * Load the quay sponsored-gas wallet. Same key-source-precedence pattern
  * as the issuer (env hex → env bech32 → .secrets file).
@@ -32,27 +34,70 @@ export function loadSponsorKeypair(): Ed25519Keypair {
   return Ed25519Keypair.fromSecretKey(new Uint8Array(bytes));
 }
 
-/**
- * Simple in-memory per-sender daily counter (V0). Resets on process
- * restart. Production would use a real KV store or Redis with a daily
- * TTL.
- */
-const usage = new Map<string, { count: number; resetAt: number }>();
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function checkAndIncrementSponsorUsage(
+export type SponsorUsageResult =
+  | { ok: true }
+  | { ok: false; remaining: 0; resetAt: number };
+
+/**
+ * Consume one unit of a sender's daily sponsored-gas allowance.
+ *
+ * Backed by Supabase (`sponsor_usage` + the `consume_sponsor_usage`
+ * function), not a process-local Map. The Map this replaces reset on every
+ * cold start and was per-instance, so on Vercel the cap never bound: a caller
+ * spread across N serverless instances effectively got N times the allowance.
+ *
+ * The increment happens inside a Postgres function because a read-then-write
+ * through supabase-js is not atomic — two concurrent requests both reading
+ * count=4 against a cap of 5 would each write 5 and both be allowed, which is
+ * precisely the race the limit exists to stop.
+ *
+ * **Fails open.** If Supabase is unreachable or unconfigured, this allows the
+ * request and logs. Failing closed would brick merchant withdrawals *and*
+ * merchant registration (`kyb-attestation.ts` shares this counter) for an
+ * outage unrelated to the thing being rate-limited. The hard safety rail is
+ * the sponsor's own `LOW_BALANCE_FLOOR_MIST` check, which is on-chain and
+ * cannot be bypassed by a database outage.
+ *
+ * Async by necessity — every call site must `await`.
+ */
+export async function checkAndIncrementSponsorUsage(
   sender: string,
   dailyCap: number,
-): { ok: true } | { ok: false; remaining: 0; resetAt: number } {
-  const now = Date.now();
-  const e = usage.get(sender);
-  if (!e || now > e.resetAt) {
-    usage.set(sender, { count: 1, resetAt: now + DAY_MS });
+): Promise<SponsorUsageResult> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    console.warn(
+      `[sponsor] usage counter unavailable (Supabase not configured) — allowing ${sender} without counting`,
+    );
     return { ok: true };
   }
-  if (e.count >= dailyCap) {
-    return { ok: false, remaining: 0, resetAt: e.resetAt };
+
+  try {
+    const { data, error } = await supabase.rpc("consume_sponsor_usage", {
+      p_usage_key: sender,
+      p_daily_cap: dailyCap,
+      p_window_ms: DAY_MS,
+    });
+    if (error) throw new Error(error.message);
+
+    // Postgres `returns table` comes back as a one-row array.
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error("consume_sponsor_usage returned no row");
+
+    if (row.allowed) return { ok: true };
+    return {
+      ok: false,
+      remaining: 0,
+      resetAt: new Date(row.reset_at).getTime(),
+    };
+  } catch (e) {
+    console.error(
+      `[sponsor] usage counter failed for ${sender}; failing OPEN: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+    return { ok: true };
   }
-  e.count += 1;
-  return { ok: true };
 }

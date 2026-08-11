@@ -8,6 +8,10 @@ import { useEffect, useMemo } from "react";
 import { useZkLoginSession } from "@/lib/zklogin";
 import { listOwnedMerchantEntries, type OwnedMerchantEntry } from "@/lib/quay";
 import { bytesFromEventField, queryEventsByType, type QuayEvent } from "@/lib/quay/events";
+import {
+  formatTokenAmount,
+  isYieldRoutedToken as isYieldRouted,
+} from "@/lib/quay/token-meta";
 import { QUAY, txUrl } from "@/lib/sui-config";
 import { getBlobUrl } from "@/lib/walrus/client";
 import { getSuiClient } from "@/lib/sui-client";
@@ -341,7 +345,6 @@ function MerchantLogo({ blobId, alt }: { blobId: string | null; alt: string }) {
 }
 
 function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolean }) {
-  const tokenLabel = shortTokenLabel(r.tokenType);
   const yieldRouted = isYieldRouted(r.tokenType);
   return (
     <li
@@ -374,7 +377,7 @@ function ReceiptCard({ r, highlight }: { r: NormalizedReceipt; highlight: boolea
             </span>
           </div>
           <p className="mt-0.5 text-xs text-[var(--muted)] truncate">
-            Paid with <span className="font-mono">{formatTokenAmount(r.amount, tokenLabel)}</span>
+            Paid with <span className="font-mono">{formatTokenAmount(r.amount, r.tokenType)}</span>
           </p>
           {r.memo && (
             <p className="mt-1.5 text-xs text-[var(--muted)] italic">&ldquo;{r.memo}&rdquo;</p>
@@ -425,59 +428,8 @@ function normalizeEvent(ev: QuayEvent, index: number): NormalizedReceipt | null 
   }
 }
 
-function shortTokenLabel(typeName: string): string {
-  const parts = typeName.split("::");
-  const tail = parts.at(-1) ?? typeName;
-  // Scallop sCoins ship as `SCALLOP_<UNDERLYING>` — display as the
-  // s-prefixed shorthand merchants are used to seeing in Sui wallets.
-  if (tail.startsWith("SCALLOP_")) {
-    const underlying = tail.slice("SCALLOP_".length).toLowerCase();
-    return `s${underlying === "usdsui" ? "USDsui" : underlying.toUpperCase()}`;
-  }
-  // Move struct names ship ALL_CAPS — normalize the ones whose decimals
-  // table key uses mixed case so `formatTokenAmount` finds them.
-  if (tail === "USDSUI") return "USDsui";
-  return tail;
-}
 
-/**
- * True when a receipt's `token_type` is Scallop's sCoin wrapper — the
- * canonical signal that the payment was yield-routed via the Phase 6
- * supply-side integration. The UI surfaces a small earning indicator
- * so merchants visually distinguish yield-routed vs liquid receipts.
- */
-function isYieldRouted(typeName: string): boolean {
-  return typeName.includes("::scallop_usdsui::SCALLOP_USDSUI");
-}
 
-/**
- * Format a `Coin<T>` amount for display. Falls back to the raw integer
- * with the symbol appended when the token's decimals aren't known.
- *
- * Decimals table is centralized here because the terminal renders any
- * token the merchant configured at onboard (SUI, USDC, future USDsui/USDT).
- */
-const TERMINAL_DECIMALS: Record<string, number> = {
-  SUI: 9,
-  USDC: 6,
-  USDsui: 6,
-  USDT: 6,
-  // Phase 6: Scallop sCoin wrapper is 1:1 with its underlying USDsui (6 decimals).
-  // The displayed amount is the SHARE balance — to recover the underlying USDsui
-  // amount the indexer joins on the same-tx MintEvent (see indexer.ts).
-  sUSDsui: 6,
-};
-
-function formatTokenAmount(amount: bigint, symbol: string): string {
-  const decimals = TERMINAL_DECIMALS[symbol];
-  if (decimals === undefined) return `${amount.toString()} ${symbol}`;
-  const divisor = 10n ** BigInt(decimals);
-  const whole = amount / divisor;
-  const fraction = amount % divisor;
-  const fracStr = fraction.toString().padStart(decimals, "0").replace(/0+$/, "");
-  const formatted = fracStr ? `${whole}.${fracStr}` : `${whole}`;
-  return `${formatted} ${symbol}`;
-}
 
 function formatRelativeTime(ms: number): string {
   const ageSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));

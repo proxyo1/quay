@@ -13,8 +13,7 @@ import {
   USDSUI,
   buildMintWithSCoinWrap,
   buildRedeemFromSCoin,
-  getPoolCash,
-  getSharePrice,
+  readBalanceSheet,
   preflightScallopHealthy,
   safeCallPackage,
 } from "@/lib/quay/scallop";
@@ -23,6 +22,12 @@ import {
   getYieldFeeConfig,
   readCostBasis,
 } from "@/lib/server/yield-cost-basis";
+import {
+  MAX_COINS_PER_PTB,
+  planRedeemFromBalanceSheet,
+  sharePriceFloat,
+  underlyingToShares,
+} from "@/lib/quay/scallop-redeem";
 import { getSuiClient } from "@/lib/sui-client";
 
 export const runtime = "nodejs";
@@ -48,7 +53,6 @@ export const runtime = "nodejs";
 const DAILY_CAP = 20;
 const RATE_LIMIT_LABEL = "earn-move";
 const LOW_BALANCE_FLOOR_MIST = 40_000_000n;
-const MAX_COINS_PER_PTB = 50;
 const FEATURE_FLAG_NAME = "yield_routing.scallop.usdsui";
 
 const sui = getSuiClient();
@@ -165,7 +169,7 @@ export async function POST(req: Request) {
 
   // Rate limit
   if (process.env.NODE_ENV !== "development") {
-    const usageCheck = checkAndIncrementSponsorUsage(
+    const usageCheck = await checkAndIncrementSponsorUsage(
       `${body.owner}:${RATE_LIMIT_LABEL}`,
       DAILY_CAP,
     );
@@ -317,12 +321,22 @@ export async function POST(req: Request) {
       );
     }
 
-    // Compute share amount needed for `amount` underlying. Clamp to
-    // pool cash (with 1% haircut for share-price drift).
-    const [sharePrice, poolCash] = await Promise.all([
-      getSharePrice(sui, USDSUI.coinType),
-      getPoolCash(sui, USDSUI.coinType),
-    ]);
+    // One balance-sheet read — share price and pool cash have to describe the
+    // same chain snapshot, and this used to fetch each independently.
+    const balanceSheet = await readBalanceSheet(sui, USDSUI.coinType);
+    if (!balanceSheet) {
+      return NextResponse.json(
+        { error: "Scallop reserve unavailable" },
+        { status: 503 },
+      );
+    }
+
+    const totalShareBalance = coinsRes.objects.reduce(
+      (acc, c) => acc + BigInt(c.balance),
+      0n,
+    );
+
+    const sharePrice = sharePriceFloat(balanceSheet);
     if (sharePrice <= 0) {
       return NextResponse.json(
         { error: "Scallop share price unavailable" },
@@ -330,45 +344,44 @@ export async function POST(req: Request) {
       );
     }
 
-    const HAIRCUT_BPS = 100n;
-    const haircut = (poolCash * HAIRCUT_BPS) / 10_000n;
-    const usableCash = poolCash > haircut ? poolCash - haircut : 0n;
-    if (amount > usableCash) {
-      actualAmount = usableCash;
-      partial = true;
-    }
-    if (actualAmount === 0n) {
-      return NextResponse.json(
-        {
-          error: "pool has no cash available right now",
-          requested_underlying_minor: amount.toString(),
-          pool_cash_minor: poolCash.toString(),
-        },
-        { status: 503 },
-      );
-    }
-
-    // shares to burn ≈ ceil(actualAmount / share_price). Use ceil so we
-    // never under-redeem due to rounding.
-    const sharesToBurn = BigInt(
-      Math.ceil(Number(actualAmount) / sharePrice),
-    );
-
-    const totalShareBalance = coinsRes.objects.reduce(
-      (acc, c) => acc + BigInt(c.balance),
-      0n,
-    );
-    if (totalShareBalance < sharesToBurn) {
+    // "Do you even hold this much?" is answered BEFORE the pool-cash clamp and
+    // stays a hard 400. The clamp below reduces the amount silently, which is
+    // right for transient pool liquidity but wrong for a merchant asking to
+    // move more than they own — that deserves an explicit error, not a
+    // quietly smaller redeem.
+    const sharesNeeded = underlyingToShares(balanceSheet, amount);
+    if (totalShareBalance < sharesNeeded) {
       return NextResponse.json(
         {
           error: "insufficient sUSDsui balance for requested cash-out",
           requested_underlying_minor: amount.toString(),
-          required_share_minor: sharesToBurn.toString(),
+          required_share_minor: sharesNeeded.toString(),
           available_share_minor: totalShareBalance.toString(),
         },
         { status: 400 },
       );
     }
+
+    // Shared clamp: caps at the merchant's balance, the requested amount, and
+    // pool cash (1% haircut), all in exact integer arithmetic.
+    const plan = planRedeemFromBalanceSheet({
+      shareBalance: totalShareBalance,
+      balanceSheet,
+      requestedUnderlying: amount,
+    });
+    actualAmount = plan.realizableUnderlying;
+    partial = actualAmount < amount;
+    if (actualAmount === 0n) {
+      return NextResponse.json(
+        {
+          error: "pool has no cash available right now",
+          requested_underlying_minor: amount.toString(),
+          pool_cash_minor: plan.usableCashMinor.toString(),
+        },
+        { status: 503 },
+      );
+    }
+    const sharesToBurn = plan.redeemableShare;
 
     // Compute the Quay performance fee on the gain portion. Cost basis
     // comes from the yield_cost_basis ledger (indexer-populated); the

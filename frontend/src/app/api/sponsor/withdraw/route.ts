@@ -64,7 +64,7 @@ export async function POST(req: Request) {
   }
 
   if (process.env.NODE_ENV !== "development") {
-    const usage = checkAndIncrementSponsorUsage(body.owner, DAILY_CAP);
+    const usage = await checkAndIncrementSponsorUsage(body.owner, DAILY_CAP);
     if (!usage.ok) {
       return NextResponse.json(
         { error: "daily withdraw cap reached for this address", cap: DAILY_CAP, reset_at_ms: usage.resetAt },

@@ -3,7 +3,6 @@ import { Transaction, type TransactionObjectArgument } from "@mysten/sui/transac
 
 import {
   appendSwapToPtb,
-  assertOutputWithinSlippage,
   minAcceptableOut,
   quoteRoute,
 } from "@/lib/dex/aggregator";
@@ -286,11 +285,18 @@ export async function buildPayAnyTokenPtb(
       expectedInputAmount = input.outputAmount;
       venues = [];
     } else {
-      // Verify the route can plausibly deliver at our slippage tolerance.
-      // Aggregator quoted `amountIn` to deliver `outputAmount`; if its
-      // expected output (with slippage applied) is under `minOutAcceptable`,
-      // fail loud BEFORE the user signs.
-      assertOutputWithinSlippage(input.outputAmount, minOutAcceptable);
+      // No pre-sign slippage assertion here, deliberately. The obvious guard
+      // — `assertOutputWithinSlippage(outputAmount, minOutAcceptable)` — was
+      // unreachable: `minOutAcceptable` is derived from `outputAmount` as
+      // `outputAmount * (10000 - bps) / 10000`, so it is always <= it and the
+      // comparison could never fail. Nor is a stricter replacement wanted:
+      // `appendSwapToPtb` passes `slippage` into `cetus.routerSwap`, which
+      // enforces the bound on chain where it cannot be bypassed. Adding a
+      // client-side re-derivation would buy a payment-path regression risk for
+      // protection that already exists.
+      //
+      // Where a genuine budget exists — the offramp's redeemed balance — the
+      // ceiling is enforced as a max-in bound in `lib/quay/swap-to-usdc.ts`.
 
       // Split the exact required input off the payer's coin (BN.toString-safe).
       const [inputCoinForSwap] = tx.splitCoins(payerCoinRef, [

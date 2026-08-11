@@ -119,6 +119,36 @@ sponsored dual-sign PTB pattern:
   a 10/day cap. Stuck payouts are recoverable via `scripts/cashout-redrive.ts`. Slated for
   deletion when the licensed V2 settlement leg lands (see TODOS) — do not build on it.
 
+### Coinbase CDP Offramp (`/app/merchant/wallet`, flag-gated OFF)
+
+A second, **non-custodial** cash-out rail alongside the Wise demo. The merchant sells USDC from
+their own address into their own KYC'd Coinbase account; Quay mints session tokens and builds the
+send, never holding funds. Gated by `coinbase_offramp_enabled` (off by default).
+
+Flow: quote → (redeem from Scallop if needed) → widget in a **new window** → poll for the deposit
+address → sponsored swap+send. Files: `lib/server/coinbase-{offramp,offramp-store,auth}.ts`,
+`lib/quay/swap-to-usdc.ts`, `app/api/offramp/coinbase/{session,prepare,status}`,
+`app/api/cron/coinbase-reconcile`, `app/app/merchant/wallet/CoinbaseOfframpSection.tsx`.
+
+Non-obvious, all load-bearing:
+
+- **The USDC amount is derived from a live Cetus quote**, never chosen first. Committing a
+  `sell_amount` to Coinbase and then discovering the swap can't be funded puts an uncontrollable
+  dependency after an irreversible commitment.
+- **`offramp_url` from the Sell Quote API is always an empty string** (verified across every request
+  shape). The widget URL is constructed against `pay.coinbase.com/v3/sell/input`, with `disableEdit`
+  — without it the merchant can commit to more USDC than they freed up.
+- **SG has no bank payout rail** (`payment_methods = CRYPTO_ACCOUNT, FIAT_WALLET`). Coinbase pays into
+  the merchant's Coinbase *balance*. Copy must never imply Quay settles to a bank.
+- **Signing is client-only.** No server or cron can fill an order — `zkLoginSign` needs a key that
+  exists only in the merchant's browser. Abandon-before-send is therefore unrecoverable, the widget
+  opens with `window.open` (a redirect can lose the session), and the reconcile cron only settles rows
+  that already sent.
+- **Auth is on-chain registry membership**, not a signed nonce: `zkLoginSign` cannot sign an arbitrary
+  message, and anyone can mint a zkLogin address anyway.
+- Run `scripts/coinbase-offramp-probe.ts` to re-verify the corridor; output lands in
+  `docs/coinbase-offramp-probe.md`.
+
 ### Merchant yield routing (Scallop)
 
 Opt-in from the wallet (`/api/sponsor/{toggle-yield,earn-move}`): when a merchant enables it,
