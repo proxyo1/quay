@@ -7,6 +7,7 @@ import {
   isAwaitingCommit,
   mapTransactionStatus,
   minUsdsuiForCashout,
+  offrampDailyCap,
   parseDeadlineMs,
   selectDepositTransaction,
   type OfframpTransaction,
@@ -88,6 +89,32 @@ describe("cashoutCurrency", () => {
     for (const raw of ["", "  ", "dollars", "US", "USDD", "U$D"]) {
       process.env.COINBASE_CASHOUT_CURRENCY = raw;
       expect(cashoutCurrency()).toBe("SGD");
+    }
+  });
+});
+
+describe("offrampDailyCap", () => {
+  const saved = process.env.COINBASE_OFFRAMP_DAILY_CAP;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.COINBASE_OFFRAMP_DAILY_CAP;
+    else process.env.COINBASE_OFFRAMP_DAILY_CAP = saved;
+  });
+
+  test("disabled by default", () => {
+    delete process.env.COINBASE_OFFRAMP_DAILY_CAP;
+    expect(offrampDailyCap()).toBe(0);
+  });
+
+  test("a positive value restores a ceiling", () => {
+    process.env.COINBASE_OFFRAMP_DAILY_CAP = "5";
+    expect(offrampDailyCap()).toBe(5);
+  });
+
+  test("junk or a non-positive value disables rather than guessing a cap", () => {
+    // Failing closed here would lock every merchant out on a typo.
+    for (const raw of ["", " ", "lots", "-3", "0", "NaN"]) {
+      process.env.COINBASE_OFFRAMP_DAILY_CAP = raw;
+      expect(offrampDailyCap()).toBe(0);
     }
   });
 });

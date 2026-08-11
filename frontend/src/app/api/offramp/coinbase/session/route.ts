@@ -15,6 +15,7 @@ import {
   createSellQuote,
   cashoutCurrency,
   createSessionToken,
+  offrampDailyCap,
   getCashoutLimits,
   isCoinbaseConfigured,
   minUsdsuiForCashout,
@@ -52,11 +53,11 @@ export const runtime = "nodejs";
  * the redeem is its own transaction, signed first, because Scallop's pool cash
  * is shared with every other user and can move underneath us.
  *
- * Rate limited per address and flag-gated. There is no offramp sandbox, so the
- * flag is off by default and the payout cap is a real safety rail.
+ * Flag-gated, with an optional per-address daily attempt cap. There is no
+ * offramp sandbox, so the flag is off by default and the per-transaction payout
+ * cap is a real safety rail.
  */
 
-const DAILY_CAP = 5;
 const RATE_LIMIT_LABEL = "coinbase-offramp";
 const FEATURE_FLAG_NAME = "coinbase_offramp_enabled";
 
@@ -153,17 +154,6 @@ export async function POST(req: Request) {
     }
   }
 
-  const usage = await checkAndIncrementSponsorUsage(
-    `${owner}:${RATE_LIMIT_LABEL}`,
-    DAILY_CAP,
-  );
-  if (!usage.ok) {
-    return NextResponse.json(
-      { error: "daily cash-out cap reached", cap: DAILY_CAP, reset_at_ms: usage.resetAt },
-      { status: 429 },
-    );
-  }
-
   // In-flight lock. The DB index is the real guarantee; checking here just
   // turns a constraint violation into a useful message.
   try {
@@ -183,6 +173,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
+  }
+
+  // Daily attempt cap, AFTER the in-flight lock.
+  //
+  // Off by default (`COINBASE_OFFRAMP_DAILY_CAP`, 0 disables). The remaining
+  // rails are the per-transaction payout cap, the one-open-cash-out-per-owner
+  // index, and Coinbase's own limits.
+  //
+  // Ordering is load-bearing when it IS enabled. This used to run above the
+  // lock check, so retrying while an order was open — exactly what a merchant
+  // does after a blocked popup — burned a slot and returned a 409 having
+  // created nothing. It still sits above the Coinbase and Cetus quotes, which
+  // are the expensive calls a rate limit exists to protect.
+  const dailyCap = offrampDailyCap();
+  if (dailyCap > 0) {
+    const usage = await checkAndIncrementSponsorUsage(
+      `${owner}:${RATE_LIMIT_LABEL}`,
+      dailyCap,
+    );
+    if (!usage.ok) {
+      return NextResponse.json(
+        {
+          error: "daily cash-out cap reached",
+          cap: dailyCap,
+          reset_at_ms: usage.resetAt,
+        },
+        { status: 429 },
+      );
+    }
   }
 
   const sui = getSuiClient();

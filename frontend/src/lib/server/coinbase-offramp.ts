@@ -229,6 +229,28 @@ export function cashoutCurrency(): string {
 }
 
 /**
+ * Per-address daily cap on cash-out *attempts*, from
+ * `COINBASE_OFFRAMP_DAILY_CAP`. **Zero disables it, and zero is the default.**
+ *
+ * It was a hardcoded 5 and it counted attempts rather than cash-outs, so a
+ * merchant retrying after a blocked popup exhausted a day's allowance without
+ * ever creating an order. The cap it enforced was Quay's own invention — not a
+ * Coinbase limit — and it was the tightest constraint in the system by a wide
+ * margin: Coinbase allows a pending-review app 25 test transactions.
+ *
+ * What still bounds the rail: the per-transaction payout cap
+ * (`COINBASE_OFFRAMP_MAX_SGD_MINOR`), the one-open-cash-out-per-owner index,
+ * the `coinbase_offramp_enabled` flag, and Coinbase's own limits. Set this to a
+ * positive integer to put the daily ceiling back.
+ */
+export function offrampDailyCap(): number {
+  const raw = process.env.COINBASE_OFFRAMP_DAILY_CAP?.trim();
+  if (!raw) return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
  * Fiat-per-USD ceilings used to turn Coinbase's fiat minimum into a USDsui one.
  *
  * Each is set **above** the plausible market rate on purpose: a higher rate
