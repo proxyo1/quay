@@ -1,38 +1,66 @@
 /**
  * Event queries.
  *
- * The gRPC surface Quay moved to has **no event query at all** — only a
- * streaming subscription service — so historical lookups come from Sui's
- * GraphQL endpoint instead. That leaves the app on two transports by
- * necessity, not by choice: gRPC for state, GraphQL for event history.
+ * These go to Sui's GraphQL endpoint while the rest of the app reads state
+ * over gRPC. That split is deliberate, and the reason is **retention**, not
+ * capability:
+ *
+ *   gRPC *can* query events — `client.listEvents()` maps to
+ *   `LedgerService.ListEvents` and works fine. What it can't do is remember
+ *   very far back. A fullnode serves only its own retention window and there
+ *   is no implicit archival fallback, so old events simply aren't there.
+ *
+ * Measured on mainnet 2026-08-12, asking both transports for every
+ * `payments::PaymentReceipt` ever emitted:
+ *
+ *   - gRPC    → 1 event   (oldest retained checkpoint of any event: 301811060)
+ *   - GraphQL → 4 events  (reaching back to checkpoint 299937158, 2026-07-18)
+ *
+ * Three of Quay's four mainnet payments are older than the gRPC fullnode's
+ * pruning floor. Moving these queries to gRPC therefore does not fail — it
+ * silently returns a shorter history. If you are here because the migration
+ * guide maps `suix_queryEvents` to `LedgerService.ListEvents` and this looked
+ * like unfinished work: it isn't, and switching it drops payment history with
+ * no error to notice.
+ *
+ * Neither window is unbounded. GraphQL's is merely larger, so history that has
+ * to survive indefinitely needs the Archival Service or our own index — never
+ * a public endpoint. This is the same reason state is always read from the
+ * chain rather than reconstructed by replaying events.
  *
  * Two access patterns, deliberately served differently:
  *
- *  - **by type** (`queryEventsByType`) → GraphQL. This is the "show me the
- *    last N PaymentReceipts" case behind the history and terminal screens.
- *  - **by transaction** (`eventsForTransaction`) → gRPC `getTransaction`
- *    with `include: { events: true }`. GraphQL's `EventFilter` exposes only
- *    `afterCheckpoint`, `atCheckpoint`, `beforeCheckpoint`, `sender`,
- *    `module` and `type` — there is no digest filter — and asking the
- *    transaction for its own events is a cheaper question anyway.
+ *  - **by type** (`queryEventsByType`) → GraphQL, per the above.
+ *  - **by transaction** (`eventsForTransaction`) → gRPC `getTransaction` with
+ *    `include: { events: true }`. The event filter accepts exactly one of
+ *    `sender`, `emitModule` or `eventType` — there is no digest filter — and
+ *    asking the transaction for its own events is a cheaper question anyway.
  *
- * Shape note: `parsedJson` is normalised to look like the old JSON-RPC field
- * so callers did not have to change, but the SDK warns that JSON
- * representations differ across transports. The one difference that bites in
- * practice is `vector<u8>`: JSON-RPC returned `number[]`, GraphQL returns
- * base64. `bytesFromEventField` below absorbs both.
+ * Transport plumbing (query text, cursor direction, response shape) is the
+ * SDK's `listEvents`, which presents one interface over gRPC and GraphQL
+ * alike. The one thing it does *not* absorb is the server's page cap: on
+ * GraphQL a `limit` above 50 throws `Page size is too large`, so the paging
+ * loop below stays.
  */
+
+import { SuiGraphQLClient } from "@mysten/sui/graphql";
 
 import { SUI_NETWORK } from "@/lib/sui-config";
 import type { SuiClient } from "@/lib/sui-client";
 
-/** Normalised event, shaped to match what `queryEvents` used to return. */
+/**
+ * Normalised event.
+ *
+ * Deliberately has no timestamp. The SDK's event shape carries `checkpoint`
+ * but not a wall-clock time, and nothing needs one: every screen that shows a
+ * payment time reads `timestamp_ms` out of the receipt payload itself, which
+ * is the on-chain value and the one that belongs on a receipt.
+ */
 export interface QuayEvent {
   type: string;
   parsedJson: unknown;
   txDigest: string | null;
   sender: string | null;
-  timestampMs: string | null;
   /** Address of the package whose module emitted this event, when known. */
   emittingPackage: string | null;
 }
@@ -45,133 +73,79 @@ const DEFAULT_GRAPHQL_URL: Record<"mainnet" | "testnet", string> = {
 export const SUI_GRAPHQL_URL =
   process.env.NEXT_PUBLIC_SUI_GRAPHQL_URL?.trim() || DEFAULT_GRAPHQL_URL[SUI_NETWORK];
 
-export class SuiGraphQLError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SuiGraphQLError";
-  }
-}
-
-const EVENT_NODE_FIELDS = `
-  timestamp
-  sender { address }
-  transaction { digest }
-  transactionModule { package { address } name }
-  contents { type { repr } json }
-`;
-
 /**
  * Sui's GraphQL rejects any page over 50 with a validation error, so a caller
  * asking for more must page rather than ask louder. Five pages did ask louder
  * — history, merchant history, verify, the merchant profile and post-signin,
  * at 100 or 200 — and every one of them failed outright with
  * "Page size is too large: 100 > 50", which surfaced as a permanent spinner.
+ * The SDK passes `limit` through untouched and the server still throws, so
+ * this cap is ours to respect.
  */
 const MAX_PAGE_SIZE = 50;
 
-const EVENTS_BY_TYPE = `
-  query EventsByType($type: String!, $last: Int!, $before: String) {
-    events(last: $last, before: $before, filter: { type: $type }) {
-      pageInfo { hasPreviousPage startCursor }
-      nodes { ${EVENT_NODE_FIELDS} }
-    }
-  }
-`;
-
-const EVENTS_PAGE = `
-  query EventsPage($type: String!, $first: Int!, $after: String) {
-    events(first: $first, after: $after, filter: { type: $type }) {
-      pageInfo { hasNextPage endCursor }
-      nodes { ${EVENT_NODE_FIELDS} }
-    }
-  }
-`;
-
-interface GraphQLEventNode {
-  timestamp: string | null;
-  sender: { address: string } | null;
-  transaction: { digest: string } | null;
-  transactionModule: { package: { address: string } | null; name: string } | null;
-  contents: { type: { repr: string }; json: unknown } | null;
-}
-
-async function graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const res = await fetch(SUI_GRAPHQL_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, variables }),
+/** Shared client; stateless with respect to callers, so one is enough. */
+let graphqlClient: SuiGraphQLClient | undefined;
+function getGraphQLClient(): SuiGraphQLClient {
+  graphqlClient ??= new SuiGraphQLClient({
+    url: SUI_GRAPHQL_URL,
+    network: SUI_NETWORK,
   });
-  if (!res.ok) {
-    throw new SuiGraphQLError(`events query failed: HTTP ${res.status}`);
-  }
-  const body = (await res.json()) as { data?: T; errors?: Array<{ message: string }> };
-  if (body.errors?.length) {
-    throw new SuiGraphQLError(body.errors.map((e) => e.message).join("; "));
-  }
-  if (!body.data) throw new SuiGraphQLError("empty GraphQL response");
-  return body.data;
+  return graphqlClient;
 }
 
-function toQuayEvent(n: GraphQLEventNode): QuayEvent {
+/** The slice of the SDK's event shape this module depends on. */
+interface SdkEvent {
+  eventType: string;
+  json: Record<string, unknown> | null;
+  transactionDigest: string;
+  sender: string;
+  packageId: string;
+}
+
+function toQuayEvent(e: SdkEvent): QuayEvent {
   return {
-    type: n.contents?.type?.repr ?? "",
-    parsedJson: n.contents?.json ?? null,
-    txDigest: n.transaction?.digest ?? null,
-    sender: n.sender?.address ?? null,
-    // GraphQL returns an ISO timestamp; callers expect epoch millis.
-    timestampMs: n.timestamp ? String(Date.parse(n.timestamp)) : null,
-    emittingPackage: n.transactionModule?.package?.address ?? null,
+    type: e.eventType,
+    parsedJson: e.json ?? null,
+    txDigest: e.transactionDigest ?? null,
+    sender: e.sender ?? null,
+    emittingPackage: e.packageId ?? null,
   };
 }
 
 /**
  * Most recent events of a Move type, newest first.
  *
- * GraphQL paginates from the end with `last`, which is what "newest N" means
- * here; the result is reversed so callers keep the descending order the old
- * `order: "descending"` gave them.
- *
  * Walks backwards in pages of at most `MAX_PAGE_SIZE`, so `limit` is a request
  * for how many events the caller wants rather than a page size they have to
- * know the server's cap for. Each page arrives oldest-first and every
- * subsequent page is older still, hence the prepend and the single reverse at
- * the end.
+ * know the server's cap for. `before` continues a descending walk, each page
+ * older than the last.
  */
-interface EventsByTypeResponse {
-  events?: {
-    pageInfo?: { hasPreviousPage: boolean; startCursor: string | null };
-    nodes?: GraphQLEventNode[];
-  };
-}
-
 export async function queryEventsByType(
   eventType: string,
   limit = 50,
 ): Promise<QuayEvent[]> {
-  const collected: GraphQLEventNode[] = [];
+  const client = getGraphQLClient();
+  const collected: QuayEvent[] = [];
   let before: string | null = null;
 
   while (collected.length < limit) {
-    const data: EventsByTypeResponse = await graphql<EventsByTypeResponse>(
-      EVENTS_BY_TYPE,
-      {
-        type: eventType,
-        last: Math.min(MAX_PAGE_SIZE, limit - collected.length),
-        before,
-      },
-    );
+    const page = await client.listEvents({
+      filter: { eventType },
+      limit: Math.min(MAX_PAGE_SIZE, limit - collected.length),
+      order: "descending",
+      before,
+    });
 
-    const nodes = data.events?.nodes ?? [];
-    // An empty page with hasPreviousPage still set would otherwise spin here.
-    if (nodes.length === 0) break;
-    collected.unshift(...nodes);
+    // An empty page with hasNextPage still set would otherwise spin here.
+    if (page.events.length === 0) break;
+    collected.push(...page.events.map(toQuayEvent));
 
-    const pageInfo = data.events?.pageInfo;
-    if (!pageInfo?.hasPreviousPage || !pageInfo.startCursor) break;
-    before = pageInfo.startCursor;
+    if (!page.hasNextPage || !page.endCursor) break;
+    before = page.endCursor;
   }
 
-  return collected.map(toQuayEvent).reverse();
+  return collected;
 }
 
 export interface EventPage {
@@ -183,27 +157,23 @@ export interface EventPage {
 /**
  * One page of events of a type, **oldest first**, for cursor-driven indexing.
  * `after` is the opaque `endCursor` from the previous page; pass `null` to
- * start from the beginning of the type's history.
+ * start from the beginning of the type's retained history.
  */
 export async function queryEventsPageAscending(
   eventType: string,
   first: number,
   after: string | null,
 ): Promise<EventPage> {
-  const data = await graphql<{
-    events?: {
-      pageInfo?: { hasNextPage: boolean; endCursor: string | null };
-      nodes?: GraphQLEventNode[];
-    };
-  }>(EVENTS_PAGE, {
-    type: eventType,
-    first: Math.min(first, MAX_PAGE_SIZE),
+  const page = await getGraphQLClient().listEvents({
+    filter: { eventType },
+    limit: Math.min(first, MAX_PAGE_SIZE),
+    order: "ascending",
     after,
   });
   return {
-    events: (data.events?.nodes ?? []).map(toQuayEvent),
-    endCursor: data.events?.pageInfo?.endCursor ?? null,
-    hasNextPage: data.events?.pageInfo?.hasNextPage ?? false,
+    events: page.events.map(toQuayEvent),
+    endCursor: page.endCursor,
+    hasNextPage: page.hasNextPage,
   };
 }
 
@@ -242,7 +212,6 @@ export async function eventsForTransaction(
       parsedJson: e.json ?? null,
       txDigest,
       sender: e.sender ?? null,
-      timestampMs: null,
       emittingPackage: e.packageId ?? null,
     }));
   } catch {
@@ -251,9 +220,10 @@ export async function eventsForTransaction(
 }
 
 /**
- * Coerce a Move `vector<u8>` field out of an event's JSON, whichever
- * transport produced it: JSON-RPC gave `number[]`, GraphQL gives base64, and
- * a hex string shows up occasionally too. Returns `null` when the field is
+ * Coerce a Move `vector<u8>` field out of an event's JSON. The SDK also hands
+ * back the event's raw `bcs`, which is the more reliable source, but callers
+ * here read the JSON projection — where GraphQL renders `vector<u8>` as base64
+ * and a hex string shows up occasionally too. Returns `null` when the field is
  * absent or unrecognisable rather than guessing.
  */
 export function bytesFromEventField(value: unknown): Uint8Array | null {

@@ -11,9 +11,12 @@
  * Transport is gRPC-web, which works from both the server and the browser —
  * `fullnode.mainnet.sui.io` answers preflight with `access-control-allow-origin: *`.
  *
- * What gRPC does NOT cover: there is no event query of any kind on the gRPC
- * surface (only a streaming subscription service). Historical event lookups
- * live in `lib/quay/events.ts` and go to GraphQL instead.
+ * Historical event lookups live in `lib/quay/events.ts` and go to GraphQL
+ * instead — not because gRPC lacks an event query (it has one:
+ * `listEvents`/`LedgerService.ListEvents`) but because a fullnode only serves
+ * its own retention window, which on mainnet is currently short enough to hide
+ * most of Quay's payment history. See the header of `events.ts` for the
+ * measurement; the failure mode is a silently shorter list, not an error.
  */
 
 import { SuiGrpcClient } from "@mysten/sui/grpc";
