@@ -58,7 +58,74 @@ Generated 2026-05-12 from office-hours design session + hackathon scoping.
 - [ ] NETS SGQR terms-of-service legal opinion — risk is reduced by using UEN (ACRA-controlled) rather than NETS-controlled keys, but a formal opinion is still prudent before mainnet
 - [ ] Mobile-number PayNow proxy support (proxy type `0`) for sole-proprietor merchants without a UEN
 - [x] Manual KYB doc review gate before issuer attestation (`/admin/kyb` flow, shipped)
-- [ ] CorpPass federation for automatic UEN ownership verification (replaces the current manual Bizfile review at `/admin/kyb`)
+- [ ] **Harden manual UEN ownership proof — the current check does not establish ownership.**
+  `/app/merchant/onboard` accepts "Bizfile (ACRA) or business letterhead". Neither proves control:
+  an **ACRA business profile is a public record any person can buy for S$5.50** — you need not be
+  an owner or director — and a letterhead is a Word document. So the evidence behind an issuer
+  attestation costs an attacker S$5.50. The payoff is high and silent: claim a real merchant's UEN
+  and payments scanned from their physical sticker settle to the attacker, while the victim (not a
+  Quay user) has no way to notice. The *binding* is fine — JCS `evidence_content` over UEN + name +
+  doc hash + claimer, nonce'd and expiry-bound; it is the attested fact that is weak.
+  Distinguish two failure modes: document **forgery** (fixable by verification) and **impersonation**
+  (genuine document, wrong person — unfixable by any amount of document scrutiny). Today's review
+  only ever addresses the first, and only by eye.
+  Fix, in priority order:
+  - [ ] **Require a PayNow transfer *from* the business account** with a one-time reference code
+    issued per submission (S$0.01 to Quay's PayNow). This is the high-leverage change: the bank
+    already did full KYB to open the account, and PayNow registration already verified the
+    UEN↔entity binding, so Quay **inherits the bank's KYB**. Sending requires account control;
+    receiving proves nothing — that asymmetry is the whole point. On-brand too: merchants already
+    have PayNow, so nothing new must be acquired. Moves the bar from "spend S$5.50" to "control the
+    business bank account". **Verify first:** how much sender detail the bank surfaces on an inbound
+    PayNow credit — the reference code correlates regardless, but a visible sender UEN/registered
+    name would make the match machine-checkable instead of manual.
+    Needs: a `verification_code` + payment-observed state on `kyb_submissions`, and
+    `evidence_content` extended to bind the reference code once payment is the primary evidence.
+  - [ ] **Accept the OpenAttestation (`.oa`) file** ACRA issues alongside the business-profile PDF,
+    and verify it programmatically. Kills forgery outright and removes reviewer judgment — but does
+    **nothing** for impersonation, since a genuine profile is purchasable. Complement to the PayNow
+    check, never a substitute.
+  - [ ] Keep **postal PIN to the ACRA-registered address** in reserve for merchants with no business
+    bank account. Strong, but slow (days) and costs postage.
+  - [ ] Considered and ranked lower: photo of the physical SGQR sticker beside a handwritten one-time
+    code (circumstantial, but hard to fake at scale); NRIC/selfie matched against the Bizfile officer
+    list (standard, forgeable, still closes the "wrong person entirely" gap); business-domain email
+    (poor fit — hawkers and small SMEs mostly have no domain).
+- [ ] **Myinfo Business / Corppass for automatic UEN ownership verification.** The right long-term
+  answer: the merchant's own **Corppass Administrator** designates who may transact for the entity,
+  so authority comes from government records rather than from reviewing a PDF. Data originates from
+  ACRA (via BizFile), BGP, BCA and Corppass; a user may retrieve only their own business's corporate
+  data and their own personal data, which is exactly Quay's need and no more.
+  Researched 2026-08-12 — do not re-derive:
+  - **Cost is a non-issue.** No setup or onboarding fees; freemium gives 50,000 free Login and 5,000
+    free Myinfo Standard transactions per month per UEN. Quay would use a rounding error of that.
+    (Unconfirmed: whether Myinfo Business is priced identically to personal Myinfo — the rate table
+    needs a Singpass login.)
+  - **Three gates, not zero.** Developer Portal access needs GovTech approval; staging/sandbox is
+    self-service once inside; the production app is a *separate* approval taking up to 2 weeks.
+  - **It cannot replace the manual flow.** Onboarding prerequisites state Singpass may not be the
+    sole authentication or form-filling method — a manual/alternative path (manual entry, document
+    upload) is a *condition of approval*. So `/admin/kyb` and the KYB doc handling stay permanently;
+    Myinfo Business becomes the fast path, cutting review *frequency*, not the code or the admin-seed
+    liability in SECURITY.md. Corollary: the hardening item above is not throwaway work — it is the
+    fallback Quay is required to operate either way.
+  - **Biggest risk is the regulated-industry question.** Prerequisites require licences or permits if
+    operating in a regulated industry, and each requested data scope needs written justification.
+    Quay has no PSA/DPT-SP counsel opinion (see above), so that item gates this one. No published
+    policy was found on crypto/DPT use cases in either direction.
+  - **Build on the current version.** Myinfo Business v3 opened for onboarding 2026-05-18, but v3/v4
+    partners must migrate to Myinfo v5 by end September 2026 and be FAPI 2.0 compliant by
+    31 December 2026 — target v5/FAPI 2.0 directly rather than onboarding to v3 and migrating.
+  - **Integration wrinkle:** merchants authenticate with Google zkLogin, but Myinfo Business
+    authenticates with Singpass/Corppass — different identities. The Corppass session proves UEN
+    authority; the attestation must be issued for the Sui address presented **in that same session**,
+    nonce-bound, or a relay attack lets someone pass Corppass for their own UEN and swap in another
+    address. `ClaimMessage` already carries nonce + claimer, so the shape is right.
+- [ ] **Free, zero-approval interim: ACRA open data UEN pre-check.** `data.gov.sg` publishes the ACRA
+  entity register (2M+ entities, refreshed monthly) — UEN, entity name, status, type, address. No
+  application, no cost. Confirms a UEN exists, is active, and matches the claimed name *before* a
+  submission reaches the review queue. It does **not** prove the claimant controls it, so it is a
+  cheap filter on obviously bad claims and a name pre-fill, never a replacement for review.
 - [ ] Retroactive KYB review for grandfathered merchants registered before the KYB gate landed — admin tool to flag a wallet "needs KYB" and surface a banner in their terminal until they submit
 - [ ] v1.1: "Remember key on this device for 24h" password-wrapped storage for the admin X25519 key, to avoid re-signing the derive-key prompt on every session once daily review volume warrants it
 - [ ] v2: WebAuthn / Touch ID-derived unlock as an alternative to wallet-signature derivation
