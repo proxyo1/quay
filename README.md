@@ -153,6 +153,19 @@ The only custodial path in the app, and a deliberately throwaway one — a hacka
 
 The 25 bps spread is Quay's fee: it holds 100% of the USDsui and disburses 99.75% of its SGD worth. Quote math is pure and unit-tested in [`frontend/src/lib/server/cashout-fee.ts`](frontend/src/lib/server/cashout-fee.ts).
 
+### 5. Cash out USDsui → USDC via Coinbase (✅ non-custodial, off by default)
+
+The second money-out rail, and the one that does not require trusting Quay with the funds: the merchant sells USDC from **their own address** into **their own KYC'd Coinbase account**. Quay mints session tokens and builds the send; it never holds the coins. Gated behind `coinbase_offramp_enabled` (off by default), with a per-transaction cap (`COINBASE_OFFRAMP_MAX_SGD_MINOR`) and a daily cap (`COINBASE_OFFRAMP_DAILY_CAP`) that is **zero — disabled — by default**.
+
+1. `/api/offramp/coinbase/session` authorises the merchant by **on-chain registry membership** — does this address own a registered UEN? — and mints a short-lived token. A signed nonce would not work here: `zkLoginSign` can't sign an arbitrary message, and anyone can mint a zkLogin address anyway, so possession of one proves nothing.
+2. A live Cetus quote determines how much USDC the merchant can actually realise. **The amount is derived from the quote, never chosen first** — committing a `sell_amount` to Coinbase and then finding the swap unfundable would put an uncontrollable dependency after an irreversible commitment. If the balance is in Scallop, it is redeemed first.
+3. The Coinbase widget opens in a **new window** (`window.open`, not a redirect — a redirect can lose the session). The merchant confirms the sale there and Coinbase returns a deposit address, which `/api/offramp/coinbase/status` polls for.
+4. `/api/offramp/coinbase/prepare` builds the sponsored swap+send. The merchant zkLogin-signs in their browser and the USDC goes straight to Coinbase's deposit address.
+
+**Signing is client-only** — the zkLogin key exists only in the merchant's browser, so no server and no cron can fill an order on their behalf. A merchant who completes the widget and closes the tab before sending leaves an order nobody can finish; [`/api/cron/coinbase-reconcile`](frontend/src/app/api/cron/coinbase-reconcile) only settles rows that already sent.
+
+Two limits worth stating plainly. **Singapore has no Coinbase bank payout rail** (`payment_methods = CRYPTO_ACCOUNT, FIAT_WALLET`), so this pays into the merchant's Coinbase *balance*, not their bank — it is **not parity with the Wise demo** and does not on its own justify deleting it. And **there is no offramp sandbox**: any end-to-end test is real money against production Coinbase. Corridor facts are re-verifiable with [`scripts/coinbase-offramp-probe.ts`](scripts/coinbase-offramp-probe.ts) → [`docs/coinbase-offramp-probe.md`](docs/coinbase-offramp-probe.md).
+
 ---
 
 ## Architecture
@@ -195,7 +208,8 @@ Merchants can opt idle USDsui into a Scallop lending position from `/app/merchan
 
 - **Issuer**: ed25519 keypair held by Quay-the-company in `.secrets/issuer-testnet.json` (gitignored). The key is network-agnostic — the same pubkey is committed on both testnet and mainnet, and the registry's `chain_id` (1 on mainnet, never reused) is what prevents cross-network attestation replay. Signs `ClaimMessage` attestations server-side via `/api/attest`. Production path: air-gapped hardware key → 2-of-3 multisig → NETS-controlled signer / BizFile+ federation. Rotation is a single `rotate_issuer_pubkey` call, no redeploy.
 - **Sponsor**: separate ed25519 keypair that covers gas for onboarding, settlement-preference updates, partial withdrawals, and yield toggles. Rate-limited per address (5 onboardings/day, 10 metadata-updates/day). Refuses to sign if its own balance falls below 20% of the funding target.
-- **Treasury** (`.secrets/treasury-mainnet.json`): used **only** by the cash-out demo — the one custodial path in the app. Briefly holds USDsui between the on-chain transfer and the Wise PayNow SGD payout. Off by default behind `cashout_enabled` + `WISE_ENV=sandbox`.
+- **Treasury** (`.secrets/treasury-mainnet.json`): used **only** by the Wise cash-out demo — the one custodial path in the app. Briefly holds USDsui between the on-chain transfer and the Wise PayNow SGD payout. Off by default behind `cashout_enabled` + `WISE_ENV=sandbox`. The Coinbase rail does **not** touch it.
+- **Coinbase CDP** (`/api/offramp/coinbase/*`): the non-custodial cash-out rail. Quay holds CDP API credentials to mint offramp sessions and read order status, but never the merchant's funds — USDC moves from the merchant's own address to their own Coinbase account. Authorisation is on-chain registry membership rather than a signed nonce ([`frontend/src/lib/server/coinbase-auth.ts`](frontend/src/lib/server/coinbase-auth.ts)). Off by default behind `coinbase_offramp_enabled`.
 - **Walrus**: stores merchant profile JSON (logo blob ID + preferred receive token + name), full payment receipts, **and encrypted KYB documents** (AES-256-GCM ciphertext, plaintext never touches the server). Operator audit log records the `(evidence_hash, walrus_blob_id)` mapping in Supabase so the issuer-signed evidence is recoverable.
 - **KYB admin (`ADMIN_WALLETS`, `ADMIN_KYB_PUBKEY`, `ADMIN_JWT_SECRET`)**: mnemonic-backed Sui wallet whose ed25519 signature over `"QUAY_KYB_DECRYPT_KEY_V1"` deterministically derives the X25519 decryption key. The private key is **never stored** — re-derived in the admin's browser each session. Loss of the wallet seed = inability to decrypt pending docs. See [`SECURITY.md`](SECURITY.md) for the full threat model.
 
@@ -203,13 +217,13 @@ Merchants can opt idle USDsui into a Scallop lending position from `/app/merchan
 
 The authed app surface lives under the `/app` namespace (`app.quay.cash`). Library code is organized by domain:
 
-- `frontend/src/lib/quay/` — pay + register + lookup + indexer + Walrus profile fetch + Scallop yield + transfer (withdraw)
+- `frontend/src/lib/quay/` — pay + register + lookup + indexer + Walrus profile fetch + Scallop yield/redeem + transfer (withdraw) + swap-to-USDC (Coinbase offramp)
 - `frontend/src/lib/dex/` — Cetus Aggregator wrapper, user balances hook, partner config
 - `frontend/src/lib/walrus/` — publisher + aggregator client, v1 profile schema
 - `frontend/src/lib/pyth/` — Hermes client, USD/SGD inversion, SUI/USD pull
 - `frontend/src/lib/sgqr/` — EMVCo MPM parser + builder + CRC16 + quote-metadata codec
 - `frontend/src/lib/zklogin/` — Enoki session, sign helpers
-- `frontend/src/lib/server/` — server-only issuer, sponsor, treasury, Wise, cashout-store
+- `frontend/src/lib/server/` — server-only issuer, sponsor, treasury, Wise, cashout-store, Coinbase offramp (session/store/auth)
 
 ---
 
@@ -402,7 +416,8 @@ The on-chain primitive supports all three without redeploy — only the issuer k
 | **Mainnet deployment** | ✅ Shipped | Live since 2026-05-15. IDs above; canonical artifact `scripts/deploy-mainnet.json`. |
 | **Gasless stablecoin transfers** | ✅ partial (withdraw) | Live on mainnet (v125, 2026-05-20), USDsui allowlisted. Withdraw-everything ships gasless via [`0x2::coin::send_funds`](https://docs.sui.io/develop/transaction-payment/gasless-stablecoin-transfers) (zero fee, no SUI). Remaining: a no-receipt gasless quick-pay. `payments::pay<T>` stays sponsored+receipted — a custom event disqualifies gasless. |
 | **Scallop USDsui yield** | ✅ shipped | Sponsored opt-in from the wallet; payments auto-route into the yield position. Cost basis tracked by Vercel crons. |
-| **Licensed non-custodial cash-out leg** | 📋 V2 | Replace the personal-Wise demo with a licensed PayNow settlement leg (StraitsX) or Bridge/Stripe issuer redemption; delete the custodial demo. |
+| **Non-custodial cash-out (Coinbase CDP)** | ✅ shipped, flag OFF | Merchant sells USDC from their own address into their own KYC'd Coinbase account; Quay never holds funds. Pays into a Coinbase *balance* — SG has no bank payout rail — so it is **not parity** with the Wise demo. |
+| **Licensed non-custodial cash-out leg** | 📋 V2 | Replace the personal-Wise demo with a licensed PayNow settlement leg (StraitsX) or Bridge/Stripe issuer redemption — Bridge issues USDsui and would redeem at par, removing the swap leg and ending in a bank account; then delete the custodial demo. |
 | **LP-mode inventory market-making** | 📋 V0.5 | Aggregator referral covers V0 revenue with $0 capital. Inventory mode adds spread capture once volume justifies $10k–$50k seed. |
 | **Mobile-number PayNow** (proxy type `0`) | 📋 V0.5 | ~70% of SG hawkers use mobile-number PayNow rather than UEN. Domain-tag namespacing (`PAYNOW_MOBILE_V1`) is already designed in; needs frontend parser + a new attestation flow. |
 | **SuiNS optional name attach** | 📋 V0.5 | Address truncation works for V0; SuiNS lookup adds a human-readable label in the terminal feed. |
@@ -415,7 +430,8 @@ The on-chain primitive supports all three without redeploy — only the issuer k
 
 - **Mobile-number PayNow not supported in V0.** Domain-tag scheme is in place; needs frontend wiring + attestation policy.
 - **The V0 attestation issuer is single-key and ops-controlled.** Mitigated by AdminCap rotation; V1 migrates to multisig, V2 to a NETS-controlled signer or BizFile+ self-attestation.
-- **Cash-out is a custodial demo on a personal Wise account** within hackathon scope. Off by default (`cashout_enabled`, `WISE_ENV=sandbox`); the licensed non-custodial settlement leg is V2. No Singapore PSA/DPT-SP counsel opinion has been obtained — do not treat the cash-out path as production-ready.
+- **The Wise cash-out rail is a custodial demo on a personal Wise account** within hackathon scope. Off by default (`cashout_enabled`, `WISE_ENV=sandbox`); the licensed non-custodial settlement leg is V2. No Singapore PSA/DPT-SP counsel opinion has been obtained — do not treat it as production-ready.
+- **The Coinbase cash-out rail is non-custodial but not a Wise replacement.** Off by default (`coinbase_offramp_enabled`, daily cap defaults to zero). It pays into a Coinbase *balance* rather than a bank, requires each merchant to hold a KYC'd Coinbase SG account, and costs roughly 4× the Wise leg (~101 bps measured against 25 bps). Its win is non-custody, not merchant economics. **There is no offramp sandbox** — end-to-end testing is real money. Abandoning the flow after the Coinbase widget but before signing is unrecoverable, because the signing key lives only in the merchant's browser.
 - **Testnet (dev) has no Quay-USDC ↔ SUI aggregator route.** A side effect of the bridged testnet stable Cetus's subgraph doesn't index; mainnet does not have this gap.
 - **No camera-scan support for non-SGQR formats.** Other countries' QR formats need separate parsers (see "Fork this for your country").
 
@@ -449,18 +465,19 @@ quay/
 │   │       ├── kyb/               # submit / status / finalize / admin-pubkey
 │   │       ├── admin/             # wallet-signed admin queue
 │   │       ├── sponsor/           # update-metadata / withdraw / toggle-yield / earn-move
-│   │       ├── cashout/           # quote / initiate / confirm (custodial demo)
-│   │       ├── cron/              # Scallop monitor + cost-basis indexer
+│   │       ├── cashout/           # quote / initiate / confirm (custodial Wise demo)
+│   │       ├── offramp/coinbase/  # session / prepare / status (non-custodial)
+│   │       ├── cron/              # Scallop monitor + cost-basis indexer + coinbase-reconcile
 │   │       ├── receipts/          # receipt lookup
 │   │       └── zklogin/salt/      # zkLogin salt service
 │   └── src/lib/
 │       ├── dex/                   # Cetus Aggregator + balances + partner config
 │       ├── pyth/                  # Hermes client + SGD/USD/SUI quote math
-│       ├── quay/                  # pay + register + lookup + indexer + scallop + transfer
+│       ├── quay/                  # pay + register + lookup + indexer + scallop + transfer + swap-to-usdc
 │       ├── sgqr/                  # EMVCo MPM parser + builder + quote-metadata codec
 │       ├── walrus/                # client + v1 merchant profile schema
 │       ├── zklogin/               # Enoki integration + ephemeral key handling
-│       ├── server/                # issuer, sponsor, treasury, wise, cashout-store (server-only)
+│       ├── server/                # issuer, sponsor, treasury, wise, cashout-store, coinbase-* (server-only)
 │       └── sui-config.ts          # active network + deployed IDs (mirrors deploy-mainnet.json)
 ├── scripts/                       # bun-runnable ops + smoke tooling
 │   ├── deploy-mainnet.json        # canonical mainnet IDs
@@ -477,11 +494,13 @@ quay/
 │   ├── gasless-withdraw-spike.ts  # verifies 0x2::coin::send_funds gasless path
 │   ├── cashout-redrive.ts         # recover stuck Wise payouts
 │   ├── wise-smoke.ts / wise-payout-probe.ts  # Wise sandbox probes
+│   ├── coinbase-offramp-probe.ts  # re-verify the CDP offramp corridor
 │   └── gen-test-vectors.ts        # ed25519 test vectors for Move tests
 ├── supabase/migrations/           # Postgres schema (KYB, audit log, flags, yield cost basis)
 ├── docs/
 │   ├── GOOGLE_OAUTH_SETUP.md      # zkLogin path setup
-│   └── DRESS_REHEARSAL.md         # demo runbook
+│   ├── coinbase-offramp-probe.md  # measured CDP offramp corridor facts
+│   └── DRESS_REHEARSAL.md         # demo runbook (testnet-era)
 ├── SECURITY.md                    # threat model + custody disclosure
 ├── TODOS.md
 ├── CONTRIBUTING.md

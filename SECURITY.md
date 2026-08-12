@@ -1,9 +1,14 @@
 # Security policy
 
-quay is a hackathon submission on Sui testnet. There is no mainnet
-deployment and no production users to harm — but the Move contract is
-intended to migrate to mainnet, and the trust model below is what
-governs that migration.
+quay began as a hackathon submission on Sui testnet and is now **deployed
+to Sui mainnet** (testnet artifacts are archived). The trust model below
+governs the live deployment, not a hypothetical future one.
+
+Two paths can move real money and are therefore **both off by default**:
+the custodial Wise PayNow cash-out demo (`cashout_enabled`, and
+`WISE_ENV=sandbox` unless deliberately flipped) and the non-custodial
+Coinbase CDP offramp (`coinbase_offramp_enabled`, with a daily cap that
+defaults to zero). Read "Known V0 caveats" before enabling either.
 
 ## Reporting a vulnerability
 
@@ -79,9 +84,56 @@ issues for un-patched vulnerabilities.
 | `pay<T>` slippage from off-chain Pyth quote | UI shows the rate the user accepted; on-chain settlement uses whatever Coin the wallet sends | Day 5.5+ Cetus on-chain swap with `amount_limit` slippage cap |
 | Phishing site impersonation | None — single deploy at quay.com (when mainnet) | DNSSEC + HSTS + Tag 59 strict allowlist on rendered names (AD29) |
 | Mobile-number PayNow gap | Not supported in V0 | `PAYNOW_MOBILE_V1` namespace via the domain-tag scheme |
-| Merchant cash-out custody | **Custodial demo.** `/api/cashout/*` briefly holds the merchant's USDsui in a Quay treasury (`.secrets/treasury-mainnet.json`) between the on-chain transfer and a Wise PayNow SGD payout funded from a Quay float. Defaults to `WISE_ENV=sandbox` (no real money) and the `cashout_enabled` flag is off by default; **live (`WISE_ENV=live`) is a deliberate config flip** intended only for controlled own-funds payouts, bounded by a per-tx cap (`CASHOUT_MAX_SGD_MINOR`, default S$50) + 10/day per-address limit. | V2 non-custodial licensed leg (StraitsX PayNow settlement or Bridge/Stripe issuer redemption); delete the demo (see TODOS). |
+| Merchant cash-out custody (Wise rail) | **Custodial demo.** `/api/cashout/*` briefly holds the merchant's USDsui in a Quay treasury (`.secrets/treasury-mainnet.json`) between the on-chain transfer and a Wise PayNow SGD payout funded from a Quay float. Defaults to `WISE_ENV=sandbox` (no real money) and the `cashout_enabled` flag is off by default; **live (`WISE_ENV=live`) is a deliberate config flip** intended only for controlled own-funds payouts, bounded by a per-tx cap (`CASHOUT_MAX_SGD_MINOR`, default S$50) + 10/day per-address limit. | V2 non-custodial licensed leg (StraitsX PayNow settlement or Bridge/Stripe issuer redemption); delete the demo (see TODOS). |
+| Merchant cash-out (Coinbase rail) | **Non-custodial.** The merchant sells USDC from their own address into their own KYC'd Coinbase account; Quay mints session tokens and builds the send but never holds funds. Off by default behind `coinbase_offramp_enabled`, and additionally bounded by a per-tx cap (`COINBASE_OFFRAMP_MAX_SGD_MINOR`), a daily cap (`COINBASE_OFFRAMP_DAILY_CAP`, **0 = disabled, and 0 is the default**), and a one-open-cash-out-per-owner index. **There is no Coinbase offramp sandbox** — any end-to-end test is real money against production. | Evaluate Bridge/Stripe redemption at par (removes the swap leg, ends in a bank rather than a Coinbase balance). See TODOS. |
+| Coinbase offramp abandonment | Signing is **client-only** — `zkLoginSign` needs a key that exists only in the merchant's browser, so no server or cron can fill an order. A merchant who completes the Coinbase widget and then closes the tab before sending leaves an order Quay cannot complete on their behalf; the reconcile cron only settles rows that already sent. | Unrecoverable by design, not by omission — the alternative is server-side custody of a signing key. Surfaced to the merchant rather than retried silently. |
 
-The cash-out flow is the only custodial path in quay. Code defaults are
+### The two cash-out rails differ in custody, and only one is custodial
+
+There are two money-out-to-fiat paths on `/app/merchant/wallet`, and they are
+not variations on one design:
+
+- **Coinbase CDP offramp** (`/api/offramp/coinbase/*`) — **non-custodial**. The
+  merchant sells USDC out of their own address into their own KYC'd Coinbase
+  account. Quay mints session tokens and builds the swap+send; it never holds
+  the funds. Gated OFF by `coinbase_offramp_enabled`.
+- **Wise PayNow demo** (`/api/cashout/*`) — **custodial**, and the only
+  custodial path in quay. Described below.
+
+Three properties of the Coinbase rail are load-bearing and easy to regress:
+
+1. **Authorisation is on-chain registry membership, not a signed nonce.** The
+   obvious design fails twice: `zkLoginSign` cannot sign an arbitrary message
+   (it wraps a TransactionData-intent signature), and proving control of a
+   zkLogin address is not an abuse control anyway — any Google account yields
+   one, so an attacker can mint addresses freely. The meaningful gate is
+   whether the address owns a registered UEN in `MerchantRegistry`: scarce
+   (it requires passing KYB and an issuer attestation), exactly the population
+   allowed to cash out, and unforgeable. A successful check mints a
+   short-lived Quay token so the polling and prepare calls need not re-read
+   the chain. See [`frontend/src/lib/server/coinbase-auth.ts`](frontend/src/lib/server/coinbase-auth.ts).
+2. **Signing is client-only.** No server path and no cron can fill an order.
+   This is why the widget opens with `window.open` rather than a redirect (a
+   redirect can lose the session) and why the reconcile cron only settles rows
+   that already sent.
+3. **The USDC amount is derived from a live Cetus quote, never chosen first.**
+   Committing a `sell_amount` to Coinbase and *then* discovering the swap
+   cannot be funded puts an uncontrollable dependency after an irreversible
+   commitment.
+
+Two disclosure points that copy must respect: **Singapore has no Coinbase bank
+payout rail** (`payment_methods = CRYPTO_ACCOUNT, FIAT_WALLET`), so Coinbase
+pays into the merchant's Coinbase *balance* — never imply Quay settles to a
+bank. And **there is no offramp sandbox**, so any end-to-end verification is
+real money against production Coinbase.
+
+The Coinbase rail is therefore **not parity** with the Wise demo and does not
+by itself unblock deleting it: it ends in a Coinbase balance rather than a bank
+account, and requires each merchant to hold a KYC'd Coinbase SG account.
+
+### The Wise cash-out demo
+
+The Wise cash-out flow is the only custodial path in quay. Code defaults are
 inert — sandbox payouts, flag off — so the repo ships moving no real money;
 going live is an explicit operator decision (`WISE_ENV=live` + a live Wise
 token + flipping `cashout_enabled`), and is intended only for an operator
@@ -101,7 +153,7 @@ failing silently.
 The trust-critical Move surface is small:
 
 - [`move/quay/sources/payments.move`](move/quay/sources/payments.move)
-  — ~290 LOC. `register_merchant`, `set_initial_issuer_pubkey`,
+  — ~517 LOC. `register_merchant`, `set_initial_issuer_pubkey`,
   `rotate_issuer_pubkey`, and the BCS `ClaimMessage` shape are the
   load-bearing pieces. `pay` and `refund` are essentially
   emit-and-forward.
@@ -124,8 +176,22 @@ The trust-critical server surface is also small:
   request. Same JWT signing key (`ADMIN_JWT_SECRET`) used for merchant
   polling tokens in
   [`frontend/src/lib/server/polling-token.ts`](frontend/src/lib/server/polling-token.ts).
+- [`frontend/src/lib/server/coinbase-auth.ts`](frontend/src/lib/server/coinbase-auth.ts)
+  — the registry-membership gate on the Coinbase offramp routes, plus the
+  short-lived token it mints. Read the header before changing it; the
+  rejected alternatives are documented there and both are dead ends.
+- [`frontend/src/lib/server/coinbase-offramp.ts`](frontend/src/lib/server/coinbase-offramp.ts)
+  + [`frontend/src/lib/server/coinbase-offramp-store.ts`](frontend/src/lib/server/coinbase-offramp-store.ts)
+  — CDP session/quote calls and the cash-out state machine, including the
+  caps and the one-open-cash-out-per-owner index.
 
 If you're auditing, start there.
+
+**Known gap, deliberately not reproduced.** `/api/cashout/*` and
+`/api/sponsor/*` have **no authentication** — `owner` is client-supplied and
+regex-validated only. That hole is pre-existing. The Coinbase routes do not
+reproduce it (they gate on registry membership, above); retrofitting the same
+gate to the older routes is tracked in TODOS.
 
 ## KYB key custody
 

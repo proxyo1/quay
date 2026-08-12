@@ -95,7 +95,16 @@ vulnerabilities.
 
 - Anything that adds a custodial path (quay holding user keys / coins).
   The whole point of this protocol is that quay never custodies user
-  funds.
+  funds. There is exactly one grandfathered exception — the Wise PayNow
+  cash-out demo (`/api/cashout/*`), which is deliberately throwaway and
+  scheduled for deletion (see TODOS) — and it is not a precedent. The
+  Coinbase CDP offramp (`/api/offramp/coinbase/*`) is the pattern to
+  follow for money-out work: the merchant sells from their own address
+  into their own account, and quay builds the transaction without ever
+  holding the funds. Note that its signing is necessarily **client-only**
+  (the zkLogin key exists only in the browser), so do not add a server or
+  cron path that "completes" a stalled order — that would mean custody of
+  a signing key.
 - Anything that hardcodes mainnet contract addresses without a
   documented multisig rotation plan for the issuer key.
 - Anything that removes the AD48 ("Why not just off-ramp?") section
