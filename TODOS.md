@@ -126,6 +126,32 @@ Generated 2026-05-12 from office-hours design session + hackathon scoping.
   application, no cost. Confirms a UEN exists, is active, and matches the claimed name *before* a
   submission reaches the review queue. It does **not** prove the claimant controls it, so it is a
   cheap filter on obviously bad claims and a name pre-fill, never a replacement for review.
+- [ ] **Deferred by the 2026-08-20 eng review: hijack detection + recovery.** The mandatory PayNow
+  micro-deposit (a cent sent to the UEN's PayNow proxy carrying a reference code the merchant reads
+  off their statement) makes claiming someone else's UEN genuinely hard, so the tooling for spotting
+  and undoing a hijack was deferred rather than dropped. Each item below has a trigger; if the trigger
+  fires, the deferral judgement was wrong and the item becomes urgent.
+  - [ ] **`admin_reassign_merchant` in Move** — the only way to fix a wrong registration. Today
+    `update_merchant_address` (`payments.move:372`) asserts only `entry.sui_address == ctx.sender()`,
+    so a registry entry can never be moved without the holder's key: a bad entry is permanent for
+    everyone, including you. Design settled: gated on `AdminCap` **and** a fresh issuer attestation
+    (so no single key can seize a UEN), aborts unless a dispute evidence blob exists, pages a human on
+    every call, reuses the existing BCS `ClaimMessage` verify path. Note `MerchantEntry` and
+    `MerchantRegistry` layouts are frozen by Sui upgrade rules, so any new state needs dynamic fields;
+    the dispute record goes in the entry's `evidence_hash` instead. **This is the only irreversible
+    change in the plan — published forever once shipped, which is exactly why it waited.**
+    *Trigger: the first contested claim.*
+  - [ ] **Payer-side verification signal at `/app/scan`** — show the ACRA-registered business name (and
+    verification method) before the payer confirms. The victim of a hijack is not a Quay user and cannot
+    notice, but the payer is looking at a screen at the exact moment of loss. Must read cache-only with
+    a hard timeout so data.gov.sg is never in the payment path, and must read as positive confirmation
+    rather than a warning, or payers learn to ignore it. *Trigger: any hijack at all.*
+  - [ ] **Public `/m/<uen>` lookup + contest intake** — the only mechanism by which a non-user victim
+    could ever discover that their UEN was claimed. `payments.move` already references the route but
+    `src/app/m` does not exist. Watch out: it is an enumeration oracle (UEN → Sui address → public
+    balance), so rate-limit it, return an identical shape for unregistered UENs, publish no listing
+    endpoint, and consider omitting the address entirely since verification status and claim date are
+    all a victim actually needs. *Trigger: any hijack at all.*
 - [ ] Retroactive KYB review for grandfathered merchants registered before the KYB gate landed — admin tool to flag a wallet "needs KYB" and surface a banner in their terminal until they submit
 - [ ] v1.1: "Remember key on this device for 24h" password-wrapped storage for the admin X25519 key, to avoid re-signing the derive-key prompt on every session once daily review volume warrants it
 - [ ] v2: WebAuthn / Touch ID-derived unlock as an alternative to wallet-signature derivation
