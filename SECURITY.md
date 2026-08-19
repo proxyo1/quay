@@ -44,13 +44,41 @@ issues for un-patched vulnerabilities.
   `.secrets/issuer-testnet.json` (or the prod equivalent) lets the
   holder mint arbitrary attestations. V1 migrates to a multisig via
   `rotate_issuer_pubkey(cap, registry, new_pubkey, clock)`.
-- **The attestation route is now human-gated.** As of the KYB review
-  flow, `/api/kyb/finalize` only issues an attestation for submissions
-  the admin has explicitly approved via `/admin/kyb`. The merchant
-  uploads an encrypted proof-of-ownership document at submission time
-  (Bizfile from ACRA, business letterhead, etc.); the admin reviews and
-  decides before any signature is minted. See "KYB key custody" below
-  for the admin trust model.
+- **UEN ownership is proven by a PayNow micro-deposit, not by document
+  review.** Quay sends S$0.01 to the UEN proxy encoded on the merchant's
+  SGQR sticker, carrying a reference code; the merchant reads it off
+  their bank statement and enters it. Passing requires visibility into
+  the account that UEN receives PayNow into, which is the same account
+  the physical sticker pays into. `/api/kyb/finalize` issues an
+  attestation only for submissions that cleared that check.
+
+  This replaced admin review of an uploaded Bizfile. That check did not
+  establish ownership: an **ACRA business profile is a public record any
+  person can buy for S$5.50**, so the evidence behind an attestation cost
+  an attacker S$5.50. Document review addresses forgery; it cannot
+  address impersonation, where the document is genuine and the claimant
+  is not the owner. The micro-deposit addresses impersonation directly,
+  and is a challenge Quay issues rather than evidence the claimant
+  selects.
+
+  Residual risks: code entry is capped at 5 attempts per hour and the
+  counter **fails closed**, because it is the only thing between a
+  guesser and someone else's UEN. Codes expire, and expiry is required
+  rather than cosmetic — an unexpired abandoned claim would hold a real
+  business's UEN hostage via the uniqueness index. ACRA data is used for
+  autofill and to supply the payout address; it is never a gate, since
+  the register refreshes monthly and a newly incorporated company is
+  legitimately absent.
+- **Payout redirection can be detected but NOT prevented.**
+  `update_merchant_address` (`payments.move:372`) asserts only that the
+  caller currently holds the entry, and Sui's compatible-upgrade rules
+  forbid changing an existing public function's signature, so no
+  attestation can be demanded of it; a v2 function would leave v1
+  callable forever. The adversary here is the caller, so an application
+  check stops nobody. `/api/cron/payout-watch` watches the
+  `MerchantAddressUpdated` event and alerts, which shrinks
+  time-to-discovery but is not a control. Recovery for a wrongly-held UEN
+  (`admin_reassign_merchant`) is designed and deferred; see TODOS.md.
 - **The Sui Move code has not been independently audited.** Required
   before mainnet ($25–50k, 4–6 weeks lead time, OtterSec / MoveBit /
   Zellic recommended).

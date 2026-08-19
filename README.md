@@ -65,7 +65,7 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 | Surface | Status |
 |---|---|
 | `/app/merchant/login` — Google zkLogin (Enoki prover) | ✅ |
-| `/app/merchant/onboard` — claim a UEN, pick receive token, upload logo, attach KYB proof (Bizfile/letterhead, encrypted in-browser) | ✅ sponsored gas + admin review |
+| `/app/merchant/onboard` — claim a UEN, confirm the ACRA-registered name, pick receive token, upload logo | ✅ sponsored gas + PayNow code verification |
 | `/app/merchant/onboard/pending` — submission status, polls every 30s, "Complete registration" once approved | ✅ |
 | `/app/merchant/wallet` — view identity, **change settlement preference any time** | ✅ sponsored gas |
 | `/app/merchant/wallet` — **withdraw USDsui to any address** (non-custodial) | ✅ gasless for the full balance (`0x2::coin::send_funds`); sponsored gas for partial amounts |
@@ -88,7 +88,7 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 | `/api/kyb/finalize` — post-approval: build evidence_content (JCS), sign attestation, return sponsored tx (5/day per address) | ✅ |
 | `/api/admin/*` — wallet-signed admin queue: `challenge`, `auth`, `kyb/list`, `kyb/[id]`, `kyb/[id]/decide` | ✅ |
 | `/app/admin/setup` — one-time wallet → X25519 pubkey derivation for `ADMIN_KYB_PUBKEY` | ✅ |
-| `/app/admin/kyb` — admin review queue, in-browser decryption via wallet-signature-derived key | ✅ |
+| `/app/admin/kyb` — exception queue: cents awaiting a manual send, lockouts, and legacy document review | ✅ |
 | `/api/sponsor/update-metadata` — sponsored settlement-token changes (10/day) | ✅ |
 | `/api/sponsor/withdraw` — sponsored partial USDsui withdrawals | ✅ |
 | `/api/sponsor/toggle-yield` + `/api/sponsor/earn-move` — sponsored Scallop yield opt-in/out | ✅ |
@@ -102,28 +102,32 @@ PayNow is free for Singapore merchants and 99% of payers use it. quay isn't tryi
 
 ## How it works (product walkthrough)
 
-### 1. Merchant onboarding (two phases, ~2 minutes of merchant time + admin review)
+### 1. Merchant onboarding (~2 minutes, no review queue)
 
-**Phase 1 — Submit (merchant, ~2 minutes):**
+**Step 1 — Claim (merchant, seconds):**
 
 1. Sign in at `/app/merchant/login` with Google → Enoki returns a Groth16 zk-proof binding the Google identity to a deterministic Sui address.
-2. Scan their SGQR sticker (or type UEN manually).
-3. Optionally upload a logo and business name.
-4. Pick **how they want to receive payments**: USDsui (default) or SUI.
-5. **Attach a proof of business ownership** (Bizfile from ACRA, or business letterhead): PDF / PNG / JPEG / WebP, ≤ 5 MB. The browser generates a per-doc AES-256-GCM key, encrypts the doc, wraps the key with the admin's X25519 pubkey via NaCl `crypto_box_seal`, and uploads the ciphertext to Walrus. Plaintext bytes never leave the browser.
-6. Tap "Submit for review" → row inserted in `kyb_submissions` with `status='pending'`, polling-token JWT returned, merchant redirected to `/app/merchant/onboard/pending` (polls every 30s).
+2. Scan their SGQR sticker (or type the UEN manually).
+3. Confirm the business name. It comes from ACRA's open register, looked up by UEN. Merchants can add the **trading name** customers actually know: a stall registered as "AH HOCK F&B ENTERPRISE" trades as "Ah Hock Chicken Rice", and only the registered name is bound on chain.
+4. Pick **how they want to receive payments**: USDsui (default) or SUI. Optionally add a logo.
 
-**Phase 2 — Admin review (~1 business day target):**
+**Step 2 — Prove they own the UEN (merchant, one code):**
 
-7. Admin connects their mnemonic-backed Sui wallet at `/app/admin/kyb`, signs a challenge → 1h HttpOnly cookie set.
-8. Click a pending row → wallet pops up to sign `"QUAY_KYB_DECRYPT_KEY_V1"` (deterministic ed25519 → HKDF-SHA256 + RFC 7748 clamp → X25519 priv key, in browser memory only). Ciphertext fetched from Walrus, decrypted, doc rendered inline (PDF iframe / image zoom).
-9. Admin clicks **Approve** (or Reject with reason). Row flips to `status='approved'`.
+5. Quay sends **S$0.01 via PayNow to the UEN on their sticker**, carrying a reference code like `QUAY-7F3K9M`.
+6. The merchant finds it in their bank app and types the code back at `/app/merchant/onboard/pending`.
 
-**Phase 3 — Finalize (merchant, 1 signature):**
+That round trip is the whole ownership proof. Reading the code requires seeing deposits into the account that UEN's PayNow pays into, which is the same account the sticker on the shopfront pays into. It is a challenge Quay issues, not evidence the claimant supplies — which matters, because anything a claimant hands over they can shop for.
 
-10. Merchant's pending page polls, sees status flip to "Approved", clicks **Complete registration**.
-11. Server builds canonical `evidence_content` JSON (JCS, RFC 8785) binding UEN + business_name + `kyb_doc_hash_hex` + `kyb_doc_blob_id` + timestamps + claimer address, hashes it to `evidence_hash`, issuer signs an ed25519 attestation, sponsor co-signs gas, returns sponsored tx bytes.
-12. Merchant signs as sender via zkLogin, `register_merchant` lands on chain with `evidence_hash` committing to the KYB doc.
+The screen is built for leaving and coming back: it survives losing the browser tab, does not require re-signing in, and says plainly that the cent may take a while.
+
+**Step 3 — Finalize (merchant, 1 signature):**
+
+7. Server builds canonical `evidence_content` JSON (JCS, RFC 8785) v2, binding UEN + registered name + trading name + verification method + the ACRA snapshot taken at claim time + timestamps + claimer address. Hashes it to `evidence_hash`, issuer signs an ed25519 attestation, sponsor co-signs gas.
+8. Merchant signs as sender via zkLogin; `register_merchant` lands on chain.
+
+**Why there is no document any more.** Onboarding used to take an encrypted Bizfile for an admin to review. It never proved ownership: an ACRA business profile is a **public record any person can buy for S$5.50**, so the evidence behind an attestation cost an attacker S$5.50, and review only ever caught forgery, only by eye. Proof of control over the receiving account replaced it, which also removed the ~1 business day wait and the document-storage liability. `/app/admin/kyb` still exists, as an exception queue.
+
+`evidence_content` v1 blobs remain verifiable: their hashes are committed on chain and cannot be backfilled, so readers switch on `v`.
 
 Total wallet balance required: **zero SUI**. The chain commits a 32-byte hash that anyone can verify against the Walrus blob — KYB proof becomes tamper-evident without leaking the document.
 
@@ -456,7 +460,7 @@ quay/
 │   │   │   ├── merchant/wallet/   # identity + settlement change + withdraw + yield
 │   │   │   ├── merchant/terminal/ # live PaymentReceipt feed
 │   │   │   ├── merchant/history/  # incoming-payment history
-│   │   │   ├── admin/kyb/         # admin review queue
+│   │   │   ├── admin/kyb/         # exception queue (sends, lockouts, legacy docs)
 │   │   │   └── admin/setup/       # one-time admin X25519 pubkey derivation
 │   │   ├── docs/                  # public docs page
 │   │   ├── embed/                 # embeddable widgets

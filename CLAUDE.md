@@ -190,13 +190,42 @@ Use the env-hex path in production; the `.secrets` files are the local-dev fallb
 `ADMIN_KYB_PUBKEY`, `ADMIN_JWT_SECRET`, `CRON_SECRET`, Wise/cashout) lives in `frontend/.env.local` —
 there is no committed `.env.example`, so read the consuming module to learn the exact var names.
 
-### Onboarding flow (two-phase, KYB-gated)
+### Onboarding flow (PayNow-verified, no review queue)
 
-Merchant signs in with Google zkLogin → submits KYB docs (stored to Walrus, hash recorded) →
-**manual admin review at `/app/admin/kyb`** → on approval, `/api/kyb/finalize` builds a canonical
-JCS (RFC 8785) `evidence_content` binding UEN + business name + doc hash + claimer address, the
-issuer signs it, the sponsor co-signs gas (rate-limited 5/day per address), and the merchant
-submits the sponsored `register_merchant` tx.
+Merchant signs in with Google zkLogin → scans their SGQR sticker → the UEN is looked
+up in **ACRA's open register** (`lib/acra`, data.gov.sg) to fill in the registered name →
+Quay sends **S$0.01 via PayNow to that UEN** carrying a reference code → the merchant
+reads it off their bank statement and enters it → the row auto-approves → `/api/kyb/finalize`
+builds canonical JCS (RFC 8785) `evidence_content` **v2** (UEN + registered name + trading
+name + verification method + the ACRA snapshot frozen at claim time + claimer), the issuer
+signs it, the sponsor co-signs gas, and the merchant submits the sponsored `register_merchant`.
+
+Load-bearing, non-obvious:
+
+- **No document, and no human in the common path.** Reviewing an uploaded Bizfile never
+  proved ownership: an ACRA business profile is a public record anyone can buy for S$5.50.
+  Reading a code out of the UEN's own bank account does prove it. `/app/admin/kyb` is now
+  an exception queue (cents awaiting a manual send, lockouts, legacy document rows).
+- **The cent is sent by a human first.** `CentSender` (`lib/server/verification/sender.ts`)
+  is the seam; `ManualCentSender` logs an operator action item. Wise *can* address a UEN
+  (`docs/wise-paynow-probe.md`), so automating it is a swap, not a rewrite.
+- **ACRA never blocks onboarding.** The register refreshes monthly, so a company
+  incorporated weeks ago is legitimately absent. `AcraLookup` has an explicit `unavailable`
+  branch and no throw path. ACRA also supplies the payout address — Wise's
+  `singapore_paynow` requires a full address that a scanned sticker cannot give, and only
+  the 27 per-letter *detail* datasets carry it, not the cheap UEN register.
+- **Attempt limiting fails CLOSED** (`verification/attempts.ts`), unlike
+  `checkAndIncrementSponsorUsage` which fails open by design. Both use the same
+  `consume_sponsor_usage` RPC; only the failure posture differs, and it differs on purpose.
+- **`awaiting_code` is an active claim** in `kyb_submissions_one_active_per_uen`, so expiry
+  is mandatory: an abandoned signup would otherwise lock a real business out of its own UEN
+  forever. Swept lazily in `/api/kyb/submit` (the Hobby plan's two cron slots are taken).
+- **evidence_content v1 must keep verifying.** Its hashes are on chain and cannot be
+  backfilled. `lib/server/kyb-evidence.ts` owns both versions; the v1 digest is pinned in a
+  test. Keys are always present and null when unknown, because JCS treats an absent key and
+  a null value as different bytes.
+- **Payout redirection is detectable, not preventable** — see SECURITY.md and
+  `/api/cron/payout-watch`.
 
 ## Conventions
 
