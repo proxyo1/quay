@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import type { KybStatusResponse } from "@/lib/kyb/types";
-import { finalizeKyb, KybClientError, pollKybStatus } from "@/lib/kyb/client";
+import {
+  finalizeKyb,
+  KybClientError,
+  pollKybStatus,
+  resendKybCode,
+  verifyKybCode,
+} from "@/lib/kyb/client";
 import {
   clearPendingHandoff,
   loadPendingHandoff,
@@ -36,8 +42,19 @@ export default function PendingPage() {
     setHandoff(loadPendingHandoff());
   }, []);
 
+  // Only bounce to login when there is nothing to resume.
+  //
+  // Verification requires leaving Quay for a banking app, and on a phone that
+  // round trip can lose the zkLogin session, which lives in browser storage.
+  // Sending the merchant to a login screen at that point would cost them the
+  // work they just did: they read the code, came back, and got a wall.
+  //
+  // The polling token is sufficient authority to enter a code — it is bound to
+  // the submission — so an unauthenticated merchant with a saved handoff stays
+  // on this screen. A signature is only needed to finalize on chain, and that
+  // step asks them to sign in at the moment it actually matters.
   useEffect(() => {
-    if (hydrated && !session) {
+    if (hydrated && !session && !loadPendingHandoff()) {
       const expiredParam = expired ? "&expired=1" : "";
       router.replace(`/merchant/login?next=/merchant/onboard/pending${expiredParam}`);
     }
@@ -91,7 +108,7 @@ export default function PendingPage() {
     }
   }
 
-  if (!hydrated || !session) {
+  if (!hydrated || (!session && !handoff)) {
     return (
       <main className="relative z-10 mx-auto w-full max-w-md px-5 py-16">
         <p className="text-sm text-[var(--muted-soft)]">Loading…</p>
@@ -123,9 +140,11 @@ export default function PendingPage() {
         <Link href="/merchant" className="text-[var(--accent)] hover:underline text-sm inline-flex items-center gap-1">
           <span aria-hidden>←</span> merchant
         </Link>
-        <button type="button" onClick={signOut} className="glass-chip rounded-full">
-          Sign out
-        </button>
+        {session && (
+          <button type="button" onClick={signOut} className="glass-chip rounded-full">
+            Sign out
+          </button>
+        )}
       </header>
 
       <section className="space-y-1">
@@ -142,9 +161,43 @@ export default function PendingPage() {
 
       <PendingStatusCard status={status} pollError={pollError} />
 
-      {status?.status === "approved" && (
-        <ApproveActions finalize={finalize} onComplete={handleComplete} />
+      {status?.status === "awaiting_code" && (
+        <CodeEntryCard
+          pollingToken={handoff.pollingToken}
+          reference={status.code_reference}
+          sent={Boolean(status.code_sent_at)}
+          onVerified={() => void pollOnce()}
+        />
       )}
+
+      {status?.status === "code_failed" && (
+        <section className="glass-card-danger rounded-2xl p-4 space-y-2">
+          <p className="text-sm font-medium text-red-200">Verification locked</p>
+          <p className="text-xs text-red-200/80">
+            For safety we stop after a few incorrect codes. Nothing is lost —
+            contact us and we&apos;ll reset it.
+          </p>
+        </section>
+      )}
+
+      {status?.status === "approved" &&
+        (session ? (
+          <ApproveActions finalize={finalize} onComplete={handleComplete} />
+        ) : (
+          <section className="glass-card-accent rounded-2xl p-4 space-y-2">
+            <p className="text-sm font-medium text-white">Verified. One step left.</p>
+            <p className="text-xs text-[var(--muted)]">
+              Sign in again to finish registering on chain. Your verification is
+              saved.
+            </p>
+            <Link
+              href="/merchant/login?next=/merchant/onboard/pending"
+              className="glass-btn-primary inline-flex text-sm py-2.5 px-4"
+            >
+              Sign in →
+            </Link>
+          </section>
+        ))}
 
       {status?.status === "rejected" && (
         <section className="glass-card-danger rounded-2xl p-4 space-y-3">
@@ -235,8 +288,16 @@ function PendingStatusCard({
 
 const STATUS_BADGE: Record<KybStatusResponse["status"], { label: string; classes: string }> = {
   pending: {
-    label: "Pending",
+    label: "Preparing",
     classes: "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]",
+  },
+  awaiting_code: {
+    label: "Waiting for you",
+    classes: "border-[var(--warning)]/40 bg-[var(--warning)]/10 text-[var(--warning)]",
+  },
+  code_failed: {
+    label: "Locked",
+    classes: "border-[var(--danger)]/40 bg-[var(--danger)]/10 text-[var(--danger)]",
   },
   approved: {
     label: "Approved",
@@ -255,6 +316,213 @@ const STATUS_BADGE: Record<KybStatusResponse["status"], { label: string; classes
     classes: "border-[var(--danger)]/40 bg-[var(--danger)]/10 text-[var(--danger)]",
   },
 };
+
+
+/**
+ * The await-code screen.
+ *
+ * Hierarchy is deliberate and ordered by what the merchant needs while they
+ * are about to leave the app:
+ *
+ *   1. WHERE TO LOOK    loudest, it is the instruction they carry away
+ *   2. WHAT TO FIND     the reference, with the real string to match
+ *   3. WHERE TO PUT IT  the input, reachable one-handed
+ *   4. ESCAPE HATCHES   quietest
+ *
+ * Everything else is cut: no progress bar, no step counter, no reassurance
+ * copy. This screen has one job.
+ *
+ * It also has to survive an app switch. The merchant leaves for their banking
+ * app and may come back to an evicted tab, so nothing here depends on state
+ * held since submit: the reference comes from the polling response and the
+ * whole screen rebuilds from a cold start.
+ */
+function CodeEntryCard({
+  pollingToken,
+  reference,
+  sent,
+  onVerified,
+}: {
+  pollingToken: string;
+  reference: string | null;
+  sent: boolean;
+  onVerified: () => void;
+}) {
+  const [code, setCode] = useState("");
+  const [state, setState] = useState<CodeEntryState>({ kind: "idle" });
+
+  const busy = state.kind === "checking" || state.kind === "resending";
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!code.trim() || busy) return;
+    setState({ kind: "checking" });
+    try {
+      const result = await verifyKybCode(pollingToken, code);
+      switch (result.status) {
+        case "verified":
+          setState({ kind: "idle" });
+          onVerified();
+          return;
+        case "wrong":
+          setState({ kind: "wrong", remaining: result.remaining ?? 0 });
+          return;
+        case "locked":
+          setState({ kind: "locked" });
+          return;
+        case "no_pending_code":
+          setState({ kind: "stale" });
+          return;
+        case "unavailable":
+          setState({ kind: "unavailable" });
+          return;
+      }
+    } catch (e) {
+      setState({
+        kind: "unavailable",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  async function resend() {
+    if (busy) return;
+    setState({ kind: "resending" });
+    try {
+      await resendKybCode(pollingToken);
+      setCode("");
+      setState({ kind: "resent" });
+      onVerified(); // re-polls; picks up the new reference
+    } catch (e) {
+      setState({
+        kind: "unavailable",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  return (
+    <section className="glass-card-warning rounded-2xl p-4 space-y-4">
+      {/* 2. WHAT TO FIND */}
+      <div className="space-y-1.5">
+        <p className="text-sm text-white leading-relaxed">
+          {sent
+            ? "Look for an incoming PayNow of S$0.01. The reference contains your code:"
+            : "When it arrives, look for an incoming PayNow of S$0.01. The reference will look like:"}
+        </p>
+        <p className="font-mono text-lg tracking-wider text-[var(--warning)] break-all">
+          {reference ?? "QUAY-XXXXXX"}
+        </p>
+      </div>
+
+      {/* 3. WHERE TO PUT IT */}
+      <form onSubmit={submit} className="space-y-2">
+        <label
+          htmlFor="verification-code"
+          className="block text-[11px] uppercase tracking-[0.12em] text-[var(--muted-soft)]"
+        >
+          Code from your statement
+        </label>
+        <input
+          id="verification-code"
+          value={code}
+          onChange={(e) => {
+            setCode(e.target.value);
+            if (state.kind !== "idle") setState({ kind: "idle" });
+          }}
+          // Merchants paste straight from their banking app, so the field
+          // accepts the whole reference and the server strips the prefix.
+          placeholder="QUAY-7F3K9M"
+          autoCapitalize="characters"
+          autoCorrect="off"
+          spellCheck={false}
+          inputMode="text"
+          disabled={busy}
+          className="glass-input w-full px-3 py-3 font-mono text-base tracking-wider disabled:opacity-50"
+          style={{ backgroundColor: "var(--surface-input)" }}
+        />
+        <button
+          type="submit"
+          disabled={!code.trim() || busy}
+          className="glass-btn-primary w-full py-3.5 disabled:opacity-40"
+        >
+          {state.kind === "checking" ? "Checking…" : "Verify"}
+        </button>
+      </form>
+
+      <CodeEntryFeedback state={state} />
+
+      {/* 4. ESCAPE HATCHES */}
+      <div className="flex items-center justify-between pt-1">
+        <button
+          type="button"
+          onClick={resend}
+          disabled={busy}
+          className="text-xs text-[var(--muted)] underline underline-offset-2 disabled:opacity-40"
+        >
+          {state.kind === "resending" ? "Sending…" : "Didn't get it? Send a new one"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+type CodeEntryState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "resending" }
+  | { kind: "resent" }
+  | { kind: "wrong"; remaining: number }
+  | { kind: "locked" }
+  | { kind: "stale" }
+  | { kind: "unavailable"; message?: string };
+
+/**
+ * Every failure gets a specific message and a way forward. A wrong code says
+ * how many tries are left, an expired one offers a new code rather than
+ * reading as an error, and an outage says "try again" rather than blaming
+ * the merchant's code.
+ */
+function CodeEntryFeedback({ state }: { state: CodeEntryState }) {
+  switch (state.kind) {
+    case "wrong":
+      return (
+        <p className="text-xs text-[var(--danger)]">
+          That code doesn&apos;t match.{" "}
+          {state.remaining > 0
+            ? `${state.remaining} ${state.remaining === 1 ? "try" : "tries"} left.`
+            : "Last try."}
+        </p>
+      );
+    case "locked":
+      return (
+        <p className="text-xs text-[var(--danger)]">
+          Locked after too many incorrect codes. Contact us and we&apos;ll reset it.
+        </p>
+      );
+    case "stale":
+      return (
+        <p className="text-xs text-[var(--muted)]">
+          That code has expired or was already used. Send a new one below.
+        </p>
+      );
+    case "resent":
+      return (
+        <p className="text-xs text-[var(--success)]">
+          A new code is on its way. The previous one no longer works.
+        </p>
+      );
+    case "unavailable":
+      return (
+        <p className="text-xs text-[var(--muted)]">
+          We couldn&apos;t check that just now. Please try again in a moment.
+          {state.message ? ` (${state.message})` : ""}
+        </p>
+      );
+    default:
+      return null;
+  }
+}
 
 function ApproveActions({
   finalize,
@@ -302,10 +570,14 @@ function ApproveActions({
 }
 
 function renderHeadline(status: KybStatusResponse | null): string {
-  if (!status) return "We're reviewing your application";
+  if (!status) return "Setting up your verification";
   switch (status.status) {
     case "pending":
-      return "We're reviewing your application";
+      return "Setting up your verification";
+    case "awaiting_code":
+      return "Check your bank app";
+    case "code_failed":
+      return "Too many incorrect codes";
     case "approved":
       return "Approved ✓";
     case "rejected":
@@ -318,14 +590,20 @@ function renderHeadline(status: KybStatusResponse | null): string {
 }
 
 function renderBody(status: KybStatusResponse | null, handoff: KybPendingHandoff): string {
-  if (!status) return `Submitted ${relativeTime(handoff.submittedAt)}. Checking status…`;
+  if (!status) return `Started ${relativeTime(handoff.submittedAt)}. Getting things ready…`;
   switch (status.status) {
     case "pending":
-      return `Submitted ${relativeTime(status.submitted_at)}. We typically review within 1 business day. You can close this tab — we'll keep your spot.`;
+      return "We're preparing a S$0.01 payment to your PayNow. This page will update when it's on its way.";
+    case "awaiting_code":
+      return status.code_sent_at
+        ? "We sent S$0.01 to your PayNow. Find it in your bank app and enter the code from the reference below."
+        : "We're sending S$0.01 to your PayNow. While we're in early access this can take a few hours. It's safe to close this page and come back.";
+    case "code_failed":
+      return "This verification is locked. Get in touch and we'll reset it for you.";
     case "approved":
-      return "Sign one transaction with your wallet to complete on-chain registration. Sponsor gas is covered.";
+      return "Verified. Sign one transaction to finish registering. Gas is covered.";
     case "rejected":
-      return "Update your document or details and submit again.";
+      return "Update your details and try again.";
     case "finalized":
       return "Your merchant entry is on chain and ready to accept payments.";
     case "collision":

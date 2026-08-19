@@ -125,6 +125,22 @@ export default function AdminKybDetailPage() {
 
   const handleFetchAndDecrypt = useCallback(async () => {
     if (!item || derive.kind !== "matched") return;
+    // Submissions made after onboarding dropped the document have no
+    // ciphertext at all. Only legacy rows reach the decrypt path.
+    const mime = item.original_mime_type;
+    if (
+      !item.ciphertext_blob_id ||
+      !item.wrapped_dek_b64 ||
+      !item.ciphertext_nonce_b64 ||
+      !mime
+    ) {
+      setDecrypt({
+        kind: "error",
+        message:
+          "This submission has no document. Ownership was proven by PayNow micro-deposit instead.",
+      });
+      return;
+    }
     setDecrypt({ kind: "fetching" });
     try {
       const ciphertext = await fetchBlob(item.ciphertext_blob_id);
@@ -134,7 +150,7 @@ export default function AdminKybDetailPage() {
       const dek = await unwrapDek(wrapped, derive.privKey, derive.pubKey);
       try {
         const plaintext = decryptDocument(ciphertext, nonce, dek);
-        setDecrypt({ kind: "ready", plaintext, mime: item.original_mime_type });
+        setDecrypt({ kind: "ready", plaintext, mime });
       } finally {
         dek.fill(0); // zero plaintext DEK after use
       }

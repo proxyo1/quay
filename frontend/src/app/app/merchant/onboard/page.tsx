@@ -5,16 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { SgqrCameraScanner } from "@/components/SgqrCameraScanner";
-import {
-  bytesToBase64,
-  bytesToHex,
-  encryptDocument,
-  generateDek,
-  hexToBytes,
-  kybDocHash,
-  wrapDek,
-} from "@/lib/kyb/crypto";
-import { fetchAdminKybPubkey, submitKyb } from "@/lib/kyb/client";
+import { submitKyb } from "@/lib/kyb/client";
 import { savePendingHandoff } from "@/lib/kyb/handoff";
 import { extractMerchant, looksLikeUen, parseSgqr } from "@/lib/sgqr";
 import { lookupUen } from "@/lib/quay";
@@ -32,17 +23,9 @@ import { getSuiClient } from "@/lib/sui-client";
 const LOGO_MAX_BYTES = 200 * 1024;
 const LOGO_ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-const KYB_DOC_MAX_BYTES = 5 * 1024 * 1024;
-const KYB_DOC_ALLOWED_MIME = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-]);
-
 type State =
   | { kind: "idle" }
-  | { kind: "submitting"; phase: "encrypting" | "uploading" | "saving" }
+  | { kind: "submitting"; phase: "uploading" | "saving" }
   | { kind: "already-yours" }
   | { kind: "error"; message: string };
 
@@ -56,8 +39,6 @@ export default function OnboardPage() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [logoNotice, setLogoNotice] = useState<string | null>(null);
-  const [kybDocFile, setKybDocFile] = useState<File | null>(null);
-  const [kybDocError, setKybDocError] = useState<string | null>(null);
   const [receiveToken, setReceiveToken] = useState<SupportedReceiveToken>(DEFAULT_RECEIVE_TOKEN);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
@@ -80,11 +61,12 @@ export default function OnboardPage() {
   if (!session) return null;
 
   const uenValid = looksLikeUen(uen);
-  const ready = uenValid && kybDocFile !== null && state.kind !== "submitting";
-  const currentStep: 1 | 2 | 3 | 4 =
+  // No document to gate on any more: a valid UEN is the whole precondition.
+  const ready = uenValid && state.kind !== "submitting";
+  // Three steps now, not four: scan, confirm, verify. The document step is
+  // gone because reviewing a purchasable PDF never proved ownership.
+  const currentStep: 1 | 2 | 3 =
     state.kind === "submitting" || state.kind === "already-yours"
-      ? 4
-      : kybDocFile
       ? 3
       : uenValid
       ? 2
@@ -124,8 +106,8 @@ export default function OnboardPage() {
   }
 
   async function handleSubmit() {
-    if (!session || !kybDocFile) return;
-    setState({ kind: "submitting", phase: "encrypting" });
+    if (!session) return;
+    setState({ kind: "submitting", phase: "uploading" });
     setLogoNotice(null);
     try {
       const existing = await lookupUen(sui, QUAY.registryId, uen);
@@ -180,30 +162,19 @@ export default function OnboardPage() {
         }
       }
 
-      // ── Encrypt the KYB doc client-side. Server never sees plaintext. ──
-      const docBytes = new Uint8Array(await kybDocFile.arrayBuffer());
-      const dek = generateDek();
-      const { ciphertext, nonce } = encryptDocument(docBytes, dek);
-      const docHashHex = bytesToHex(kybDocHash(docBytes));
-
-      // Fetch the admin's X25519 public key, wrap the DEK.
-      const adminPubkeyHex = await fetchAdminKybPubkey();
-      const adminPubkey = hexToBytes(adminPubkeyHex);
-      const wrappedDek = await wrapDek(dek, adminPubkey);
-
-      // Best-effort: zero the plaintext DEK after wrap.
-      dek.fill(0);
-
+      // No document. Ownership is proven by the PayNow micro-deposit: we
+      // send S$0.01 to the UEN proxy on this merchant's sticker carrying a
+      // reference code, and they read it back off their bank statement.
+      // A document proved nothing here — an ACRA business profile is a public
+      // record anyone can buy for S$5.50.
       setState({ kind: "submitting", phase: "uploading" });
 
       const submitResult = await submitKyb({
         uen,
+        // The server forces the registered name from ACRA; this is only the
+        // fallback for when the register cannot answer.
         businessName: merchantName.trim() || undefined,
-        ciphertextB64: bytesToBase64(ciphertext),
-        ciphertextNonceB64: bytesToBase64(nonce),
-        wrappedDekB64: bytesToBase64(wrappedDek),
-        kybDocHashHex: docHashHex,
-        originalMimeType: kybDocFile.type,
+        tradingName: merchantName.trim() || undefined,
         claimer: session.address,
       });
 
@@ -225,27 +196,6 @@ export default function OnboardPage() {
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     }
-  }
-
-  function onKybDocChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    if (!file) {
-      setKybDocFile(null);
-      setKybDocError(null);
-      return;
-    }
-    if (!KYB_DOC_ALLOWED_MIME.has(file.type)) {
-      setKybDocFile(null);
-      setKybDocError(`Unsupported type ${file.type || "(unknown)"} — use PDF, PNG, JPEG, or WebP.`);
-      return;
-    }
-    if (file.size > KYB_DOC_MAX_BYTES) {
-      setKybDocFile(null);
-      setKybDocError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — max 5 MB.`);
-      return;
-    }
-    setKybDocFile(file);
-    setKybDocError(null);
   }
 
   function onLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -438,44 +388,6 @@ export default function OnboardPage() {
           {logoNotice && <p className="text-[11px] text-amber-300">{logoNotice}</p>}
         </div>
 
-        <div className="relative z-10 space-y-1.5">
-          <label htmlFor="kyb-doc" className="block text-[11px] uppercase tracking-[0.12em] text-[var(--accent)]">
-            Proof of ownership <span className="normal-case text-[var(--muted-soft)]">(required, ≤5MB)</span>
-          </label>
-          <label
-            htmlFor="kyb-doc"
-            className={`block rounded-xl border-2 border-dashed px-4 py-5 text-center cursor-pointer transition backdrop-blur-md ${
-              kybDocFile
-                ? "border-[var(--accent)]/45 bg-[var(--accent)]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]"
-                : "border-white/15 hover:border-white/30 hover:bg-white/[0.03]"
-            }`}
-          >
-            <UploadIcon />
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              {kybDocFile
-                ? `${kybDocFile.name} (${(kybDocFile.size / 1024 / 1024).toFixed(1)}MB)`
-                : "Tap to upload Bizfile (ACRA) or business letterhead"}
-            </p>
-            <p className="text-[10px] text-[var(--muted-soft)] mt-0.5">
-              {kybDocFile
-                ? "Will be encrypted in your browser before upload"
-                : "PDF, PNG, JPEG, or WebP"}
-            </p>
-          </label>
-          <input
-            id="kyb-doc"
-            type="file"
-            accept="application/pdf,image/png,image/jpeg,image/webp"
-            onChange={onKybDocChange}
-            className="sr-only"
-            disabled={state.kind === "submitting"}
-          />
-          {kybDocError && <p className="text-[11px] text-amber-300">{kybDocError}</p>}
-          <p className="text-[10px] text-[var(--muted-soft)] leading-relaxed">
-            Your document is encrypted on this device before being uploaded.
-            Only Quay&apos;s reviewer can decrypt it.
-          </p>
-        </div>
       </section>
 
       <section className="glass-card-accent rounded-2xl p-4">
@@ -606,11 +518,9 @@ function SubmitFlow({
   }
   if (state.kind === "submitting") {
     const label =
-      state.phase === "encrypting"
-        ? "Encrypting your document…"
-        : state.phase === "uploading"
-        ? "Uploading to Walrus…"
-        : "Saving your submission…";
+      state.phase === "uploading"
+        ? "Saving your details…"
+        : "Setting up verification…";
     return (
       <button
         type="button"

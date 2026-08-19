@@ -63,6 +63,12 @@ export async function GET(req: Request): Promise<NextResponse> {
     submitted_at: submission.submitted_at,
     decided_at: submission.decided_at,
     finalized_at: submission.finalized_at,
+    // Lets the await-code screen say what to look for on the statement, and
+    // survive a cold start: a merchant returning from their banking app in a
+    // fresh tab rebuilds the whole screen from this response.
+    code_reference: submission.code_reference,
+    code_sent_at: submission.code_sent_at,
+    code_expires_at: submission.code_expires_at,
   };
   return NextResponse.json(response);
 }

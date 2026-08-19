@@ -6,6 +6,7 @@
 import type {
   KybAdminListItem,
   KybDecision,
+  KybStatus,
   KybStatusResponse,
 } from "./types";
 
@@ -39,20 +40,27 @@ async function readError(res: Response, fallback: string): Promise<KybClientErro
 
 export interface SubmitKybInput {
   uen: string;
+  /** Registered name. Only used when ACRA cannot supply one. */
   businessName?: string;
-  ciphertextB64: string;
-  ciphertextNonceB64: string;
-  wrappedDekB64: string;
-  kybDocHashHex: string;
-  originalMimeType: string;
+  /** Signboard name customers know. Shown to payers. */
+  tradingName?: string;
   claimer: string;
 }
 
 export interface SubmitKybResponse {
   submissionId: string;
   pollingToken: string;
-  status: "pending";
+  status: "awaiting_code";
   submittedAt: string;
+  /** ACRA-registered name, resolved server-side. */
+  businessName: string;
+  /** What to look for on the bank statement, e.g. "QUAY-7F3K9M". */
+  codeReference: string;
+  codeExpiresAt: string;
+  /** False on the manual rail: a human still has to send the cent. */
+  centSent: boolean;
+  /** Why ACRA produced nothing, when it produced nothing. */
+  acraNote: string | null;
 }
 
 export async function submitKyb(input: SubmitKybInput): Promise<SubmitKybResponse> {
@@ -62,11 +70,7 @@ export async function submitKyb(input: SubmitKybInput): Promise<SubmitKybRespons
     body: JSON.stringify({
       uen: input.uen,
       business_name: input.businessName,
-      ciphertext_b64: input.ciphertextB64,
-      ciphertext_nonce_b64: input.ciphertextNonceB64,
-      wrapped_dek_b64: input.wrappedDekB64,
-      kyb_doc_hash_hex: input.kybDocHashHex,
-      original_mime_type: input.originalMimeType,
+      trading_name: input.tradingName,
       claimer: input.claimer,
     }),
   });
@@ -74,14 +78,24 @@ export async function submitKyb(input: SubmitKybInput): Promise<SubmitKybRespons
   const json = (await res.json()) as {
     submission_id: string;
     polling_token: string;
-    status: "pending";
+    status: "awaiting_code";
     submitted_at: string;
+    business_name: string;
+    code_reference: string;
+    code_expires_at: string;
+    cent_sent: boolean;
+    acra_note: string | null;
   };
   return {
     submissionId: json.submission_id,
     pollingToken: json.polling_token,
     status: json.status,
     submittedAt: json.submitted_at,
+    businessName: json.business_name,
+    codeReference: json.code_reference,
+    codeExpiresAt: json.code_expires_at,
+    centSent: json.cent_sent,
+    acraNote: json.acra_note,
   };
 }
 
@@ -104,6 +118,56 @@ export interface FinalizeKybResponse {
   expiresAtMs: number;
   evidenceHash: string;
   evidenceBlobId: string;
+}
+
+export interface VerifyCodeResult {
+  status: "verified" | "wrong" | "locked" | "unavailable" | "no_pending_code";
+  remaining?: number;
+}
+
+/**
+ * Submit the code the merchant read off their bank statement.
+ *
+ * Every non-2xx here is a MEANINGFUL state, not a failure to surface raw:
+ * a wrong code with attempts left, a lockout, a temporary outage, and an
+ * expired code all need different copy and different next actions. So this
+ * reads the body on both paths rather than throwing on !res.ok.
+ */
+export async function verifyKybCode(
+  pollingToken: string,
+  code: string,
+): Promise<VerifyCodeResult> {
+  const res = await fetch("/api/kyb/verify-code", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${pollingToken}`,
+    },
+    body: JSON.stringify({ code }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Partial<VerifyCodeResult>;
+  if (json.status) return json as VerifyCodeResult;
+  // No recognizable body: treat as a transient outage rather than inventing
+  // a verdict about the merchant's code.
+  if (!res.ok) return { status: "unavailable" };
+  return { status: "verified" };
+}
+
+export interface ResendCodeResult {
+  code_reference: string;
+  code_expires_at: string;
+  cent_sent: boolean;
+}
+
+export async function resendKybCode(
+  pollingToken: string,
+): Promise<ResendCodeResult> {
+  const res = await fetch("/api/kyb/resend-code", {
+    method: "POST",
+    headers: { authorization: `Bearer ${pollingToken}` },
+  });
+  if (!res.ok) throw await readError(res, "could not send a new code");
+  return (await res.json()) as ResendCodeResult;
 }
 
 export async function finalizeKyb(
@@ -148,7 +212,7 @@ export async function fetchAdminKybPubkey(): Promise<string> {
 }
 
 export async function adminListSubmissions(
-  status: "pending" | "approved" | "rejected" | "finalized" | "collision" = "pending",
+  status: KybStatus = "pending",
 ): Promise<KybAdminListItem[]> {
   const url = `/api/admin/kyb/list?status=${encodeURIComponent(status)}`;
   const res = await fetch(url);

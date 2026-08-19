@@ -16,7 +16,12 @@ import {
 } from "@/lib/kyb/client";
 import type { KybAdminListItem, KybStatus } from "@/lib/kyb/types";
 
+// The queue is now exceptions, not the default path: merchants verify
+// themselves via the PayNow micro-deposit. "Awaiting code" is the operator's
+// send queue on the manual rail; "Locked out" needs a human to reset.
 const TABS: { key: KybStatus; label: string }[] = [
+  { key: "awaiting_code", label: "Awaiting code" },
+  { key: "code_failed", label: "Locked out" },
   { key: "pending", label: "Pending" },
   { key: "approved", label: "Approved-awaiting" },
   { key: "rejected", label: "Rejected" },
@@ -35,7 +40,7 @@ export default function AdminKybQueuePage() {
   const account = useCurrentAccount();
   const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
 
-  const [tab, setTab] = useState<KybStatus>("pending");
+  const [tab, setTab] = useState<KybStatus>("awaiting_code");
   const [items, setItems] = useState<KybAdminListItem[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [auth, setAuth] = useState<AuthState>({ kind: "unknown" });

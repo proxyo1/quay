@@ -10,6 +10,8 @@ export const runtime = "nodejs";
 
 const VALID_STATUSES: KybStatus[] = [
   "pending",
+  "awaiting_code",
+  "code_failed",
   "approved",
   "rejected",
   "finalized",

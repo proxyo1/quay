@@ -114,12 +114,33 @@ export async function POST(req: Request): Promise<NextResponse> {
     : Date.now();
   const submittedAtMs = Date.parse(submission.submitted_at);
 
+  // ── evidence_content v2 ──
+  //
+  // v1 committed to the KYB document (hash + Walrus blob id). Onboarding no
+  // longer collects a document, because an ACRA business profile is a public
+  // record anyone can buy for S$5.50 and reviewing one never proved
+  // ownership. v2 commits to what actually justified the approval: proof of
+  // control over the UEN's PayNow account, plus what the register said at
+  // claim time.
+  //
+  // v1 blobs must keep verifying. Their hashes are committed on chain and
+  // cannot be backfilled, so any reader must switch on `v` and keep the v1
+  // path alive — breaking it would make every already-registered merchant
+  // unverifiable. There is a regression test for exactly this.
+  //
+  // Every key is always present, null when unknown. JCS treats an absent key
+  // and a null value as different bytes, so the convention must be fixed or
+  // the hash stops being reproducible.
   const evidenceObject = {
-    v: 1,
+    v: 2,
     uen: submission.uen,
     business_name: submission.business_name ?? "",
-    kyb_doc_hash_hex: submission.kyb_doc_hash_hex,
-    kyb_doc_blob_id: submission.ciphertext_blob_id,
+    trading_name: submission.trading_name,
+    verification_method: submission.verification_method,
+    verified_at_ms: submission.verified_at
+      ? Date.parse(submission.verified_at)
+      : null,
+    acra: submission.acra_snapshot,
     submitted_at_ms: submittedAtMs,
     approved_at_ms: decidedAtMs,
     claimer_address: submission.wallet_address,
