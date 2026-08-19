@@ -4,7 +4,11 @@ import { NextResponse } from "next/server";
 
 import { compareEntityNames, lookupAcraUen } from "@/lib/acra";
 import type { AcraSnapshot } from "@/lib/kyb/types";
-import { insertSubmission, KybStoreError } from "@/lib/server/kyb-store";
+import {
+  insertSubmission,
+  releaseExpiredVerifications,
+  KybStoreError,
+} from "@/lib/server/kyb-store";
 import { mintPollingToken } from "@/lib/server/polling-token";
 import { issueVerification, resolvePayoutAddress } from "@/lib/server/verification";
 import { lookupUen } from "@/lib/quay";
@@ -63,6 +67,32 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "claimer address invalid" }, { status: 400 });
   }
   const uen = body.uen.trim().toUpperCase();
+
+  // ── Release any expired hold on this UEN, opportunistically ──
+  //
+  // `awaiting_code` counts as an active claim in the uniqueness index, so an
+  // abandoned verification blocks the real merchant. The sweeper cron exists
+  // for this, but the Vercel Hobby plan allows only two cron slots and both
+  // are already spoken for, so relying on it alone would mean shipping a
+  // lockout with no scheduled remedy.
+  //
+  // Sweeping here instead is arguably better than a cron regardless: the
+  // lockout is only observable when somebody tries to claim the UEN, which is
+  // exactly this moment. Best-effort — a sweep failure must not block a claim.
+  try {
+    const released = await releaseExpiredVerifications();
+    if (released.length > 0) {
+      console.warn(
+        `[/api/kyb/submit] released ${released.length} expired verification(s) before claim`,
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[/api/kyb/submit] expired-verification sweep failed, continuing: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
 
   // ── Already claimed on chain? ──
   try {

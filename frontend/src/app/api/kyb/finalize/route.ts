@@ -1,7 +1,10 @@
 import "server-only";
 
 import { blake2b } from "@noble/hashes/blake2.js";
-import canonicalize from "canonicalize";
+import {
+  buildEvidenceContentV2,
+  canonicalizeEvidence,
+} from "@/lib/server/kyb-evidence";
 import { NextResponse } from "next/server";
 
 import {
@@ -114,44 +117,25 @@ export async function POST(req: Request): Promise<NextResponse> {
     : Date.now();
   const submittedAtMs = Date.parse(submission.submitted_at);
 
-  // ── evidence_content v2 ──
-  //
-  // v1 committed to the KYB document (hash + Walrus blob id). Onboarding no
-  // longer collects a document, because an ACRA business profile is a public
-  // record anyone can buy for S$5.50 and reviewing one never proved
-  // ownership. v2 commits to what actually justified the approval: proof of
-  // control over the UEN's PayNow account, plus what the register said at
-  // claim time.
-  //
-  // v1 blobs must keep verifying. Their hashes are committed on chain and
-  // cannot be backfilled, so any reader must switch on `v` and keep the v1
-  // path alive — breaking it would make every already-registered merchant
-  // unverifiable. There is a regression test for exactly this.
-  //
-  // Every key is always present, null when unknown. JCS treats an absent key
-  // and a null value as different bytes, so the convention must be fixed or
-  // the hash stops being reproducible.
-  const evidenceObject = {
-    v: 2,
-    uen: submission.uen,
-    business_name: submission.business_name ?? "",
-    trading_name: submission.trading_name,
-    verification_method: submission.verification_method,
-    verified_at_ms: submission.verified_at
-      ? Date.parse(submission.verified_at)
-      : null,
-    acra: submission.acra_snapshot,
-    submitted_at_ms: submittedAtMs,
-    approved_at_ms: decidedAtMs,
-    claimer_address: submission.wallet_address,
-  };
-  const canonical = canonicalize(evidenceObject);
-  if (!canonical) {
+  // evidence_content lives in lib/server/kyb-evidence so the v1 read path
+  // stays testable: v1 hashes are on chain and cannot be backfilled, so
+  // breaking them would make every merchant registered before the document
+  // was dropped unverifiable.
+  const evidenceObject = buildEvidenceContentV2(submission, {
+    submittedAtMs,
+    approvedAtMs: decidedAtMs,
+  });
+
+  let canonical: string;
+  try {
+    canonical = canonicalizeEvidence(evidenceObject);
+  } catch (e) {
     return NextResponse.json(
-      { error: "canonicalize() returned null — evidence_content contains a non-serializable value" },
+      { error: e instanceof Error ? e.message : String(e) },
       { status: 500 },
     );
   }
+
   const evidenceBytes = new TextEncoder().encode(canonical);
   const evidenceHash = blake2b(evidenceBytes, { dkLen: 32 });
   const evidenceHashHex = Buffer.from(evidenceHash).toString("hex");

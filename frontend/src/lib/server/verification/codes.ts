@@ -56,14 +56,20 @@ export function formatReference(code: string): string {
 /**
  * Normalize merchant input before comparing.
  *
- * Merchants paste from their banking app, so the input arrives with the
- * prefix attached, lowercased, spaced, or wrapped in whatever the bank put
- * around it. All of that is noise. Anything outside the alphabet is dropped,
- * then the prefix is removed if present.
+ * Merchants paste from their banking app, and what they paste is rarely just
+ * the code: it arrives lowercased, spaced, with the prefix attached, or as a
+ * whole statement line with the bank's own wording wrapped around it
+ * ("PayNow QUAY-7F3K9M ref"). Accepting all of that costs nothing and saves a
+ * merchant from retyping under a "that code doesn't match" error.
+ *
+ * So: look for the QUAY marker anywhere and take the code that follows it. If
+ * there is no marker, fall back to treating the whole input as the code.
  */
 export function normalizeCodeInput(raw: string): string {
-  const upper = raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return upper.startsWith("QUAY") ? upper.slice(4) : upper;
+  const upper = raw.toUpperCase();
+  const marked = new RegExp(`QUAY[^A-Z0-9]*([${ALPHABET}]{${CODE_LENGTH}})`).exec(upper);
+  if (marked) return marked[1];
+  return upper.replace(/[^A-Z0-9]/g, "");
 }
 
 /** blake2b256 of the code. The plaintext is never stored. */
