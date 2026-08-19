@@ -49,8 +49,33 @@ alter table public.kyb_submissions
 -- /api/kyb/finalize gates on it explicitly; a verified merchant lands there
 -- exactly as an admin-approved one used to.
 
-alter table public.kyb_submissions
-    drop constraint if exists kyb_submissions_status_check;
+-- Drop the OLD status check by discovery, not by guessing its name.
+--
+-- The original constraint was written inline on the column, so Postgres named
+-- it automatically. `drop constraint if exists <guessed name>` would silently
+-- no-op if that guess is wrong, leaving the old narrow constraint in place
+-- next to the new one — and then every `awaiting_code` insert fails while this
+-- migration reports success. Find it by what it constrains instead.
+do $$
+declare
+    c record;
+begin
+    for c in
+        select con.conname
+        from pg_constraint con
+        join pg_class rel on rel.oid = con.conrelid
+        join pg_namespace nsp on nsp.oid = rel.relnamespace
+        where nsp.nspname = 'public'
+          and rel.relname = 'kyb_submissions'
+          and con.contype = 'c'
+          and pg_get_constraintdef(con.oid) like '%status%'
+    loop
+        execute format(
+            'alter table public.kyb_submissions drop constraint %I',
+            c.conname
+        );
+    end loop;
+end $$;
 
 alter table public.kyb_submissions
     add constraint kyb_submissions_status_check
