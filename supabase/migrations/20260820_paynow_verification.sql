@@ -49,33 +49,25 @@ alter table public.kyb_submissions
 -- /api/kyb/finalize gates on it explicitly; a verified merchant lands there
 -- exactly as an admin-approved one used to.
 
--- Drop the OLD status check by discovery, not by guessing its name.
+-- Drop the OLD status check.
 --
--- The original constraint was written inline on the column, so Postgres named
--- it automatically. `drop constraint if exists <guessed name>` would silently
--- no-op if that guess is wrong, leaving the old narrow constraint in place
--- next to the new one — and then every `awaiting_code` insert fails while this
--- migration reports success. Find it by what it constrains instead.
-do $$
-declare
-    c record;
-begin
-    for c in
-        select con.conname
-        from pg_constraint con
-        join pg_class rel on rel.oid = con.conrelid
-        join pg_namespace nsp on nsp.oid = rel.relnamespace
-        where nsp.nspname = 'public'
-          and rel.relname = 'kyb_submissions'
-          and con.contype = 'c'
-          and pg_get_constraintdef(con.oid) like '%status%'
-    loop
-        execute format(
-            'alter table public.kyb_submissions drop constraint %I',
-            c.conname
-        );
-    end loop;
-end $$;
+-- The original constraint was declared inline on the column, so Postgres named
+-- it automatically. That name is not a guess: it was read back from the live
+-- database as `kyb_submissions_status_check` before this was written.
+--
+-- If it ever differs in another environment, this `if exists` silently no-ops
+-- and the old narrow constraint survives beside the new one — after which
+-- every `awaiting_code` insert fails while this migration reports success. So
+-- verify afterwards that exactly ONE check constraint mentions `status`:
+--
+--   select conname, pg_get_constraintdef(oid) from pg_constraint
+--    where conrelid = 'public.kyb_submissions'::regclass and contype = 'c';
+--
+-- (A pg_constraint discovery loop would be self-correcting, but it needs a
+-- dollar-quoted DO block, and Supabase's SQL editor splits statements on
+-- semicolons — which tears such a block apart. Plain DDL runs everywhere.)
+alter table public.kyb_submissions
+    drop constraint if exists kyb_submissions_status_check;
 
 alter table public.kyb_submissions
     add constraint kyb_submissions_status_check
